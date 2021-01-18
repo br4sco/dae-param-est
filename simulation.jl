@@ -1,87 +1,142 @@
 import Interpolations.CubicSplineInterpolation
+import Random
+
 using DifferentialEquations
 using Sundials
 using DelimitedFiles
 using Plots
 
-struct IC
-  x0::Array{Float64, 1}
-  xp0::Array{Float64, 1}
-  dvars::Array{Bool, 1}
+struct Model
+  f!::Function                  # residual function
+  x0::Array{Float64, 1}         # initial values of x
+  xp0::Array{Float64, 1}        # initial values of x'
+  dvars::Array{Bool, 1}         # bool array indicating differential variables
+  h::Function                   # output function (single output)
+  plottrace::Function           # function to plot a single simulation trace
+                                # for debugging purposes
 end
 
-const TSTART = 0.
-const TEND = 10.
+Random.seed!(1234)              # set the seed
 
-const NW = 1
-const NU = 1
-const M = 2
+const N = 100                   # number of steps
+const M = 2                     # number of noise realizations
+const K = 2                     # number of θ samples
 
-const WS = reshape(readdlm("ws.csv", ','), (:, NW, M))
-const US = readdlm("us.csv", ',')
-const THETAS = readdlm("theta.csv", ',')
+const T0 = 0.                   # simulation start time
+const T = 10.                   # simulation end time
+const ΔT = (T - T0) / (N - 1)   # simulation output stepsize
 
-const N = size(THETAS, 2)
+const NZ = 1                    # dimension of white noise
+const NU = 1                    # dimension of inputs
+const Nθ = 3                    # dimension of θ
 
-function ts(n)
-  TSTART:((TEND - TSTART) / n):TEND
-end
+const US = rand(10, NU)         # input data (TODO: temporary implementation)
+const ZS = rand(10, NZ, M)      # white noise data (TODO: temporary implementation)
+const ΘS = rand(Nθ, K)          # paramter data (TODO: temporary implementation)
+const σs = 0.02 * rand(M)       # output noise realizations (should this also
+                                # be fixed as the process noise?) (TODO:
+                                # temporary implementation)
 
-function interpolation(xs::Array{Float64, 1})
-  let f = CubicSplineInterpolation(ts(length(xs) - 1), xs)
-    t -> f(t)
+function interpolation(t0::Float64, tend::Float64, xs::Array{Float64, 1})
+  let ts = range(t0, tend, length=length(xs))
+    CubicSplineInterpolation(ts, xs)
   end
 end
 
-function pendulumF(u::Function, w::Function)::DAEFunction
-  function f(out, xp, x, theta, t)
-    out[1] = x[2] - xp[1]
-    out[2] = x[4] - xp[3]
-    out[3] = theta[1] * xp[2] + x[5] * x[1] / theta[2] + w(t)
-    out[4] = theta[1] * xp[4] + x[5] * x[3] / theta[2] + theta[3] + u(t)
-    out[5] = x[1] * xp[2] + x[2]^2 + x[3] * xp[4] + x[4]^2
+# Simple model of a pendulum in Cartesian coordinates on index-1 form
+function pendulum(z::Array{Float64, 2}, θ::Array{Float64, 1})::Model
+
+  # the input function is simply an interpolation over the first column in the
+  # input data
+  function u(t)
+    interpolation(T0, T, US[:,1])(t)
   end
-  f
-end
 
-function pendulumIC(u0::Float64,w0::Float64, theta::Array{Float64, 1}, t0::Float64)::IC
-  x0 = [theta[1], 0., 0., 0., 0.]
-  xp0 = [0., 0., -w0 / theta[2], -(theta[3] + u0) / theta[2], 0.]
-  dvars = Bool[1, 1, 1, 1, 0]
-  IC(x0, xp0, dvars)
-end
+  # the process noise (TODO: implement appropriate linear filter model, given
+  # white noise [z] and [θ])
+  function w(t)
+    interpolation(T0, T, z[:,1])(t)
+  end
 
-function pendulumPlot(sol)
-  plot(sol, tspan=(TSTART + 0.0001, TEND), layout=(3,1), vars=[(0,1), (0,3), (0,5)])
-end
-
-
-function simulate1(u::Function, w::Function, theta::Array{Float64, 1})
-  f = pendulumF(u, w)
-  ic = pendulumIC(u(TSTART), w(TSTART), theta, TSTART)
-  prob = DAEProblem(f, ic.x0, ic.xp0, (TSTART, TEND), theta, differential_vars=ic.dvars)
-  solve(prob, IDA())
-end
-
-function simulateM(theta::Array{Float64, 1}, ms::UnitRange{Int}, doplot=false)
-  u = interpolation(US[:, 1])
-  plot_array = Any[]
-  for m = ms
-    w = interpolation(WS[:, 1, m])
-    sol = simulate1(u, w, theta)
-    if doplot
-      push!(plot_array, pendulumPlot(sol))
+  let m = θ[1], L = θ[2], g = θ[3]
+    # the residual function
+    function f!(out, xp, x, p, t)
+      out[1] = x[2] - xp[1]
+      out[2] = x[4] - xp[3]
+      out[3] = m * xp[2] + x[5] * x[1] / L + w(t)
+      out[4] = m * xp[4] + x[5] * x[3] / L + g + u(t)
+      out[5] = x[1] * xp[2] + x[2]^2 + x[3] * xp[4] + x[4]^2
     end
-    print(typeof(reduce(hcat, sol(ts(10)).u)))
-  end
-  if doplot
-    display(plot(plot_array...))
+
+    # initial values, the pendulum starts at x=1, y=0 at rest
+    x0 = [
+      L,                          # x
+      0.,                         # x'
+      0.,                         # y
+      0.,                         # y'
+      0.                          # λ
+    ]
+
+    xp0 = [
+      0.,                         # x'
+      -w(T0) / m,                 # x''
+      0.,                         # y'
+      -(g + u(T0)) / m,           # y''
+      0.                          # λ'
+    ]
+
+    dvars = Bool[1, 1, 1, 1, 0]
+
+    # the output function
+    function h(x)
+      x[5]                      # we observe the tension λ in the pendulum arm
+    end
+
+    # plots a single simulation trace of x, y, λ
+    function plottrace(sol)
+      plot(sol,
+           tspan=(T0 + 0.0001, T),
+           layout=(3,1),
+           vars=[(0,1), (0,3), (0,5)])
+    end
+
+    Model(f!, x0, xp0, dvars, h, plottrace)
   end
 end
 
-# w = interpolation(WS[:,1,1])
-# u = interpolation(US[:,1])
-# theta = [1., 2., 3.]
+# Simulate at fixed parameter θ and process noise realization given fixed z and
+# returns output y
+function simulate1(z::Array{Float64, 2},
+                   θ::Array{Float64, 1},
+                   doplot=false)::Array{Float64, 1}
 
-# sol = simulate1(u, w, theta)
-# plot(sol, tspan=(0.001, 10.0), layout=(3,1), vars=[(0,1),(0,3),(0,5)])
+  m = pendulum(z, θ)
+  prob = DAEProblem(m.f!, m.xp0, m.x0, (T0, T), θ, differential_vars=m.dvars)
+  sol = solve(prob, IDA())
+  if doplot                     # for debugging purposes
+    display(m.plottrace(sol))
+  end
+  map(m.h, sol(T0:ΔT:T).u)
+end
+
+# Simulates at fixed parameter θ over all realizations of z and returns output
+# averaged over the noise realizations
+function simulateM(θ::Array{Float64, 1})::Array{Float64, 1}
+  yhat = zeros(N)
+  for m = 1:M
+    z = ZS[:,:,m]
+    yhat += (simulate1(z, θ) .+ σs[m])
+  end
+  yhat / M
+end
+
+# Simulates over all θ samples and returns the corresponding outputs in an N×K
+# matrix
+function simulateK()::Array{Float64, 2}
+  Yhats = zeros(N,K)
+  for k = 1:K
+    θ = ΘS[:,k]
+    Yhats[:,k] += simulateM(θ)
+  end
+  Yhats
+end
