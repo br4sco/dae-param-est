@@ -104,7 +104,7 @@ function pendulum(z::Array{Float64, 2}, θ::Array{Float64, 1})::Model
   end
 end
 
-# Simulate at fixed parameter θ and process noise realization given fixed z and
+# Simulates at fixed parameter θ and process noise realization given fixed z and
 # returns output y
 function simulate1(z::Array{Float64, 2},
                    θ::Array{Float64, 1},
