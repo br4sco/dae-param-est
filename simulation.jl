@@ -68,7 +68,7 @@ function pendulum(z::Array{Float64, 2}, θ::Array{Float64, 1})::Model
       out[5] = x[1] * xp[2] + x[2]^2 + x[3] * xp[4] + x[4]^2
     end
 
-    # initial values, the pendulum starts at x=1, y=0 at rest
+    # initial values, the pendulum starts at x=L, y=0 at rest
     x0 = [
       L,                          # x
       0.,                         # x'
