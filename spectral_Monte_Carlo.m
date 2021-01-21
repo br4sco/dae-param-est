@@ -39,7 +39,7 @@ W = dw:dw:w_max;  % a grid of frequencies
 spec = (specFac(W*1i)).*specFac(-W*1i); 
 % loglog(W,spec)
 k = length(W); % number of used frequencies
-Phi = rand(M,k)*2*pi;
+Phi = rand(M,k)*2*pi;  % these should be fixed during the whole estimation procedure
 w = @(t) sum(2*sqrt(dw*spec).*cos(W*t + Phi),2)'; % the process w(t)
 
 wT = zeros(tfinal,M); % allocate memory space
