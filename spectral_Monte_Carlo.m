@@ -1,6 +1,6 @@
 % Given a continuous rational spectrum of a CT stochastic process w(t), 
 % we seek to generate a realization of w
-% It is assumed that we the spectrim phi_w(w) is characterized via a 
+% It is assumed that the spectrum phi_w(w) is characterized via a 
 % linear filter Gw with n poles and m zeros such that all poles are stable.
 % The spectrum is discretized and the spectral representation is used.
 
