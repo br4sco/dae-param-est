@@ -33,9 +33,6 @@ const Nθ = 3                    # dimension of θ
 const US = rand(10, NU)         # input data (TODO: temporary implementation)
 const ZS = rand(10, NZ, M)      # white noise data (TODO: temporary implementation)
 const ΘS = rand(Nθ, K)          # paramter data (TODO: temporary implementation)
-const σs = 0.02 * rand(M)       # output noise realizations (should this also
-                                # be fixed as the process noise?) (TODO:
-                                # temporary implementation)
 
 function interpolation(t0::Float64, tend::Float64, xs::Array{Float64, 1})
   let ts = range(t0, tend, length=length(xs))
@@ -125,7 +122,7 @@ function simulateM(θ::Array{Float64, 1})::Array{Float64, 1}
   yhat = zeros(N)
   for m = 1:M
     z = ZS[:,:,m]
-    yhat += (simulate1(z, θ) .+ σs[m])
+    yhat += simulate1(z, θ)
   end
   yhat / M
 end
