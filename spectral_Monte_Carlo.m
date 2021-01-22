@@ -21,13 +21,14 @@ clear
 M = 1000;
 tfinal = 5; % seconds. This is the length of each realization
 
-
-
 % Suppose that Gw(s) = (s+z1)/(a*s^2 + b*2*s +c)
 % the parameters z1, a, b, and c are known (for now)
 s= tf('s');
 Gw = (s+1)/(s^2 + sqrt(12)*s +2);
-specFac = @(s) (s+1)./(s.^2 + sqrt(12)*s +2);
+specFac = @(s) (s+1)./(pi*(s.^2 + sqrt(12)*s +2));
+% th pi factor corresponds to the spectral factor of white noise
+% The Fourier transform of the Dirac delta is
+% 1/(2*pi) = spectral density of white noise
 
 % bodemag(Gw); % inspect to check frequency w_max, above which the spectrum is
 % almost zero
@@ -36,17 +37,19 @@ w_max = 100; % rad/sec
 dw = 0.001; %rad/sec  delta w ( the realizations are periodic with period 2*pi/dw)
 W = dw:dw:w_max;  % a grid of frequencies
 % value of the spectral density at the chosen frequencies
-spec = (specFac(W*1i)).*specFac(-W*1i); 
+spec = (specFac(W*1i)).*specFac(-W*1i);
 % loglog(W,spec)
 k = length(W); % number of used frequencies
 Phi = rand(M,k)*2*pi;  % these should be fixed during the whole estimation procedure
 w = @(t) sum(2*sqrt(dw*spec).*cos(W*t + Phi),2)'; % the process w(t)
 
-wT = zeros(tfinal,M); % allocate memory space
-dt = 0.1; % seconds
+% =============== end =================%
+
+% some illustrations and checks
 
 % Evaluating w(t) on a uniform time grid for inspection
-
+wT = zeros(tfinal,M); % allocate memory space
+dt = 0.1; % seconds
 T = dt:dt:tfinal;
 for i = 1:length(T)
     wT(i,:) = w(T(i));  
@@ -58,21 +61,17 @@ end
 figure
 plot(T, wT(:,10))
 
-
 figure
 hist(wT(10,:))
-figure
-hist(wT(:,10))
+
 % statistics
 % figure
 % plot(mean(wT)) % each realization should be zero
-
 % check variances at different times
 % var(wT(100,:))
 % var(wT(500,:))
 % var(wT(end,:))
 var(wT(20,:))
-
 
 % averages
 var(wT(1,:))
@@ -88,17 +87,12 @@ integral(spect,-inf, inf)
 
 sum(2*dw*spec)
 
-
 % comparizon with exact discrete-time method
 % canonical state-space model corresponding to Gw
 Aw = [0 -2;
       1 -sqrt(12);];
 Bw = [1; 1;];
-C = [0 sqrt(2*pi)];  % there is a 2*pi factor appearing in C
-                     % I had to add this to match the correlations from the
-                     % two method. I think this has to do with the
-                     % normalization of the correlation function when
-                     % computed using inverse Fourier transforms
+C = [0 1];  
 F = [-Aw Bw*Bw';
     zeros(2) Aw';]*dt;
 expF = expm(F);
@@ -116,14 +110,10 @@ plot(T,wTd(:,2))
 var(wTd(50,:))
 var(wTd(:,10))
 
-
-
-
 figure
 hist(wTd(10,:))
 figure
 hist(wTd(:,10))
-
 
 figure
 plot(T,wT)
