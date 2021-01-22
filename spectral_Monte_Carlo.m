@@ -25,8 +25,8 @@ tfinal = 5; % seconds. This is the length of each realization
 % the parameters z1, a, b, and c are known (for now)
 s= tf('s');
 Gw = (s+1)/(s^2 + sqrt(12)*s +2);
-specFac = @(s) (s+1)./((sqrt(2*pi)*(s.^2 + sqrt(12)*s +2));
-% th (sqrt(2*pi) factor corresponds to the spectral factor of white noise
+specFac = @(s) (s+1)./(sqrt(2*pi)*(s.^2 + sqrt(12)*s +2));
+% th sqrt(2*pi) factor corresponds to the spectral factor of white noise
 % The Fourier transform of the Dirac delta is
 % 1/(2*pi) = spectral density of white noise
 
