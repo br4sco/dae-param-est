@@ -22,24 +22,28 @@ function w(t::Float64)
     δ = t - (t0 + k*Ts)
     n = size(A)[1]
 
-    Mexp    = [A B*B'; zeros(size(A)) A']
+    Mexp    = [A B*B'; zeros(size(A)) -A']
     Mδ      = exp(Mexp*δ)
     MTs_δ   = exp(Mexp*(Ts-δ))
     Adδ     = Mδ[1:n, 1:n]
     AdTs_δ  = MTs_δ[1:n, 1:n]
     Bd2δ    = Mδ[1:n, n+1:end]*Adδ
     Bd2Ts_δ = MTs_δ[1:n, n+1:end]*AdTs_δ
-
     Cδ      = cholesky(Bd2δ)        # Might need to wrap matrices in Hermitian()
     CTs_δ   = cholesky(Bd2Ts_δ)
     Bdδ     = Cδ.L
     BdTs_δ  = CTs_δ.L
 
-    zkδ = randn(Float64, (n, 1)) # Samples noise contribution at time Ts*k + δ
+    Y = x[k+1] - AdTs_δ*Adδ*x[k]
+    M = (AdTs_δ*Bdδ)*(AdTs_δ*Bdδ)' + BdTs_δ*BdTs_δ'
+    Σ = I - (AdTs_δ*Bdδ)'*(M\(AdTs_δ*Bdδ))
+    m = (AdTs_δ*Bdδ)'*(M\Y)
+    CΣ = cholesky(Σ)
+    Σroot = CΣ.L
 
-    Bdz = AdTs_δ\( x[k+1] - BdTs_δ*zkδ) - Adδ*x[k]
-
-    wkδ = (C*( Adδ*x[k] + Bdz))[1]      # The desired disturbance sample
+    # wkδ = C*x(k*Ts + δ), where x is sampled from normal distribution with mean
+    # m and variance Σ = Σroot*Σroot'
+    wkδ = (C*(m + Σroot*randn(Float64, (n, 1))))[1]
 
     return wkδ
 end
