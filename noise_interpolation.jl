@@ -49,6 +49,6 @@ function w(t::Float64)
 end
 
 # DEBUG
-t = 0.07
+t = 0.9
 wt = w(t)
 println(wt)

@@ -3,84 +3,125 @@ include("simulation.jl")
 
 using ProgressMeter
 using LsqFit
+using DelimitedFiles
+using Statistics
+using LaTeXStrings
+using Distributions
 
 Random.seed!(1234)              # set the seed
 
 struct EstProblem
-  mk_model::Function
-  ZS::Array{Float64, 2}
-  sp::SimParams
-  ys::Array{Float64, 1}
-  θ::Array{Float64, 1}
-  θ0::Array{Float64, 1}
+  mk_mk_model::Function         # Function f(z), where z is a noise realization
+                                # and reurns a function g(θ), where θ are the
+                                # model paramaters, and returns a system model.
+  ZS::Array{Float64, 2}         # Matrix where columns are noise realiztions.
+  tp::TimeParams                # Time parameters.
+  ws::Array{Float64, 1}         # Disturbance of the true system.
+  ys::Array{Float64, 1}         # Measurement of the true system.
+  θ::Array{Float64, 1}          # Parameters of the true system.
+  θ0::Array{Float64, 1}         # Initial guess of the parameters.
 end
 
-function mk_yhat(mk_model::Function,
-                 sp::SimParams,
+function mk_yhat(mk_mk_model::Function,
+                 tp::TimeParams,
                  ZS::Array{Float64, 2})::Function
 
-   function f(θ::Array{Float64, 1})::Array{Float64, 1}
-     N = length(ys)
-     M = size(ZS, 2)
-     yhats = zeros(N)
-     p = Progress(M, 1, "Simulating...", 50)
-     Threads.@threads for m = 1:M
-       z = ZS[:, m]
-       model = mk_model(θ, z)
-       yhats += simulate1(model, sp, θ)
-       next!(p)
-     end
-     yhats
-   end
-end
-
-function mk_lm_model(sp::SimParams, yhat::Function)::Function
-  y = identity
-  θold::Array{Float64, 1} = ones(3) * Inf
-  function model(t::Float64, θ::Array{Float64, 1})
-    if θ != θold
-      y = interpolation(sp.T0, sp.T, yhat(θ))
-      θold = θ
+  let N = tp.N
+    function f(θ::Array{Float64, 1})::Array{Float64, 1}
+      M = size(ZS, 2)
+      yhats = [Threads.Atomic{Float64}(0.0) for i in 1:(N+1)]
+      @info "θ set to $(θ)"
+      p = Progress(M, 1, "Running $(M) simulations...", 50)
+      @inbounds Threads.@threads for m = 1:M
+        z = ZS[:, m]
+        mk_model = mk_mk_model(z)
+        y = simulate1(mk_model, tp, θ)
+        for i = 1:(N+1)
+          Threads.atomic_add!(yhats[i], y[i])
+        end
+        next!(p)
+      end
+      map(y -> y[], yhats) / M
     end
-    y(t)
   end
-  model
 end
 
-const PROBLEM1 = begin
-  us = [0; rand(10)]
-
-  function u(t::Float64)::Float64
-    interpolation(T0, T, us)(t)
-  end
-
-  θ = [1., 1., 1.]              # true parameters
-  θ0 = [0.2, 1.1, 0.7]          # inital guess
-
-  N = 1000                      # number of steps
-  T0 = 0.0                      # simulation start time
-  T = 19.0                      # simulation end time
-  ΔT = (T - T0) / (N - 1)       # simulation output stepsize
-
-  sp = SimParams(T0, ΔT, T)
-
-  # plot(T0:ΔT:T, u)
-  nm = SPECTRAL_MC_NOISE_1
-
-  mk_model = (θ, z) -> pendulum(u, t -> nm.w(z, t), θ) # physical model
-
-  z = rand(nm.K)
-  # plot(T0:ΔT:T, t -> nm.w(z, t))
-
-  ys = simulate1(mk_model(θ, z), sp, θ)  # output data
-
-  M = 100
-  ZS = rand(nm.K, M)            # noise realizations
-
-  EstProblem(mk_model, ZS, sp, ys, θ, θ0)
+function plot_signal_to_noise_ratio(ys, ws)
+  plot(ys.^2 ./ ws.^2, yaxis=:log, xlabel="time (steps)", ylabel=L"y^2/w^2")
 end
 
-p = PROBLEM1
-yhat = mk_yhat(p.mk_model, p.sp, p.ZS)
-fit = curve_fit((t, θ) -> yhat(θ), p.sp.T0:p.sp.ΔT:p.sp.T, p.ys, p.θ0)
-fit.params
+function mk_est_problem(tp, θ, θ0, e, u, w, mk_mk_model, mk_ZS, M)
+
+
+  z = reshape(mk_ZS(1), :)
+  ys = simulate1(mk_mk_model(z), tp, θ)
+  ys += e * rand(Normal(), length(ys))
+  ws = map(t -> w(z, t), collect(time_range(tp)))
+
+  ZS = mk_ZS(M)
+
+  EstProblem(mk_mk_model, ZS, tp, ws, ys, θ, θ0)
+end
+
+function problem0()
+  let us = [0; rand(10)]
+    θ = [1.]
+    θ0 = [0.5]
+    e = 0.01
+
+    N = 100
+    T0 = 0.0
+    ΔT = 0.05
+    tp = TimeParams(T0, ΔT, N)
+
+    function u(t)
+      interpolation(tp, us)(t)
+    end
+
+    M = 1
+
+    w = (z, t) -> 0.0
+    mk_mk_model = z -> pendulumK(u, t -> w(z, t), T0)
+
+    mk_est_problem(tp, θ, θ0, e, u, w, mk_mk_model, M -> zeros(1, M), M)
+  end
+end
+
+function problem1()
+  let us = [0; rand(10)]
+    θ = [1.]
+    θ0 = [0.1]
+    wscale = 0.02
+    e = 0.01
+
+    N = 100
+    T0 = 0.0
+    ΔT = 0.05
+    tp = TimeParams(T0, ΔT, N)
+
+    function u(t)
+      interpolation(tp, us)(t)
+    end
+
+    M = 100
+
+    noise = spectral_mc_noise_model_3()
+    mk_ZS = noise.mk_ZS
+    w = (z, t) -> wscale * noise.w(z, t)
+    mk_mk_model = z -> pendulumK(u, t -> w(z, t), T0)
+
+    mk_est_problem(tp, θ, θ0, e, u, w, mk_mk_model, mk_ZS, M)
+  end
+end
+
+p = problem1()
+# plot_signal_to_noise_ratio(p.ys, p.ws)
+
+yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
+
+# display(plot(0.001:0.05:1.5, θ -> mean((yhat([θ]) - p.ys).^2)))
+
+fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
+@info "converged: $(fit.converged)"
+@info "Found params: $(fit.param)"
+writedlm("param.csv",  fit.param, ',')
