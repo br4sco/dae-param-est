@@ -53,7 +53,7 @@ end
 function mk_est_problem(tp, θ, θ0, σ, u, w, mk_mk_model, mk_ZS, M)
   z = reshape(mk_ZS(1), :)
   ys = simulate1(mk_mk_model(z), tp, θ)
-  ys += rand(Normal(0.0, σ), length(ys))
+  ys +=  σ*rand(Normal(), length(ys))
   ws = map(t -> w(z, t), collect(time_range(tp)))
 
   ZS = mk_ZS(M)
@@ -112,7 +112,7 @@ end
 function run()
   data = Any[]
   for wscale in [0.02, 0.2]
-    for M in [2, 10, 100, 1000]
+    for M in [2, 10, 100, 1000, 2000]
       d = Dict()
       p = problem1(wscale, M)
 
