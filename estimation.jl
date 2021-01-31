@@ -109,35 +109,34 @@ function problem1(wscale, M)
   end
 end
 
+function run()
+  data = Any[]
+  for wscale in [0.02, 0.2]
+    for M in [2, 10, 100, 1000]
+      d = Dict()
+      p = problem1(wscale, M)
 
-data = Any[]
+      @info "Parameters wscale: $(wscale), M: $(M)"
+      d["theta"] = p.θ
+      d["theta0"] = p.θ0
 
-for wscale in [0.02, 0.2]
-  for M in [2, 10, 100, 1000]
-    d = Dict()
-    p = problem1(wscale, M)
+      yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
+      d["wscale"] = wscale
+      d["M"] = M
+      θs = collect(0.001:0.04:1.5)
 
-    @info "Parameters wscale: $(wscale), M: $(M)"
-    d["theta"] = p.θ
-    d["theta0"] = p.θ0
+      @info "Computing cost function over $(θs)"
+      yhats = map(θ -> mean((yhat([θ]) - p.ys).^2), θs)
+      d["yhats"] = yhats
 
-    yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
-    d["wscale"] = wscale
-    d["M"] = M
-    θs = collect(0.001:0.04:1.5)
+      fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
+      @info "converged: $(fit.converged)"
+      @info "Found params: $(fit.param)"
+      d["converged"] = fit.converged
+      d["thetahat"] = fit.param
 
-    @info "Computing cost function over $(θs)"
-    yhats = map(θ -> mean((yhat([θ]) - p.ys).^2), θs)
-    d["yhats"] = yhats
-
-    fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
-    @info "converged: $(fit.converged)"
-    @info "Found params: $(fit.param)"
-    d["converged"] = fit.converged
-    d["thetahat"] = fit.param
-
-    push!(data, d)
+      push!(data, d)
+    end
   end
+  save("data.jld", "data", data)
 end
-
-save("data.jld", "data", data)
