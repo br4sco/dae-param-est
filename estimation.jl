@@ -53,7 +53,7 @@ end
 function mk_est_problem(tp, θ, θ0, σ, u, w, mk_mk_model, mk_ZS, M)
   z = reshape(mk_ZS(1), :)
   ys = simulate1(mk_mk_model(z), tp, θ)
-  ys += σ * rand(Normal(), length(ys))
+  ys += rand(Normal(0.0, σ), length(ys))
   ws = map(t -> w(z, t), collect(time_range(tp)))
 
   ZS = mk_ZS(M)
