@@ -125,10 +125,12 @@ function run()
       d["M"] = M
       θs = collect(0.001:0.04:1.5)
 
-      @info "Computing cost function over $(θs)"
+      @info "Computing cost function over θ"
       yhats = map(θ -> mean((yhat([θ]) - p.ys).^2), θs)
       d["yhats"] = yhats
+      d["thetas"] = θs
 
+      @info "Fitting θ"
       fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
       @info "converged: $(fit.converged)"
       @info "Found params: $(fit.param)"
