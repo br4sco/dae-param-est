@@ -7,6 +7,7 @@ using DelimitedFiles
 using Statistics
 using LaTeXStrings
 using Distributions
+using JLD
 
 Random.seed!(1234)              # set the seed
 
@@ -33,11 +34,10 @@ function mk_yhat(mk_mk_model::Function,
       @info "θ set to $(θ)"
       p = Progress(M, 1, "Running $(M) simulations...", 50)
       @inbounds Threads.@threads for m = 1:M
-        z = ZS[:, m]
-        mk_model = mk_mk_model(z)
+        mk_model = mk_mk_model(ZS[:, m])
         y = simulate1(mk_model, tp, θ)
-        for i = 1:(N+1)
-          Threads.atomic_add!(yhats[i], y[i])
+        for k = 1:(N+1)
+          Threads.atomic_add!(yhats[k], y[k])
         end
         next!(p)
       end
@@ -50,12 +50,10 @@ function plot_signal_to_noise_ratio(ys, ws)
   plot(ys.^2 ./ ws.^2, yaxis=:log, xlabel="time (steps)", ylabel=L"y^2/w^2")
 end
 
-function mk_est_problem(tp, θ, θ0, e, u, w, mk_mk_model, mk_ZS, M)
-
-
+function mk_est_problem(tp, θ, θ0, σ, u, w, mk_mk_model, mk_ZS, M)
   z = reshape(mk_ZS(1), :)
   ys = simulate1(mk_mk_model(z), tp, θ)
-  ys += e * rand(Normal(), length(ys))
+  ys += σ * rand(Normal(), length(ys))
   ws = map(t -> w(z, t), collect(time_range(tp)))
 
   ZS = mk_ZS(M)
@@ -67,7 +65,7 @@ function problem0()
   let us = [0; rand(10)]
     θ = [1.]
     θ0 = [0.5]
-    e = 0.01
+    σ = 0.01
 
     N = 100
     T0 = 0.0
@@ -83,16 +81,15 @@ function problem0()
     w = (z, t) -> 0.0
     mk_mk_model = z -> pendulumK(u, t -> w(z, t), T0)
 
-    mk_est_problem(tp, θ, θ0, e, u, w, mk_mk_model, M -> zeros(1, M), M)
+    mk_est_problem(tp, θ, θ0, σ, u, w, mk_mk_model, M -> zeros(1, M), M)
   end
 end
 
-function problem1()
+function problem1(wscale, M)
   let us = [0; rand(10)]
     θ = [1.]
     θ0 = [0.1]
-    wscale = 0.02
-    e = 0.01
+    σ = 0.01
 
     N = 100
     T0 = 0.0
@@ -103,25 +100,44 @@ function problem1()
       interpolation(tp, us)(t)
     end
 
-    M = 100
-
     noise = spectral_mc_noise_model_3()
     mk_ZS = noise.mk_ZS
     w = (z, t) -> wscale * noise.w(z, t)
     mk_mk_model = z -> pendulumK(u, t -> w(z, t), T0)
 
-    mk_est_problem(tp, θ, θ0, e, u, w, mk_mk_model, mk_ZS, M)
+    mk_est_problem(tp, θ, θ0, σ, u, w, mk_mk_model, mk_ZS, M)
   end
 end
 
-p = problem1()
-# plot_signal_to_noise_ratio(p.ys, p.ws)
 
-yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
+data = Any[]
 
-# display(plot(0.001:0.05:1.5, θ -> mean((yhat([θ]) - p.ys).^2)))
+for wscale in [0.02, 0.2]
+  for M in [2, 10, 100, 1000]
+    d = Dict()
+    p = problem1(wscale, M)
 
-fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
-@info "converged: $(fit.converged)"
-@info "Found params: $(fit.param)"
-writedlm("param.csv",  fit.param, ',')
+    @info "Parameters wscale: $(wscale), M: $(M)"
+    d["theta"] = p.θ
+    d["theta0"] = p.θ0
+
+    yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
+    d["wscale"] = wscale
+    d["M"] = M
+    θs = collect(0.001:0.04:1.5)
+
+    @info "Computing cost function over $(θs)"
+    yhats = map(θ -> mean((yhat([θ]) - p.ys).^2), θs)
+    d["yhats"] = yhats
+
+    fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
+    @info "converged: $(fit.converged)"
+    @info "Found params: $(fit.param)"
+    d["converged"] = fit.converged
+    d["thetahat"] = fit.param
+
+    push!(data, d)
+  end
+end
+
+save("data.jld", "data", data)
