@@ -22,7 +22,7 @@ end
 function print_theta(data, wscale)
   print("wscale = $(wscale)\n")
   for d in data
-    print("M = $(d["M"]) theta = $(d["theta"]), theta0 = $(d["theta"]), thetahat = $(d["thetahat"])\n")
+    print("M = $(d["M"]), theta = $(d["theta"]), theta0 = $(d["theta0"]), thetahat = $(d["thetahat"])\n")
   end
 end
 
