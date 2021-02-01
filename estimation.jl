@@ -125,7 +125,7 @@ function run()
       yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
       yhats = map(θ -> yhat([θ]), θs)
       d["yhats"] = yhats
-      costs = map(θ -> mean((yhat([θ]) - p.ys).^2), θs)
+      costs = map(θ -> mean((yhats - p.ys).^2), θs)
       d["costs"] = costs
 
       @info "Fitting θ"
@@ -142,7 +142,7 @@ function run()
   p0 = problem0()
   yhat0 = mk_yhat(p0.mk_mk_model, p0.tp, p0.ZS)
   yhats0 = map(θ -> yhat0([θ]), θs)
-  costs0 = map(θ -> mean((yhat0([θ]) - p0.ys).^2), θs)
+  costs0 = map(θ -> mean((yhat0 - p0.ys).^2), θs)
 
   save("data.jld", "runs", runs, "thetas", θs, "yhats0", yhats0, "costs0", costs0)
 end
