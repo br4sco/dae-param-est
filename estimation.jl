@@ -46,10 +46,6 @@ function mk_yhat(mk_mk_model::Function,
   end
 end
 
-function plot_signal_to_noise_ratio(ys, ws)
-  plot(ys.^2 ./ ws.^2, yaxis=:log, xlabel="time (steps)", ylabel=L"y^2/w^2")
-end
-
 function mk_est_problem(tp, θ, θ0, σ, u, w, mk_mk_model, mk_ZS, M)
   z = reshape(mk_ZS(1), :)
   ys = simulate1(mk_mk_model(z), tp, θ)
@@ -110,7 +106,9 @@ function problem1(wscale, M)
 end
 
 function run()
-  data = Any[]
+  runs = Any[]
+  θs = collect(0.001:0.04:1.5)
+
   for wscale in [0.02, 0.2]
     for M in [2, 10, 100, 1000, 2000]
       d = Dict()
@@ -123,12 +121,10 @@ function run()
       yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
       d["wscale"] = wscale
       d["M"] = M
-      θs = collect(0.001:0.04:1.5)
 
       @info "Computing cost function over θ"
       yhats = map(θ -> mean((yhat([θ]) - p.ys).^2), θs)
       d["yhats"] = yhats
-      d["thetas"] = θs
 
       @info "Fitting θ"
       fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
@@ -137,8 +133,13 @@ function run()
       d["converged"] = fit.converged
       d["thetahat"] = fit.param
 
-      push!(data, d)
+      push!(runs, d)
     end
   end
-  save("data.jld", "data", data)
+
+  p0 = problem0()
+  yhat0 = mk_yhat(p0.mk_mk_model, p0.tp, p0.ZS)
+  yhats0 = map(θ -> mean((yhat0([θ]) - p0.ys).^2), θs)
+
+  save("data.jld", "runs", runs, "thetas", θs, "yhats0", yhats0)
 end
