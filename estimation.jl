@@ -118,13 +118,15 @@ function run()
       d["theta"] = p.θ
       d["theta0"] = p.θ0
 
-      yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
       d["wscale"] = wscale
       d["M"] = M
 
       @info "Computing cost function over θ"
-      yhats = map(θ -> mean((yhat([θ]) - p.ys).^2), θs)
+      yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
+      yhats = map(θ -> yhat([θ]), θs)
       d["yhats"] = yhats
+      costs = map(θ -> mean((yhat([θ]) - p.ys).^2), θs)
+      d["costs"] = costs
 
       @info "Fitting θ"
       fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
@@ -139,7 +141,8 @@ function run()
 
   p0 = problem0()
   yhat0 = mk_yhat(p0.mk_mk_model, p0.tp, p0.ZS)
-  yhats0 = map(θ -> mean((yhat0([θ]) - p0.ys).^2), θs)
+  yhats0 = map(θ -> yhat0([θ]), θs)
+  costs0 = map(θ -> mean((yhat0([θ]) - p0.ys).^2), θs)
 
-  save("data.jld", "runs", runs, "thetas", θs, "yhats0", yhats0)
+  save("data.jld", "runs", runs, "thetas", θs, "yhats0", yhats0, "costs0", costs0)
 end

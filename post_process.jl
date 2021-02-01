@@ -2,20 +2,30 @@ include("estimation.jl")
 using LaTeXStrings
 using JLD
 
-function plot_signal_to_noise_ratio(ys, ws, wscale)
-  plot(
-    ys.^2 ./ ws.^2, yaxis=:log, xlabel="time (steps)", ylabel=L"y^2/w^2",
-    title="wscale = $(wscale)")
-end
+d = load("data.jld")
+θs = d["thetas"]
+costs0 = d["costs0"]
 
-function plot_yhat_over_theta(data, wscale)
+function plot_cost_over_theta(data, wscale, snr)
   p = plot(
     xlabel=L"\theta", ylabel=L"\Sigma_k (\hat{y}_k - y_k)^2",
-    title="wscale = $(wscale)")
+    title="wscale = $(wscale), snr = $(snr)")
+
+  plot!(p, [1.], seriestype=:vline, label=L"\theta")
+  plot!(p, θs, costs0, label=L"w(t)=0")
+  for d in data
+    plot!(p, θs, d["costs"], label="M = $(d["M"])")
+  end
+end
+
+function plot_cost_cost0_diff(data, wscale, snr)
+  p = plot(
+    xlabel=L"\theta", ylabel=L"|cost_M-cost0|",
+    title="wscale = $(wscale), snr = $(snr)")
 
   plot!(p, [1.], seriestype=:vline, label=L"\theta")
   for d in data
-    plot!(p, d["thetas"], d["yhats"], label="M = $(d["M"])")
+    plot!(p, θs, abs.(d["costs"] - costs0), label="M = $(d["M"])")
   end
 end
 
@@ -27,22 +37,26 @@ function print_theta(data, wscale)
 end
 
 p1 = problem1(0.02, 1)
-plot_signal_to_noise_ratio(p1.ys, p1.ws, 0.02)
-savefig("signal_to_noise_02.svg")
+snr1 = sum(p1.ys.^2) / sum(p1.ws.^2)
 
 p2 = problem1(0.2, 1)
-plot_signal_to_noise_ratio(p2.ys, p2.ws, 0.2)
-savefig("signal_to_noise_2.svg")
+snr2 = sum(p2.ys.^2) / sum(p2.ws.^2)
 
-d = load("data.jld")
-d02 = filter(x -> x["wscale"] == 0.02, d["data"])
-d2 = filter(x -> x["wscale"] == 0.2, d["data"])
 
-plot_yhat_over_theta(d02, 0.02)
+d02 = filter(x -> x["wscale"] == 0.02, d["runs"])
+d2 = filter(x -> x["wscale"] == 0.2, d["runs"])
+
+plot_cost_over_theta(d02, 0.02, snr1)
 savefig("cost_over_theta_02.svg")
 
-plot_yhat_over_theta(d2, 0.2)
+plot_cost_over_theta(d2, 0.2, snr2)
 savefig("cost_over_theta_2.svg")
+
+plot_cost_cost0_diff(d02, 0.02, snr1)
+savefig("cost_diff_over_theta_02.svg")
+
+plot_cost_cost0_diff(d2, 0.2, snr2)
+savefig("cost_diff_over_theta_2.svg")
 
 print_theta(d02, 0.02)
 print_theta(d2, 0.2)
