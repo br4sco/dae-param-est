@@ -22,7 +22,7 @@ close all
 
 % == user's options
 % choose model
-model = 2;  % either 1 or 2
+model = 1;  % either 1 or 2
 % request values at random times?
 randTimes = true; % if false a uniform grid is fitted within the original one
 n         = 50; %number of requested samples; used only if randTimes = true;

@@ -56,3 +56,7 @@ flycheck_*.el
 
 
 # End of https://www.toptal.com/developers/gitignore/api/emacs
+testing_conditional_distributions.m
+test_noise_interpolation.jl
+t2i_func.m
+testing_conditional_distributions.m
