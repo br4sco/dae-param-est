@@ -117,6 +117,7 @@ end
 function experiment(problem, M, wscale, n, name)
   runs = []
   for i = 1:n
+    @info "run $(i) of $(n)"
     p = problem(wscale, M)
     push!(runs, run_est(p, p.yhat_baseline, "baseline"))
     push!(runs, run_est(p, p.yhat, "$(M)"))
