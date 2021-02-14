@@ -52,7 +52,7 @@ Gw    = sigma/(a1*s^2 + b1*s +c1);
 d1 = 4.2641;
 d2 = 19.7713;
 d3 = 56.2256;
-d4 = 16;  % d1, ..., e4 are coeffs of denom.
+d4 = 16;  % d1, ..., d4 are coeffs of denom.
 n3 = 1;
 n4 = 1; % one zero at -1
 % here p_w = 3
@@ -74,7 +74,7 @@ if model == 1
     % model 1
     specFac = @(s) (sigma)./(sqrt(2*pi)*(a1*s.^2 + b1*s +c1));
 elseif model == 2
-    % model 2: the one used in spectral_Monte_Carlo
+    % model 2
     specFac = @(s) (n3*s+n4)./(sqrt(2*pi)*(s.^4 + d1*s.^3 + d2*s.^2 + d3*s + d4));%
 end
 spec    = (specFac(W*1i)).*specFac(-W*1i);  % S(w)
@@ -179,9 +179,8 @@ for r = 1:n
     expF_requested   = expm(F*(requested_times(r)/dt));
     expF_next        = expm(F*((prev_t(r)+dt)/dt));
     
-    % the indices need to be updated to work generically
     % Note here that we can use P_prev = P_requested = P_next = Q
-    % the computations as used in this loop are do not converge in general
+    % the computations as used in this loop do not converge in general
     % due to numerical issues (!). It is used here for illustration/comparison
     P_prev = expF_prev(order+1:end,order+1:end)'*Q*expF_prev(order+1:end,order+1:end)+...
         expF_prev(order+1:end,order+1:end)'*expF_prev (1:order,order+1:end);
