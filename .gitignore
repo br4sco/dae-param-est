@@ -60,3 +60,7 @@ testing_conditional_distributions.m
 test_noise_interpolation.jl
 t2i_func.m
 testing_conditional_distributions.m
+
+# dont track plots
+*.svg
+*.png
