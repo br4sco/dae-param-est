@@ -8,9 +8,9 @@
 % (2) discretizing the the linear filter and simulating its response to a
 % white noise input
 %
-% Two given spectra are used. One with pole excess 4, and the other has
-% pole excess 2 leading to realizations that are 2 times differentiable and
-% one time differentiable, respectively.
+% Two given spectral densities are used. One with pole excess 2 p_w = 4,
+% and the other has pole excess 2 p_w = 6 leading to realizations that are
+% 1 time differentiable and 2 times differentiable, respectively.
 
 % Mohamed Abdalmoaty
 % abda@kth.se
@@ -22,32 +22,40 @@ close all
 
 % == user's options
 % choose model
-model = 1;  % either 1 or 2
+model = 2;  % either 1 or 2
 % request values at random times?
 randTimes = true; % if false a uniform grid is fitted within the original one
 n         = 50; %number of requested samples; used only if randTimes = true;
 M         = 1;     % number of required realizations (not really used now)
-dt        = 0.01;  % initial time resolution in seconds
-tfinal    = 2; % length of realizations in seconds
+dt        = 0.05;  % initial time resolution in seconds
+tfinal    = 10; % length of realizations in seconds
 
 %=========================================================================%
 
 
 
-% == the linear filter == %
+% ==  linear filter 1 == %
 % Suppose that is Gw(s) = sigma/(a*s^2 + b*2*s +c)
 % the parameters sigma, a, b, and c are known (for now)
 sigma = 0.5;   % this parameter tunes the magnitude of the disturbance
 omega = 4;   % natural freq. in rad/s (tunes freq. contents/fluctuations)
 zeta  = 0.1; % dampling coefficient (tunes damping)
-a     = 1;
-b     = 2*omega*zeta;
-c     = omega^2;
+a1     = 1;
+b1     = 2*omega*zeta;
+c1     = omega^2;
 s     = tf('s');
-Gw    = sigma/(a*s^2 + b*s +c);
+Gw    = sigma/(a1*s^2 + b1*s +c1);
 % isstable(Gw) % the filter is stable
+% here p_w = 2
 
-
+% == linear filter 2 == %
+d1 = 4.2641;
+d2 = 19.7713;
+d3 = 56.2256;
+d4 = 16;  % d1, ..., e4 are coeffs of denom.
+n3 = 1;
+n4 = 1; % one zero at -1
+% here p_w = 3
 
 
 % == the spectral factor
@@ -64,10 +72,10 @@ W     = dw:dw:w_max;  % a grid of frequencies
 % approximation is periodic with period 2*pi/dw
 if model == 1
     % model 1
-    specFac = @(s) (sigma)./(sqrt(2*pi)*(a*s.^2 + b*s +c));
+    specFac = @(s) (sigma)./(sqrt(2*pi)*(a1*s.^2 + b1*s +c1));
 elseif model == 2
     % model 2: the one used in spectral_Monte_Carlo
-    specFac = @(s) (s+1)./(sqrt(2*pi)*(1*s.^2 + sqrt(12)*s +1));%
+    specFac = @(s) (n3*s+n4)./(sqrt(2*pi)*(s.^4 + d1*s.^3 + d2*s.^2 + d3*s + d4));%
 end
 spec    = (specFac(W*1i)).*specFac(-W*1i);  % S(w)
 figure('position',  [200, 400, 1500, 500])
@@ -102,34 +110,36 @@ xlabel('time (s)'); ylabel('w(t)')
 % == discrete-time model simulation
 if model == 1
     % continuous-time state-space model matrices of Gw
-    Aw = [0 -c;
-        1 -b;];
-    Bw = [sigma; 0;];
+    Aw = [0 -c1;
+          1 -b1;];
+    Bw = [sigma; 0;]; %> number of zeros here = no. of defined derivatives
     C  = [0 1];
 elseif model == 2
-    % The model we tried in spectral_Monte_Carlo.m
-    Aw = [0 -1;
-        1 -sqrt(12);];
-    Bw = [1; 1;];
-    C  = [0 1];
+    % The model has p_w = 3
+    Aw = [  [zeros(1,3);
+                  eye(3)]     -[d4; d3; d2; d1;]];
+    Bw = [n4; n3; 0; 0;];  %> number of zeros here = no. of defined derivatives
+    C  = [0 0 0 1];
+    % number of poles (=4) - number of zeros (=1) = p_w = 3
+    % so we can differentiate w, p_w-1 = 2 times
 end
 % find the corresponding discrete-time matrices
 F       = [-Aw             Bw*Bw';
-    zeros(size(Aw))   Aw';]*dt;
+            zeros(size(Aw))   Aw';]*dt;
 expF    = expm(F);
-% the indices need to be updated to work generically
-Awd     = expF(3:4,3:4)';
-Sigma_w = Awd* expF(1:2,3:4); % cov matrix of discrete-time nosie
+order = length(Aw);
+Awd     = expF(order+1:end,order+1:end)';
+Sigma_w = Awd* expF(1:order,order+1:end); % cov matrix of discrete-time nosie
 Bwd     = chol(Sigma_w,'lower');
 
-Gwd = ss(Awd,eye(2),C,0,dt); % the discret-time linear filter
+Gwd = ss(Awd,eye(order),C,0,dt); % the discret-time linear filter
 Q = dlyap(Awd,Bwd*Bwd'); % initial state-covariance
 % evaluating the discretized w(t) for inspection
 wTd = zeros(length(T),M); % allocate memory space
 x = zeros(length(T),length(Awd),M); % state trajectories
 
 for mc = 1:M
-    [wTd(:,mc),~, x(:,:,mc)] = lsim(Gwd, chol(Sigma_w,'lower')*randn(2,length(T)),[0 T(1:end-1)], chol(Q,'lower')*randn(2,1));
+    [wTd(:,mc),~, x(:,:,mc)] = lsim(Gwd, chol(Sigma_w,'lower')*randn(order,length(T)),[0 T(1:end-1)], chol(Q,'lower')*randn(order,1));
     % a random initial state is used; Here lsim is used for efficiency but it is not needed.
     % One can simply use the state-space equations.
 end
@@ -156,7 +166,7 @@ end
 % the following random variables are used to generate the required states
 % I'm fixing them here so that I can use the same number later when trying
 % an alternative method below
-zeta = randn(2,n);
+zeta = randn(order,n);
 
 prev_x_indx      = floor(requested_times./dt);
 prev_t           = prev_x_indx*dt;
@@ -173,12 +183,12 @@ for r = 1:n
     % Note here that we can use P_prev = P_requested = P_next = Q
     % the computations as used in this loop are do not converge in general
     % due to numerical issues (!). It is used here for illustration/comparison
-    P_prev = expF_prev(3:4,3:4)'*Q*expF_prev(3:4,3:4)+...
-        expF_prev(3:4,3:4)'*expF_prev (1:2,3:4);
-    P_requested =  expF_requested(3:4,3:4)'*Q*expF_requested(3:4,3:4)+...
-        expF_requested(3:4,3:4)'*expF_requested(1:2,3:4);
-    P_next = expF_next(3:4,3:4)'*Q*expF_next(3:4,3:4)+...
-        expF_next(3:4,3:4)'*expF_next(1:2,3:4);
+    P_prev = expF_prev(order+1:end,order+1:end)'*Q*expF_prev(order+1:end,order+1:end)+...
+        expF_prev(order+1:end,order+1:end)'*expF_prev (1:order,order+1:end);
+    P_requested =  expF_requested(order+1:end,order+1:end)'*Q*expF_requested(order+1:end,order+1:end)+...
+        expF_requested(order+1:end,order+1:end)'*expF_requested(1:order,order+1:end);
+    P_next = expF_next(order+1:end,order+1:end)'*Q*expF_next(order+1:end,order+1:end)+...
+        expF_next(order+1:end,order+1:end)'*expF_next(1:order,order+1:end);
     
     cov_x_requested_given = [expm(Aw*(requested_times(r)-prev_t(r)))*P_prev...
                              P_next*expm(Aw*(prev_t(r)+dt-requested_times(r)))'];
@@ -198,7 +208,7 @@ for r = 1:n
     requested_states(:,r) =cond_mean_x_req + (V*sqrt(D))*zeta(:,r);
     % requested_states(:,r) = mvnrnd(cond_mean_x_req,cond_cov_x_req,1); % alternative way
 end
-requested_samples = requested_states(2,:);  % measure
+requested_samples = requested_states(end,:);  % measure
 
 subplot(1,3,3)
 hold all
@@ -215,12 +225,12 @@ for r = 1:n
     dt2 = prev_t(r)+dt-requested_times(r);
     
     expF_prev    = expm(F*(dt1/dt));
-    Sigma_w_prev = expF_prev(3:4,3:4)'* expF_prev(1:2,3:4); % cov matrix of discrete-time nosie
-    Awd_prev     = expF_prev(3:4,3:4)';
+    Sigma_w_prev = expF_prev(order+1:end,order+1:end)'* expF_prev(1:order,order+1:end); % cov matrix of discrete-time nosie
+    Awd_prev     = expF_prev(order+1:end,order+1:end)';
     
     expF_next    = expm(F*(dt2/dt));
-    Sigma_w_next = expF_next(3:4,3:4)'* expF_next(1:2,3:4); % cov matrix of discrete-time nosie
-    Awd_next     = expF_next(3:4,3:4)';
+    Sigma_w_next = expF_next(order+1:end,order+1:end)'* expF_next(1:order,order+1:end); % cov matrix of discrete-time nosie
+    Awd_next     = expF_next(order+1:end,order+1:end)';
     % the increment in the time interval where the value is requested
     Z = x_given(length(Aw)+1:end) - Awd*x_given(1:length(Aw));
     
@@ -242,7 +252,7 @@ for r = 1:n
     % realize the state
     requested_states_alt_method(:,r) = Awd_prev*x_given(1:length(Aw))+increment_prev;
 end
-requested_samples_alt_method = requested_states_alt_method(2,:);  % measure
+requested_samples_alt_method = requested_states_alt_method(end,:);  % measure
 
 subplot(1,3,3)
 hold all
@@ -266,13 +276,8 @@ checkValue3 = x_given(length(Aw)+1:end)- (Awd_next*Awd_prev*x_given(1:length(Aw)
 
 
 
-
-
-
-
-
-
-
+%=========================================================================
+% Here is how the conditioning is done
 
 % x_{t-1} = A_{t-1} x_{t-2} + z_{t-2}
 % x_{t} = A_{t|t-1} x_{t-1} + z_{t-1}
@@ -300,38 +305,5 @@ checkValue3 = x_given(length(Aw)+1:end)- (Awd_next*Awd_prev*x_given(1:length(Aw)
 % 
 % 
 % z_{t-1}
-% v
-% w          
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+% v          
 
