@@ -21,7 +21,7 @@ end
 function plot_cost_cost0_diff(data, wscale, snr)
   p = plot(
     xlabel=L"\theta", ylabel=L"|cost_M-cost0|",
-    title="wscale = $(wscale), snr = $(snr)")
+    title="wscale = $(wscale), snr = $(snr)", yaxis=:log)
 
   plot!(p, [1.], seriestype=:vline, label=L"\theta")
   for d in data
