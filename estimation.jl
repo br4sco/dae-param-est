@@ -14,7 +14,7 @@ Random.seed!(1234)              # set the seed
 struct EstProblem
   mk_mk_model::Function         # Function f(z), where z is a noise realization
                                 # and reurns a function g(θ), where θ are the
-                                # model paramaters, and returns a system model.
+                                # model paramaters and returns a system model.
   ZS::Array{Float64, 2}         # Matrix where columns are noise realiztions.
   tp::TimeParams                # Time parameters.
   ws::Array{Float64, 1}         # Disturbance of the true system.
@@ -23,7 +23,12 @@ struct EstProblem
   θ0::Array{Float64, 1}         # Initial guess of the parameters.
 end
 
-function mk_yhat(mk_mk_model::Function,
+# Returns a function y(θ), the observations given θ averaged over the M noise
+# realizations in ZS, on the time interval given by tp. The function
+# mk_mk_model returns a function that constructs the model of interest given
+# θ. Simulations are run in parallel, start julia as `Julia --threads n` where
+# n is the number of threads you wish to use.
+function mk_yhatM(mk_mk_model::Function,
                  tp::TimeParams,
                  ZS::Array{Float64, 2})::Function
 
@@ -43,6 +48,14 @@ function mk_yhat(mk_mk_model::Function,
       end
       map(y -> y[], yhats) / M
     end
+  end
+end
+
+# Returns a function y(θ), the observations given θ on the time interval given
+# by tp. The function mk_model constructs the model of interest given θ.
+function mk_yhat1(mk_model::Function, tp::TimeParams)
+  function f(θ::Array{Float64, 1})::Array{Float64, 1}
+    simulate1(mk_model, tp, θ)
   end
 end
 
@@ -105,44 +118,45 @@ function problem1(wscale, M)
   end
 end
 
-function run()
-  runs = Any[]
-  θs = collect(0.001:0.04:1.5)
+function mk_run(problem, Ms, wscales, θs)
+  function run()
+    runs = Any[]
 
-  for wscale in [0.02, 0.2]
-    for M in [2, 10, 100, 1000, 2000]
-      d = Dict()
-      p = problem1(wscale, M)
+    for wscale in wscales
+      for M in Ms
+        d = Dict()
+        p = problem(wscale, M)
 
-      @info "Parameters wscale: $(wscale), M: $(M)"
-      d["theta"] = p.θ
-      d["theta0"] = p.θ0
+        @info "Parameters wscale: $(wscale), M: $(M)"
+        d["theta"] = p.θ
+        d["theta0"] = p.θ0
 
-      d["wscale"] = wscale
-      d["M"] = M
+        d["wscale"] = wscale
+        d["M"] = M
 
-      @info "Computing cost function over θ"
-      yhat = mk_yhat(p.mk_mk_model, p.tp, p.ZS)
-      yhats = map(θ -> yhat([θ]), θs)
-      d["yhats"] = yhats
-      costs = map(θ -> mean((yhats - p.ys).^2), θs)
-      d["costs"] = costs
+        @info "Computing cost function over θ"
+        yhat = mk_yhatM(p.mk_mk_model, p.tp, p.ZS)
+        yhats = map(θ -> yhat([θ]), θs)
+        d["yhats"] = yhats
+        costs = map(θ -> mean((yhats - p.ys).^2), θs)
+        d["costs"] = costs
 
-      @info "Fitting θ"
-      fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
-      @info "converged: $(fit.converged)"
-      @info "Found params: $(fit.param)"
-      d["converged"] = fit.converged
-      d["thetahat"] = fit.param
+        @info "Fitting θ"
+        fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
+        @info "converged: $(fit.converged)"
+        @info "Found params: $(fit.param)"
+        d["converged"] = fit.converged
+        d["thetahat"] = fit.param
 
-      push!(runs, d)
+        push!(runs, d)
+      end
     end
-  end
 
-  p0 = problem0()
-  yhat0 = mk_yhat(p0.mk_mk_model, p0.tp, p0.ZS)
-  yhats0 = map(θ -> yhat0([θ]), θs)
-  costs0 = map(θ -> mean((yhat0 - p0.ys).^2), θs)
+    p0 = problem0()
+    yhat0 = mk_yhatM(p0.mk_mk_model, p0.tp, p0.ZS)
+    yhats0 = map(θ -> yhat0([θ]), θs)
+    costs0 = map(θ -> mean((yhat0 - p0.ys).^2), θs)
 
-  save("data.jld", "runs", runs, "thetas", θs, "yhats0", yhats0, "costs0", costs0)
+    save("data.jld", "runs", runs, "thetas", θs, "yhats0", yhats0, "costs0", costs0)
+end
 end
