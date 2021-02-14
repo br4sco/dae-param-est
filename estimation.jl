@@ -82,21 +82,27 @@ function problem1(wscale, M)
 
   z = reshape(noise.mk_ZS(1), :)
   ys = simulate1(mk_mk_model(z), tp, θ)
-  ys +=  σ*rand(Normal(), length(ys))
+  ys += σ*rand(Normal(), length(ys))
 
   yhat_baseline = mk_yhat1(pendulumK(u, t -> 0.0, T0), tp)
 
   ZS = noise.mk_ZS(M)
   yhat = mk_yhatM(mk_mk_model, tp, ZS)
 
-  EstProblem(yhat, yhat_baseline, tp, u, w, ys, θ, θ0)
+  EstProblem(yhat, yhat_baseline, tp, u, t -> w(z, t), ys, θ, θ0)
 end
 
-function run_est(p, yhat)
+function run_est(p, yhat, label)
   d = Dict()
 
+  d["name"] = label
   d["theta"] = p.θ
   d["theta0"] = p.θ0
+
+  ws = map(p.w, collect(time_range(p.tp)))
+  snr = sum(p.ys.^2) / sum(ws.^2)
+
+  d["snr"] = snr
 
   @info "Fitting θ"
   fit = curve_fit((t, θ) -> yhat(θ), time_range(p.tp), p.ys, p.θ0)
@@ -106,4 +112,20 @@ function run_est(p, yhat)
   d["thetahat"] = fit.param
 
   return d
+end
+
+function experiment(problem, M, wscale, n, name)
+  runs = []
+  for i = 1:n
+    p = problem(wscale, M)
+    push!(runs, run_est(p, p.yhat_baseline, "baseline"))
+    push!(runs, run_est(p, p.yhat, "$(M)"))
+  end
+
+  save("$(name).jld", "runs", runs)
+
+  @info "baseline: $(map(x->x["thetahat"], filter(x->x["name"] == "baseline", runs)))"
+  @info "result: $(map(x->x["thetahat"], filter(x->x["name"] != "baseline", runs)))"
+
+  return runs
 end
