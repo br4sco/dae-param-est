@@ -41,25 +41,28 @@ function mk_spectral_mc_noise_model(a, b, ωmax, dω)
 end
 
 function spectral_mc_noise_model_1()
-  a = [1.0 , 1.0]
-  b = [1., sqrt(12.0), 2.0]
-  ωmax = 100.0
+  ω = 4;       # natural freq. in rad/s (tunes freq. contents/fluctuations)
+  ζ = 0.1      # damping coefficient (tunes damping)
+  d1 = 1.0
+  d2 = 2 * ω * ζ
+  d3 = ω^2
+  a = [1.0]
+  b = [d1, d2, d3]
+  ωmax = 50.0
   dω = 0.01
   mk_spectral_mc_noise_model(a, b, ωmax, dω)
 end
 
 function spectral_mc_noise_model_2()
-  a = [1.0, 0.0]
-  b = [1.0, sqrt(12.0), 2.0, 0.1, 3.0]
-  ωmax = 100.0
+  d1 = 4.2641
+  d2 = 19.7713
+  d3 = 56.2256
+  d4 = 16.0  # d1, ..., d4 are coeffs of denom.
+  n3 = 1.0
+  n4 = 1.0 # one zero at -1
+  a = [n3, n4]
+  b = [d1, d2, d3, d4]
+  ωmax = 350.0
   dω = 0.01
-  mk_spectral_mc_noise_model(a, b, ωmax, dω)
-end
-
-function spectral_mc_noise_model_3()
-  a = [1.]
-  b = [1.0, 2.0 * 4.0 * 0.1, 4^2]
-  ωmax = 50.0
-  dω = 0.02
   mk_spectral_mc_noise_model(a, b, ωmax, dω)
 end
