@@ -4,9 +4,24 @@ using LinearAlgebra
 using CSV, DataFrames
 
 function x_inter(t::Float64, Ts::Float64, A::Array{Float64, 2}, B::Array{Float64, 2}, x::Array{Array{Float64, 1}, 1})
-    k = Int((t-t0)÷Ts)        # t lies between t0 + k*Ts and t0 + (k+1)*Ts
+    ϵ = 10e-6               # Values of δ smaller than this are treated as 0
+    k = Int(t÷Ts)           # t lies between t0 + k*Ts and t0 + (k+1)*Ts
     δ = t - (t0 + k*Ts)
     n = size(A)[1]
+
+    # TODO: Change, must be better way to pass x0
+    x0 = [0; 0]
+
+    if δ < ϵ
+        if k == 0
+            return x0
+        else
+            return x[k]
+        end
+    elseif Ts-δ < ϵ
+        return x[k+1]
+    end
+
 
     Mexp    = [A B*(B'); zeros(size(A)) -A']
     MTs     = exp(Mexp*Ts)      # TODO: This really shouldn't be computed in real time
@@ -26,17 +41,14 @@ function x_inter(t::Float64, Ts::Float64, A::Array{Float64, 2}, B::Array{Float64
     Bdδ     = Cδ.L
     BdTs_δ  = CTs_δ.L
 
-    # TODO: Change, must be better way to pass x0
-    x0 = [0; 0]
-
-    if k > 1
+    if k > 0
         # nm1 = n - 1, np1 = n + 1
         μ_nm1 = (AdTs^(k-1))*x0
         μ_n   = Adδ*μ_nm1
         μ_np1 = AdTs_δ*μ_n
         σ_nm1 = zeros(Float64, n, n)
         BdBdT = (BdTs*(BdTs'))
-        for j=0:1:k-2
+        for j=0:1:k-1
             Adj = (AdTs^j)
             σ_nm1 += Adj*(BdBdT)*(Adj')
         end
@@ -48,20 +60,24 @@ function x_inter(t::Float64, Ts::Float64, A::Array{Float64, 2}, B::Array{Float64
 
         σ_n_z = [σ_np1_n' σ_n_nm1]
         σ_z   = [σ_np1 σ_np1_nm1; σ_np1_nm1' σ_nm1]
-        z     = [x[k]; x[k-1]]
+        if k > 1
+            z = [x[k]; x[k-1]]
+        else
+            z  = [x[k]; x0]
+        end
         μ_z   = [μ_np1; μ_nm1]
         μ = μ_n + σ_n_z*(σ_z\(z-μ_z))
         Σ = Hermitian(σ_n - σ_n_z*(σ_z\(σ_n_z')))
         CΣ   = cholesky(Σ)
         Σr   = CΣ.L
     else
-        # k == 1
+        # k == 0
         μ_1 = Adδ*x0
         σ_1 = Bdδ*(Bdδ')
         μ_2 = AdTs_δ*μ_1
         σ_2 = AdTs*σ_1*(AdTs') + BdTs*(BdTs')
         σ_12 = σ_1*(AdTs')
-        μ = μ_1 + σ_12*( σ_2\(x[1]-μ_2) )       # x[2-1]=x[1], see theory notes
+        μ = μ_1 + σ_12*( σ_2\(x[1]-μ_2) )       # See theory notes for why we have x[1] - μ_2, and not e.g. x[1] - μ_1. It's a question of notation
         Σ = Hermitian(σ_1 - σ_12*(σ_2\(σ_12')))
         CΣ   = cholesky(Σ)
         Σr   = CΣ.L
