@@ -20,7 +20,7 @@ const Ts = 0.05             # Sampling frequency of noise model
 const N  = size(x_dat)[1]   # Number of simulated time steps of noise model
 
 function w(t::Float64)
-    return (C*x_inter(t, Ts, A, B, x))[1]
+  return (C*x_inter(t, Ts, A, B, x))[1]
 end
 
 δ = 0.025
@@ -40,3 +40,7 @@ inter_times = sample_times + δ*ones(size(sample_times))
 # If I knew how to plot in Julia, I would plot w_k as a function of sample_times
 # (this is the sampled noise values), and wδ as a function of inter_times
 # (these are the interpolated noise values)
+
+# to plot w you can write
+plot(t0:0.01:N*Ts, w)
+# I get errors like ERROR: PosDefException: matrix is not positive definite; Cholesky factorization failed, on this interval.
