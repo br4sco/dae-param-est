@@ -39,57 +39,57 @@ function x_inter(t::Float64, Ts::Float64, A::Array{Float64, 2}, B::Array{Float64
 
     # t_n = n*Ts, t_np1 = n*Ts + δ, t_np2 = (n+1)*Ts
     # We are thus sampling x(t_np1)
+    k_n = n
+    k_np2 = n+1
 
+
+    # np1 = n+1, np2 = n + 2
+    μ_n = (AdTs^(n-1))*x0
+    μ_np1   = Adδ*μ_n
+    μ_np2 = AdTs_δ*μ_np1
+    σ_n = zeros(Float64, nx, nx)
+    BdBdT = (BdTs*(BdTs'))
+    for j=0:1:n-1
+        Adj = (AdTs^j)
+        σ_n += Adj*(BdBdT)*(Adj')
+    end
+    σ_np1 = Adδ*σ_n*(Adδ') + Bdδ*(Bdδ')
+    σ_np2 = AdTs_δ*σ_np1*(AdTs_δ') + BdTs_δ*(BdTs_δ')
+    σ_np2_np1 = AdTs_δ*σ_np1
+    σ_np2_n = AdTs_δ*Adδ*σ_n
+    σ_np1_n   = Adδ*σ_n
+
+    σ_np1_z = [σ_np2_np1' σ_np1_n]
+    σ_z   = [σ_np2 σ_np2_n; σ_np2_n' σ_n]
+    μ_z   = [μ_np2; μ_n]
     if n > 0
-        # np1 = n+1, np2 = n + 2
-        μ_n = (AdTs^(n-1))*x0
-        μ_np1   = Adδ*μ_n
-        μ_np2 = AdTs_δ*μ_np1
-        σ_n = zeros(Float64, nx, nx)
-        BdBdT = (BdTs*(BdTs'))
-        for j=0:1:n-1
-            Adj = (AdTs^j)
-            σ_n += Adj*(BdBdT)*(Adj')
-        end
-        σ_np1 = Adδ*σ_n*(Adδ') + Bdδ*(Bdδ')
-        σ_np2 = AdTs_δ*σ_np1*(AdTs_δ') + BdTs_δ*(BdTs_δ')
-        σ_np2_np1 = AdTs_δ*σ_np1
-        σ_np2_n = AdTs_δ*Adδ*σ_n
-        σ_np1_n   = Adδ*σ_n
-
-        σ_np1_z = [σ_np2_np1' σ_np1_n]
-        σ_z   = [σ_np2 σ_np2_n; σ_np2_n' σ_n]
-        if n > 1
-            z = [x[n]; x[n-1]]
-        else
-            z  = [x[n]; x0]
-        end
-        μ_z   = [μ_np2; μ_n]
+        z = [x[k_np2]; x[k_n]]
         μ = μ_np1 + σ_np1_z*(σ_z\(z-μ_z))
         Σ = Hermitian(σ_np1 - σ_np1_z*(σ_z\(σ_np1_z')))
-        CΣ   = cholesky(Σ)
-        Σr   = CΣ.L
     else
-        # n == 0
-        μ_1 = Adδ*x0
-        σ_1 = Bdδ*(Bdδ')
-        μ_2 = AdTs_δ*μ_1
-        σ_2 = AdTs*σ_1*(AdTs') + BdTs*(BdTs')
-        σ_12 = σ_1*(AdTs')
-        μ = μ_1 + σ_12*( σ_2\(x[1]-μ_2) )       # t_0 = 0, t_1 = δ, t_2 = Ts
-        Σ = Hermitian(σ_1 - σ_12*(σ_2\(σ_12')))
-        CΣ   = cholesky(Σ)
-        Σr   = CΣ.L
+        z = [x[k_np2]; x0]
+        μ = μ_np1 + (σ_np2_np1')*( σ_np2\(x[k_np2] - μ_np2) )
+        Σ = Hermitian(σ_np1 - (σ_np2_np1')*( σ_np2\σ_np2_np1 ))
     end
+    CΣ   = cholesky(Σ)
+    Σr   = CΣ.L
 
-    # # DEBUG
+    # DEBUG Not yet fully implemented alternative approach
     # σ_Ts = BdTs*(BdTs')
     # σ_δ_Ts = AdTs_δ*(Bdδ*(Bdδ'))
-    # v_Ts = x[k] - AdTs*x[k-1]
-    # μ_new = Adδ*x[k-1] + σ_δ_Ts*(σ_Ts\v_Ts)
-    # println(μ_new)
-    # println(μ)
-    # println(μ_new - μ)
+    # # t_n = n*Ts, t_np1 = n*Ts + δ, t_np2 = (n+1)*Ts
+    # # We are thus sampling x(t_np1)
+    # if n > 0
+    #     v_Ts = x[n] - AdTs*x[n-1]         # WHY THIS AND NOT +1 ON BOTH?!?!?!??!
+    #     μ = Adδ*x[n-1] + σ_δ_Ts*(σ_Ts\v_Ts)
+    # else
+    #     # t_0 = 0, t_1 = δ, t_2 = Ts
+    #     v_Ts = x[1] - AdTs*x0
+    #     μ = Adδ*x0 + σ_δ_Ts*(σ_Ts\v_Ts)
+    # end
+    # Σ = σ_δ_Ts*(σ_Ts\(σ_δ_Ts'))
+    # CΣ   = cholesky(Σ)
+    # Σr   = CΣ.L
 
     # # DEBUG Nice, theory seems to match practice quite well
     # Σ_test = [σ_np1 σ_np1_z; σ_np1_z' σ_z]
