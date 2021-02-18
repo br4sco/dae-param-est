@@ -42,56 +42,26 @@ function x_inter(t::Float64, Ts::Float64, A::Array{Float64, 2}, B::Array{Float64
     k_n = n
     k_np2 = n+1
 
-
-    # np1 = n+1, np2 = n + 2
-    μ_n = (AdTs^(n-1))*x0
-    μ_np1   = Adδ*μ_n
-    μ_np2 = AdTs_δ*μ_np1
-    σ_n = zeros(Float64, nx, nx)
-    BdBdT = (BdTs*(BdTs'))
-    for j=0:1:n-1
-        Adj = (AdTs^j)
-        σ_n += Adj*(BdBdT)*(Adj')
-    end
-    σ_np1 = Adδ*σ_n*(Adδ') + Bdδ*(Bdδ')
-    σ_np2 = AdTs_δ*σ_np1*(AdTs_δ') + BdTs_δ*(BdTs_δ')
-    σ_np2_np1 = AdTs_δ*σ_np1
-    σ_np2_n = AdTs_δ*Adδ*σ_n
-    σ_np1_n   = Adδ*σ_n
-
-    σ_np1_z = [σ_np2_np1' σ_np1_n]
-    σ_z   = [σ_np2 σ_np2_n; σ_np2_n' σ_n]
-    μ_z   = [μ_np2; μ_n]
+    σ_Ts = BdTs*(BdTs')
+    σ_δ = (Bdδ*(Bdδ'))
+    σ_Ts_δ = AdTs_δ*σ_δ
+    # t_n = n*Ts, t_np1 = n*Ts + δ, t_np2 = (n+1)*Ts
+    # We are thus sampling x(t_np1)
     if n > 0
-        z = [x[k_np2]; x[k_n]]
-        μ = μ_np1 + σ_np1_z*(σ_z\(z-μ_z))
-        Σ = Hermitian(σ_np1 - σ_np1_z*(σ_z\(σ_np1_z')))
+        v_Ts = x[k_np2] - AdTs*x[k_n]
+        μ = Adδ*x[k_n] + (σ_Ts_δ')*(σ_Ts\v_Ts)
     else
-        z = [x[k_np2]; x0]
-        μ = μ_np1 + (σ_np2_np1')*( σ_np2\(x[k_np2] - μ_np2) )
-        Σ = Hermitian(σ_np1 - (σ_np2_np1')*( σ_np2\σ_np2_np1 ))
+        # t_0 = 0, t_1 = δ, t_2 = Ts
+        v_Ts = x[k_np2] - AdTs*x0
+        μ = Adδ*x0 + (σ_Ts_δ')*(σ_Ts\v_Ts)
     end
+    # Hermitian()-call might not be necessary, but it probably depends on the
+    # model, so I leave it in to ensure that cholesky decomposition will work
+    Σ = Hermitian(σ_δ - (σ_Ts_δ')*(σ_Ts\(σ_Ts_δ)))
     CΣ   = cholesky(Σ)
     Σr   = CΣ.L
 
-    # DEBUG Not yet fully implemented alternative approach
-    # σ_Ts = BdTs*(BdTs')
-    # σ_δ_Ts = AdTs_δ*(Bdδ*(Bdδ'))
-    # # t_n = n*Ts, t_np1 = n*Ts + δ, t_np2 = (n+1)*Ts
-    # # We are thus sampling x(t_np1)
-    # if n > 0
-    #     v_Ts = x[n] - AdTs*x[n-1]         # WHY THIS AND NOT +1 ON BOTH?!?!?!??!
-    #     μ = Adδ*x[n-1] + σ_δ_Ts*(σ_Ts\v_Ts)
-    # else
-    #     # t_0 = 0, t_1 = δ, t_2 = Ts
-    #     v_Ts = x[1] - AdTs*x0
-    #     μ = Adδ*x0 + σ_δ_Ts*(σ_Ts\v_Ts)
-    # end
-    # Σ = σ_δ_Ts*(σ_Ts\(σ_δ_Ts'))
-    # CΣ   = cholesky(Σ)
-    # Σr   = CΣ.L
-
-    # # DEBUG Nice, theory seems to match practice quite well
+    # # DEBUG OUTDATED Nice, theory seems to match practice quite well.
     # Σ_test = [σ_np1 σ_np1_z; σ_np1_z' σ_z]
     # println(Σ_test)
 

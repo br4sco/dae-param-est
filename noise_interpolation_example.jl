@@ -44,5 +44,4 @@ end
 
 # to plot w you can write
 plot(t0:0.01:N*Ts, w)
-# w(0.172)
-# w(0.072)
+# savefig("./plots.png")
