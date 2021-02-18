@@ -3,9 +3,9 @@ import Random
 include("noise_interpolation.jl")
 Random.seed!(1234)
 
-const A = [-1. 0.; 0. -2.]
-const B = [0.3 0.; 0. 0.5]
-# const B = reshape([0.5; 0.0], (2,1))
+const A = [0 -(4^2);
+      1 -(2*4*0.1);];
+const B = reshape([0.5; 0.0], (2,1))
 const C = [1 1]
 # Mohamed seems to have used this model, though cholesky decomposition fails then
 # const A = [0 -16; 1 -0.8]
@@ -44,4 +44,5 @@ end
 
 # to plot w you can write
 plot(t0:0.01:N*Ts, w)
+# w(0.172)
 # savefig("./plots.png")

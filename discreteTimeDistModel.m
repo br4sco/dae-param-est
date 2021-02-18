@@ -89,7 +89,7 @@ F       = [-Aw             Bw*Bw';
             zeros(size(Aw))   Aw';]*(t-prev_xw.t);
 expF    = expm(F);  % F is to be partitioned into n time n 4 blocks
 Awd     = expF(length(Aw)+1:end,length(Aw)+1:end)';  % the transpose of the lower right block
-Sigma_w = Awd* expF(1:length(Aw),length(Aw)+1:end); % cov matrix of discrete-time nosie
+Sigma_w = Awd* expF(1:length(Aw),length(Aw)+1:end); % cov matrix of discrete-time noise
 %       = Awd* upper right block of expF         
 Bwd     = chol(Sigma_w,'lower');
 

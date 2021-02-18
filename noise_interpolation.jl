@@ -19,17 +19,22 @@ function x_inter(t::Float64, Ts::Float64, A::Array{Float64, 2}, B::Array{Float64
         return x[n+1]
     end
 
-    Mexp    = [A B*(B'); zeros(size(A)) -A']
+    Mexp    = [-A B*(B'); zeros(size(A)) A']
     MTs     = exp(Mexp*Ts)      # TODO: This really shouldn't be computed in real time
     Mδ      = exp(Mexp*δ)
     MTs_δ   = exp(Mexp*(Ts-δ))
-    AdTs    = MTs[1:nx, 1:nx]
-    Adδ     = Mδ[1:nx, 1:nx]
-    AdTs_δ  = MTs_δ[1:nx, 1:nx]
-    Bd2Ts    = MTs[1:nx, nx+1:end]*AdTs
-    Bd2δ    = Mδ[1:nx, nx+1:end]*Adδ
-    Bd2Ts_δ = MTs_δ[1:nx, nx+1:end]*AdTs_δ
-    BdTs     = Bd2Ts
+    # AdTs    = MTs[1:nx, 1:nx]
+    # Adδ     = Mδ[1:nx, 1:nx]
+    # AdTs_δ  = MTs_δ[1:nx, 1:nx]
+    # Bd2Ts    = MTs[1:nx, nx+1:end]*AdTs
+    # Bd2δ    = Mδ[1:nx, nx+1:end]*Adδ
+    # Bd2Ts_δ = MTs_δ[1:nx, nx+1:end]*AdTs_δ
+    AdTs    = MTs[nx+1:end, nx+1:end]'
+    Adδ     = Mδ[nx+1:end, nx+1:end]'
+    AdTs_δ  = MTs_δ[nx+1:end, nx+1:end]'
+    Bd2Ts   = Hermitian(AdTs*MTs[1:nx, nx+1:end])
+    Bd2δ    = Hermitian(Adδ*Mδ[1:nx, nx+1:end])
+    Bd2Ts_δ = Hermitian(AdTs_δ*MTs_δ[1:nx, nx+1:end])
     CTs     = cholesky(Bd2Ts)
     Cδ      = cholesky(Bd2δ)        # Might need to wrap matrices in Hermitian()
     CTs_δ   = cholesky(Bd2Ts_δ)

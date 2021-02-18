@@ -5,8 +5,9 @@
 
 rng(123);
 
-A = [-1 0; 0 -2];
-B = [0.3 0; 0 0.5];
+A = [0 -(4^2);    
+      1 -(2*4*0.1);];
+B = [0.5; 0.0];
 C = eye(2);         % So that we get state as output
 
 t0 = 0;            % Initial time of noise model simulation
@@ -18,10 +19,16 @@ n = size(A, 1);
 Mexp  = [A B*(B'); zeros(size(A)) -A'];
 MTs   = expm(Mexp*Ts);
 Ad  = MTs(1:n, 1:n);
-Bd2Ts = MTs(1:n, n+1:end)*Ad;
+Bd2Ts = MTs(1:n, n+1:end)*(Ad');
 Bd    = chol(Bd2Ts);        % Might need to wrap matrices in Hermitian()
 a = norm(Ad)^2;
 b = norm(Bd)^2;
+% MTs   = expm(Mexp*Ts);
+% Ad  = MTs(n+1:end, n+1:end)';
+% Bd2Ts = Ad*MTs(1:n, n+1:end);
+% Bd    = chol(Bd2Ts);        % Might need to wrap matrices in Hermitian()
+% a = norm(Ad)^2;
+% b = norm(Bd)^2;
 
 xM = nan(N+1, 2*M);
 t = t0:Ts:t0+N*Ts;
