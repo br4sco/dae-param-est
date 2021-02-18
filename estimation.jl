@@ -1,4 +1,5 @@
 include("spectral_mc.jl")
+include("noise_interpolation.jl")
 include("simulation.jl")
 
 using ProgressMeter
@@ -26,22 +27,18 @@ end
 const Us = [0; rand(10)]        # Fix randomness of input function
 
 # Returns a function y(θ), the observations given θ averaged over the M noise
-# realizations in ZS, on the time interval given by tp. The function
-# mk_mk_model returns a function that constructs the model of interest given
-# θ. Simulations are run in parallel, start julia as `Julia --threads n` where
-# n is the number of threads you wish to use.
-function mk_yhatM(mk_mk_model::Function,
-                 tp::TimeParams,
-                 ZS::Array{Float64, 2})::Function
-
+# realizations, on the time interval given by tp. The function mk_mk_model
+# returns a function that constructs the model of interest given θ. Simulations
+# are run in parallel, start julia as `Julia --threads n` where n is the number
+# of threads you wish to use.
+function mk_yhatM(mk_mk_model::Function, tp::TimeParams, M::Int)::Function
   let N = tp.N
     function f(θ::Array{Float64, 1})::Array{Float64, 1}
-      M = size(ZS, 2)
       yhats = [Threads.Atomic{Float64}(0.0) for i in 1:(N+1)]
       @info "θ set to $(θ)"
       p = Progress(M, 1, "Running $(M) simulations...", 50)
       @inbounds Threads.@threads for m = 1:M
-        mk_model = mk_mk_model(ZS[:, m])
+        mk_model = mk_mk_model(m)
         y = simulate1(mk_model, tp, θ)
         for k = 1:(N+1)
           Threads.atomic_add!(yhats[k], y[k])
@@ -62,34 +59,46 @@ function mk_yhat1(mk_model::Function, tp::TimeParams)
 end
 
 function problem1(wscale, M)
-  θ = [1.]
-  θ0 = [0.1]
-  σ = 0.01
+  let
+    θ = [1.]
+    θ0 = [0.1]
+    σ = 0.01
 
-  N = 100
-  T0 = 0.0
-  ΔT = 0.05
-  tp = TimeParams(T0, ΔT, N)
+    N = 100
+    T0 = 0.0
+    ΔT = 0.05
+    tp = TimeParams(T0, ΔT, N)
 
-  function u(t)
-    interpolation(tp, Us)(t)
+    let
+      u = t -> interpolation(tp, Us)(t)
+
+      θ = [1.]
+      θ0 = [0.1]
+      σ = 0.01
+
+      N = 100
+      T0 = 0.0
+      ΔT = 0.05
+      tp = TimeParams(T0, ΔT, N)
+
+      nm = spectral_mc_noise_model_1(M)
+      w = (m, t) -> wscale * nm(m, t)
+
+      nm_true = spectral_mc_noise_model_1(1)
+      w_true = t -> wscale * nm_true(1, t)
+
+      model = m -> pendulumK(u, t -> w(m, t), T0)
+      model_true = pendulumK(u, w_true, T0)
+
+      ys = simulate1(model_true, tp, θ)
+      ys += σ*rand(Normal(), length(ys))
+
+      yhat_baseline = mk_yhat1(pendulumK(u, t -> 0.0, T0), tp)
+      yhat = mk_yhatM(model, tp, M)
+
+      EstProblem(yhat, yhat_baseline, tp, u, w_true, ys, θ, θ0)
+    end
   end
-
-  noise = spectral_mc_noise_model_1()
-
-  w = (z, t) -> wscale * noise.w(z, t)
-  mk_mk_model = z -> pendulumK(u, t -> w(z, t), T0)
-
-  z = reshape(noise.mk_ZS(1), :)
-  ys = simulate1(mk_mk_model(z), tp, θ)
-  ys += σ*rand(Normal(), length(ys))
-
-  yhat_baseline = mk_yhat1(pendulumK(u, t -> 0.0, T0), tp)
-
-  ZS = noise.mk_ZS(M)
-  yhat = mk_yhatM(mk_mk_model, tp, ZS)
-
-  EstProblem(yhat, yhat_baseline, tp, u, t -> w(z, t), ys, θ, θ0)
 end
 
 function run_est(p, yhat, label)
@@ -129,4 +138,19 @@ function experiment(problem, M, wscale, n, name)
   @info "result: $(map(x->x["thetahat"], filter(x->x["name"] != "baseline", runs)))"
 
   return runs
+end
+
+function baseline_experiment(problem, wscales, n)
+  tmp = []
+  for wscale in wscales
+    runs = []
+    for i = 1:n
+      @info "run $(i) of $(n)"
+      p = problem(wscale, 1)
+      push!(runs, run_est(p, p.yhat_baseline, "baseline"))
+    end
+    push!(tmp, runs)
+  end
+  save("baseline.jld", "wscales", tmp)
+  return tmp
 end
