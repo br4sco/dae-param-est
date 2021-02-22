@@ -42,7 +42,7 @@ x0 = zeros(length(Aw),1);  % the initial value of w is the second entry of x0
 
 % generate random variables. These are to be fixed during the simulation          
 % we assume here that scalar w(t)
-z = randn(K,1);
+z = randn(length(Aw),K);
 
 % ======================================================================= %
 
@@ -68,7 +68,7 @@ end
 % generate a hypothetical trajectory
 w = [x0(2); zeros(length(time_points)-1,1)];
 for idx = 2:length(time_points)
-    next_xw =  dist_model(Aw,Bw, prev_xw, time_points(idx), z(prev_xw.k));
+    next_xw =  dist_model(Aw,Bw, prev_xw, time_points(idx), z(:,prev_xw.k));
     w(idx) = next_xw.x(2);
     prev_xw = next_xw;
 end
