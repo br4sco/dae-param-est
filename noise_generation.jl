@@ -38,6 +38,10 @@ function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64)
     #   ...
     #  z[N+1,1,1], ...      ...      ...    ..., z[N+1,M,nx]]
     z_uniform = randn(Float64, N+1, nx*M)
+    # TODO: Saving z_inter seems to often (but not always) break for
+    # 4th degree systems, worth figuring out why... EDIT: Seems simply that
+    # it happends if DataFrames become too large
+
     # Let z[i,m,p,j] be the j:th element of the p:th sample in the i:th
     # inter-sample interval of the m:th realization of the process z.
     # Then z_inter should be interpreted as on the form
@@ -45,19 +49,18 @@ function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64)
     #   ...
     # [z[N+1,1,1,1], ...     ...      ...      ...      ...      ...       ...    z[N+1,M,P,nx]]
     z_inter   = randn(Float64, N+1, nx*M*P)
-    # CSV.write("z_uniform.csv", DataFrame(z_uniform), writeheader=false)
-    # CSV.write("z_inter.csv", DataFrame(z_inter), writeheader=false)
+
     CSV.write("z_uniform.csv", DataFrame(z_uniform))
-    CSV.write("z_inter.csv", DataFrame(z_inter))
+    # CSV.write("z_inter.csv", DataFrame(z_inter))
     CSV.write("metadata.csv", DataFrame([N M P nx]))
 end
 
 function load_data(N::Int64, M::Int64, P::Int64, nx::Int64)
     z_uni_mat = CSV.read("z_uniform.csv", DataFrame)
-    z_inter_mat = CSV.read("z_inter.csv", DataFrame)
+    # z_inter_mat = CSV.read("z_inter.csv", DataFrame)
     z_uniform = [ z_uni_mat[i,j] for i=1:size(z_uni_mat)[1], j=1:size(z_uni_mat)[2]]
-    z_intersample = [ z_inter_mat[i,j] for i=1:size(z_inter_mat)[1], j=1:size(z_inter_mat)[2]]
-    return z_uniform, z_intersample
+    # z_intersample = [ z_inter_mat[i,j] for i=1:size(z_inter_mat)[1], j=1:size(z_inter_mat)[2]]
+    return z_uniform#, z_intersample
 
     # # IGNORE EVERYTHING BELOW THIS COMMENT!
     # z_uniform = fill(fill(NaN, (nx,1)), (N,M))
@@ -81,11 +84,16 @@ function load_data(N::Int64, M::Int64, P::Int64, nx::Int64)
 end
 
 function load_metadata()
-    metadata_frame = CSV.read("metadata.csv", DataFrame)
-    return [metadata_frame[1,i] for i = 1:size(metadata_frame)[2]]
+    try
+        metadata_frame = CSV.read("metadata.csv", DataFrame)
+        return [metadata_frame[1,i] for i = 1:size(metadata_frame)[2]]
+    catch
+        # This happens if e.g. no metadata file exists yet
+        return nothing
+    end
 end
 
-function simulate_noise_process(mdl::NoiseModel, data::Array{Float64,2})::Array{Array{Float64, 2}}
+function simulate_noise_process(mdl::NoiseModel, data::Array{Float64,2})::Array{Array{Float64, 1}, 2}
     (Np1, Mnx) = size(data)
     N = Np1 - 1     # We have noise for times 0 to N, so a total of N+1 samples
     nx = size(mdl.Ad)[1]
@@ -93,7 +101,7 @@ function simulate_noise_process(mdl::NoiseModel, data::Array{Float64,2})::Array{
     sys = ss(mdl.Ad, mdl.Bd, mdl.Cd, 0.0, mdl.Ts)
     t = 0:Ts:N*Ts
     # Allocating space for noise process
-    x_process = [ fill(NaN, (nx,1)) for i=1:N, m=1:M]
+    x_process = [ fill(NaN, (nx,)) for i=1:N, m=1:M]
     for m=1:M
         y, t, x = lsim(sys, data[:, (1+(m-1)*nx):m*nx], t, x0=mdl.x0)
         for i=1:N
