@@ -1,11 +1,11 @@
-% This file generates a matrix with N samples of the realization of 
+% This file generates a matrix with N samples of the realization of
 % M 2-dimensional discrete-time white-noise processes.
 % It's just a temporary solution, since it's probably better to implement
 % disturbance generation in Julia in the end
 
 rng(123);
 
-A = [0 -(4^2);    
+A = [0 -(4^2);
       1 -(2*4*0.1);];
 B = [0.5; 0.0];
 C = eye(2);         % So that we get state as output
@@ -13,7 +13,7 @@ C = eye(2);         % So that we get state as output
 t0 = 0;            % Initial time of noise model simulation
 Ts = 0.05;         % Sampling frequency of noise model
 N  = 100;          % Number of simulated time steps of noise model
-M = 100;             % Number of noise realizations
+M = 5000;             % Number of noise realizations
 
 n = size(A, 1);
 Mexp  = [A B*(B'); zeros(size(A)) -A'];
@@ -50,8 +50,8 @@ writematrix(xM, 'x_mat.csv');
 
 k = 20; % We only look at the k:th and k+1:th samples
 
-% Expected value of x_{k+1} given x_k should be Ad*x_k, so 
-% x_{k+1}-Ad*x_{k} should be zero-mean for all realizations. If we average 
+% Expected value of x_{k+1} given x_k should be Ad*x_k, so
+% x_{k+1}-Ad*x_{k} should be zero-mean for all realizations. If we average
 % over M realizations, we should get a value close to 0. Mean should
 % actually be (Ad^k+1)*x0 if we are not given x_k, but we use conditional
 % mean here.
@@ -82,6 +82,3 @@ end
 
 sk   = cov(xk');
 skp1 = cov(xkp1');
-
-
-
