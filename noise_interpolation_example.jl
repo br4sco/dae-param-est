@@ -6,11 +6,7 @@ Random.seed!(1234)
 const A = [0 -(4^2);
       1 -(2*4*0.1);];
 const B = reshape([0.5; 0.0], (2,1))
-const C = [1 1]
-# Mohamed seems to have used this model, though cholesky decomposition fails then
-# const A = [0 -16; 1 -0.8]
-# const B = reshape([0.5; 0.0], (2,1))
-# const C = [0 1]
+const C = [0 1]
 
 x_dat = CSV.read("x_mat.csv", DataFrame)
 # x[k] contains the state vector from time t0 + Ts*k
@@ -21,7 +17,7 @@ const Ts = 0.05             # Sampling frequency of noise model
 const N  = size(x_dat)[1]   # Number of simulated time steps of noise model
 
 function w(t::Float64)
-  return (C*x_inter(t, Ts, A, B, x))[1]
+    return (C*x_inter(t, Ts, A, B, x))[1]
 end
 
 δ = 0.025
