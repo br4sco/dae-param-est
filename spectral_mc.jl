@@ -1,6 +1,7 @@
 using ControlSystems
 using Plots
 using Random
+using Distributions
 using DelimitedFiles
 include("noise_interpolation.jl")
 
@@ -30,9 +31,39 @@ function mk_spectral_mc_noise_model(Gw, ωmax, dω, M)
   end
 end
 
-function mk_discrete_time_dist_model(Gw, K, M)
-  let ZS = rand(K, M)
-    work()
+function mk_approx_spectral_mc_noise_model(A, B, C, x0, t0, K, M)
+  let
+    nx = size(A, 1)
+    ZS = [rand(Normal(), nx, K) for m in 1:M]
+    G = [-A (B * B'); zeros(size(A)) A']
+
+    function mk_w(m)
+      let
+        prev_x = x0
+        prev_t = t0
+        prev_k = 0
+        zs = ZS[m]
+        function w(t::Float64)::Float64
+          if t == t0
+            return first(C * x0)
+          end
+
+          F = G * (t - prev_t)
+          expF = exp(F)
+          Ad = expF[nx+1:end, nx+1:end]'
+          Σ = Ad * expF[1:nx, nx+1:end]
+          Bd = cholesky(Hermitian(Σ)).L
+          k = prev_k + 1
+          xw = Ad * prev_x + Bd * zs[:, k]
+
+          prev_x = xw
+          prev_t = t
+          prev_k = k
+
+          return first(C * xw)
+        end
+      end
+    end
   end
 end
 
@@ -99,15 +130,39 @@ function exact_noise_interpolation_model_1()
   end
 end
 
-function plot_noise(w, ts, M)
-  p = plot(t -> w(1)(t), ts, legend=false)
-  for m = 2:M
-    plot!(p, t -> w(m)(t), ts)
-  end
-  p
+function approx_spectral_mc_noise_model_1(t0, K, M)
+  f = linear_filter_1()
+  sys = ss(tf(f.a, f.b))
+  A = sys.A
+  B = sys.B
+  C = sys.C
+  x0 = zeros(size(A, 1))
+  mk_approx_spectral_mc_noise_model(A, B, C, x0, t0, K, M)
 end
 
-w2 = exact_noise_interpolation_model_1()
+function approx_spectral_mc_noise_model_3(t0, K, M)
+  A = [0 -(4^2); 1 -(2*4*0.1)]
+  B = [1; 0;]  # replace by Bw = [c; 0;]; where c is the factor tuning the variance of w
+  C  = [0 1]
+  x0 = zeros(size(A, 1))
+  mk_approx_spectral_mc_noise_model(A, B, C, x0, t0, K, M)
+end
+
+
+function plot_noise(w, ts, M)
+  let w1 = w(1)
+    p = plot(t -> w1(t), ts, legend=false)
+    for m = 2:M
+      wm = w(m)
+      plot!(p, wm, ts)
+    end
+    p
+  end
+end
+
+# w2 = exact_noise_interpolation_model_1()
 # w1 = spectral_mc_noise_model_1(10)
+# w3 = approx_spectral_mc_noise_model_3(0.,10000, 100)
 # p1 = plot_noise(w1, 0:0.01:5, 10)
-p2 = plot_noise(w2, 0:0.01:5, 10)
+# p2 = plot_noise(w2, 0:0.01:5, 1)
+# p3 = plot_noise(w3, 0.0:0.01:5, 100)

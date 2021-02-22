@@ -37,8 +37,7 @@ function interpolation(tp::TimeParams, xs::Array{Float64, 1})
 end
 
 # Simple model of a pendulum in Cartesian coordinates on index-1 form
-function pendulum(u::Function, w::Function, T0::Float64)::Function
-  function model(θ::Array{Float64, 1})::Model
+function pendulum(u::Function, w::Function, T0::Float64, θ::Array{Float64, 1})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
       # the residual function
       function f!(out, xp, x, θ, t)
@@ -83,22 +82,14 @@ function pendulum(u::Function, w::Function, T0::Float64)::Function
 
       Model(f!, x0, xp0, dvars, h, plottrace)
     end
-  end
 end
 
-function pendulumK(u, w, T0)
-  let p = pendulum(u, w, T0)
-    θ -> p([1., 1., 1., θ[1]])
-  end
+function pendulumK(u, w, T0, θ)
+  pendulum(u, w, T0, [1., 1., 1., θ[1]])
 end
 
 # simulates once
-function simulate1(mk_model::Function,
-                   tp::TimeParams,
-                   θ::Array{Float64, 1},
-                   doplot=false)
-
-  m = mk_model(θ)
+function simulate1(m::Model, tp::TimeParams, doplot=false)
 
   saveat = time_range(tp)
 
