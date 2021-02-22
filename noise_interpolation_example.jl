@@ -33,7 +33,7 @@ const Ts = 0.05             # Sampling frequency of noise model
 const N  = size(x_dat)[1]   # Number of simulated time steps of noise model
 
 function w(t::Float64)
-  return (C*x_inter(t, Ts, A, B, x))[1]
+    return (C*x_inter(t, Ts, A, B, x))[1]
 end
 
 δ = 0.025

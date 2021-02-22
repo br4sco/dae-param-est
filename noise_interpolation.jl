@@ -1,7 +1,5 @@
 import Random
-
-using LinearAlgebra
-using CSV, DataFrames
+using LinearAlgebra, CSV, DataFrames
 
 function x_inter(t::Float64,
                  Ts::Float64,
