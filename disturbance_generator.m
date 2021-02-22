@@ -5,10 +5,21 @@
 
 rng(123);
 
+% 2-dimensional, pole excess 1
 A = [0 -(4^2);
-      1 -(2*4*0.1);];
-B = [0.5; 0.0];
-C = eye(2);         % So that we get state as output
+  1 -(2*4*0.1);];
+B = [0.5; 0];
+% % 3-dimensional, pole excess 2
+% A = [0 0 -(4^2);
+%            1 0 -(4^2+2*4*0.1);
+%            0 1 -(2*4*0.1+1)]
+% B = [0.5; 0.0; 0.0];
+% % 4-dimensional, pole excess 4
+% A = [0 0 0 -24;
+%            1 0 0 -33;
+%            0 1 0 -19;
+%            0 0 1 -2.8]
+% B = [0.5; 0.0; 0.0; 0.0]
 
 t0 = 0;            % Initial time of noise model simulation
 Ts = 0.05;         % Sampling frequency of noise model
@@ -16,6 +27,7 @@ N  = 100;          % Number of simulated time steps of noise model
 M = 5000;             % Number of noise realizations
 
 n = size(A, 1);
+C = eye(2);         % So that we get state as output
 Mexp  = [A B*(B'); zeros(size(A)) -A'];
 MTs   = expm(Mexp*Ts);
 Ad  = MTs(1:n, 1:n);

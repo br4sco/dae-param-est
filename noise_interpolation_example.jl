@@ -3,15 +3,27 @@ import Random
 include("noise_interpolation.jl")
 Random.seed!(1234)
 
+# 2-dimensional, pole excess 1
 const A = [0 -(4^2);
       1 -(2*4*0.1);];
 const B = reshape([0.5; 0.0], (2,1))
-const C = [1 1]
-# Mohamed seems to have used this model, though cholesky decomposition fails then
-# const A = [0 -16; 1 -0.8]
-# const B = reshape([0.5; 0.0], (2,1))
-# const C = [0 1]
+const C = [0 1]
+# THESE MODELS BELOW ARE CURRENTLY NOT WORKING
+# # 3-dimensional, pole excess 2
+# const A = [0 0 -(4^2);
+#            1 0 -(4^2+2*4*0.1);
+#            0 1 -(2*4*0.1+1)]
+# const B = reshape([0.5; 0.0; 0.0], (3,1))
+# const C = [0 0 1]
+# # 4-dimensional, pole excess 4
+# const A = [0 0 0 -24;
+#            1 0 0 -33;
+#            0 1 0 -19;
+#            0 0 1 -2.8]
+# const B = reshape([0.5; 0.0; 0.0; 0.0], (4,1))
+# const C = [0 0 0 1]
 
+nx = size(A)[1]
 x_dat = CSV.read("x_mat.csv", DataFrame)
 # x[k] contains the state vector from time t0 + Ts*k
 x  = [ [x_dat[row, 1]; x_dat[row, 2]] for row in 1:1:size(x_dat)[1]]
