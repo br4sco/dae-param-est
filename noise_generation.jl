@@ -24,7 +24,7 @@ function discretize_ct_model(A, B, C, Ts, x0)::NoiseModel
     return NoiseModel(AdTs, BdTs, C, x0, Ts)
 end
 
-function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64)
+function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64, save_data::Bool=true)
     # N: Number of samples of uniformly sampled noise process after time 0
     # To generate noise also at time 0, we need to generate N+1 noise samples
     # M: Number of different realizations of the noise process
@@ -49,10 +49,12 @@ function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64)
     #   ...
     # [z[N+1,1,1,1], ...     ...      ...      ...      ...      ...       ...    z[N+1,M,P,nx]]
     z_inter   = randn(Float64, N+1, nx*M*P)
-
-    CSV.write("z_uniform.csv", DataFrame(z_uniform))
-    # CSV.write("z_inter.csv", DataFrame(z_inter))
-    CSV.write("metadata.csv", DataFrame([N M P nx]))
+    if save_data
+        CSV.write("z_uniform.csv", DataFrame(z_uniform))
+        # CSV.write("z_inter.csv", DataFrame(z_inter))
+        CSV.write("metadata.csv", DataFrame([N M P nx]))
+    end
+    return z_uniform, z_inter
 end
 
 function load_data(N::Int64, M::Int64, P::Int64, nx::Int64)

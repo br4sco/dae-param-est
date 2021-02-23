@@ -35,6 +35,7 @@ const C = [0 1]
 
 # NEW DATA GENERATION
 const Ts = 0.05             # Sampling frequency of noise model
+save_data = false
 N = 100     # Noise samples, excluding the initial one, x_e(0)
 M = 10000
 P = 2       # You can ignore this one for now, just keep it at 2
@@ -44,10 +45,11 @@ metadata = load_metadata()
 # If meta-paramters have changed, re-generate noise
 if metadata != [N, M, P, nx]
     # Generates white noise realizations, NOT realizations of filtered white noise
-    generate_noise(N, M, P, nx)
+    data_uniform, irrelevant_var = generate_noise(N, M, P, nx, save_data)
+else
+    # data_uniform, data_inter = load_data(N,M,P,nx)
+    data_uniform = load_data(N,M,P,nx)
 end
-# data_uniform, data_inter = load_data(N,M,P,nx)
-data_uniform = load_data(N,M,P,nx)
 # Computes all M realizations of filtered white noise
 x_mat = simulate_noise_process(noise_model, data_uniform)
 
