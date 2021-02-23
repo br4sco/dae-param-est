@@ -1,19 +1,16 @@
 import Random
-
-using LinearAlgebra
-using CSV, DataFrames
+using LinearAlgebra, CSV, DataFrames
 
 function x_inter(t::Float64,
                  Ts::Float64,
                  A::Array{Float64, 2},
                  B::Array{Float64, 2},
                  x::Array{Array{Float64, 1}, 1},
-                 ϵ::Float64=10e-6,
-                 x0::Array{Float64, 1}=[0.;0.],
-                 t0=0.0)
+                 x0::Array{Float64, 1},
+                 ϵ::Float64=10e-12)
 
     n = Int(t÷Ts)           # t lies between t0 + k*Ts and t0 + (k+1)*Ts
-    δ = t - (t0 + n*Ts)
+    δ = t - n*Ts
     nx = size(A)[1]
 
     # Values of δ smaller than ϵ are treated as 0
