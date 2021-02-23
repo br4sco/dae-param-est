@@ -15,6 +15,7 @@ struct NoiseModel
 end
 
 function discretize_ct_model(A, B, C, Ts, x0)::NoiseModel
+    nx = size(A, 1)
     Mexp    = [-A B*(B'); zeros(size(A)) A']
     MTs     = exp(Mexp*Ts)
     AdTs    = MTs[nx+1:end, nx+1:end]'
@@ -97,6 +98,7 @@ end
 
 function simulate_noise_process(mdl::NoiseModel, data::Array{Float64,2})::Array{Array{Float64, 1}, 2}
     (Np1, Mnx) = size(data)
+    Ts = mdl.Ts
     N = Np1 - 1     # We have noise for times 0 to N, so a total of N+1 samples
     nx = size(mdl.Ad)[1]
     M = Int(Mnx÷nx)
