@@ -9,7 +9,7 @@ include("simulation.jl")
 seed = 1234
 Random.seed!(seed)
 
-M = 100                         # Numer of noise realizations
+M = 10                          # numer of noise realizations
 N = 100                         # Number of steps
 Ts = 0.05                       # Stepsize
 T = N*Ts
@@ -99,7 +99,7 @@ function est()
   cs_baseline, cs
 end
 
-cs_baseline, cs = est()
+# cs_baseline, cs = est()
 
 data = DataFrame(θ = θs, cost = cs, cost_baseline = cs_b)
 meta_data = DataFrame(
@@ -114,5 +114,5 @@ meta_data = DataFrame(
   seed = seed
 )
 
-CSV.write("${filename}_data.csv", data)
-CSV.write("${filename}_meta_data.csv", meta_data)
+CSV.write("$(filename)_data.csv", data)
+CSV.write("$(filename)_meta_data.csv", meta_data)
