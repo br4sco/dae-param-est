@@ -9,7 +9,7 @@ include("simulation.jl")
 seed = 1234
 Random.seed!(seed)
 
-M = 10                          # numer of noise realizations
+M = 1000                        # numer of noise realizations
 N = 100                         # Number of steps
 Ts = 0.05                       # Stepsize
 T = N*Ts
@@ -101,7 +101,7 @@ end
 
 # cs_baseline, cs = est()
 
-data = DataFrame(θ = θs, cost = cs, cost_baseline = cs_b)
+data = DataFrame(θ = θs, cost = cs, cost_baseline = cs_baseline)
 meta_data = DataFrame(
   θ0 = θ0,
   N = N,
