@@ -1,5 +1,3 @@
-using LaTeXStrings
-using JLD
 using Distributed
 
 include("helpers.jl")

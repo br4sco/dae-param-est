@@ -17,6 +17,13 @@ struct LinearFilter
   b::Array{Float64}
 end
 
+mutable struct XW
+  x::Array{Float64, 1}
+  next_x::Array{Float64, 1}
+  t::Float64
+  k::Int
+end
+
 function spectral_density(Gw)
   function sd(ω::Float64)::Float64
     Gw(ω*im) * Gw(-ω*im) |> real |> first
@@ -40,25 +47,22 @@ function mk_spectral_mc_noise_model(Gw, ωmax, dω, M, scale)
   end
 end
 
-function mk_discrete_unconditioned_noise_model(A, B, C, x0, K, M, ϵ=10e-6)
+function mk_discrete_unconditioned_noise_model(A, B, C, K, M, scale, ϵ=10e-25)
   let
     nx = size(A, 1)
     ZS = [rand(Normal(), nx, K) for m in 1:M]
     G = [-A (B * B'); zeros(size(A)) A']
 
-    function mk_w(m)
+    function mk_w(xw, m)
       let
-        prev_x = x0
-        prev_t = 0
-        prev_k = 0
         zs = ZS[m]
         function w(t::Float64)::Float64
 
-          δ = t - prev_t
+          δ = t - xw.t
 
           if δ < ϵ
             @info "δ = $(δ) < ϵ at t = $(t)"
-            return first(C * x0)
+            return scale * first(C * xw.x)
           end
 
           F = G * δ
@@ -66,14 +70,11 @@ function mk_discrete_unconditioned_noise_model(A, B, C, x0, K, M, ϵ=10e-6)
           Ad = expF[nx+1:end, nx+1:end]'
           Σ = Ad * expF[1:nx, nx+1:end]
           Bd = cholesky(Hermitian(Σ)).L
-          k = prev_k + 1
-          xw = Ad * prev_x + Bd * zs[:, k]
+          x = Ad * xw.x + Bd * zs[:, xw.k]
 
-          prev_x = xw
-          prev_t = t
-          prev_k = k
+          xw.next_x = x
 
-          return first(C * xw)
+          return scale * first(C * x)
         end
       end
     end
@@ -128,12 +129,6 @@ function mk_spectral_mc_noise_model_1(ωmax, dω, M, scale)
   mk_spectral_mc_noise_model(Gw, ωmax, dω, M, scale)
 end
 
-function spectral_mc_noise_model_1(p::NoiseModelParams)
-  ωmax = 50.0
-  dω = 0.01
-  mk_spectral_mc_noise_model_1(ωmax, dω, p.M, 1.0)
-end
-
 function exact_noise_interpolation_model_1(p::NoiseModelParams)
   let
     f = linear_filter_1()
@@ -146,13 +141,14 @@ function exact_noise_interpolation_model_1(p::NoiseModelParams)
   end
 end
 
-function discrete_time_noise_model_1(p::NoiseModelParams)
+function discrete_time_noise_model_1(K, M, scale)
   f = linear_filter_1()
   sys = ss(tf(f.a, f.b))
   A = sys.A
   B = sys.B
   C = sys.C
   x0 = zeros(size(A, 1))
-  K = p.N * 1000
-  mk_discrete_unconditioned_noise_model(A, B, C, x0, K, p.M)
+  mk_discrete_unconditioned_noise_model(A, B, C, K, M, scale)
 end
+
+mk_w = discrete_time_noise_model_1(100000, 10)

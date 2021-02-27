@@ -7,6 +7,8 @@ using DelimitedFiles
 using Plots
 using ProgressMeter
 
+include("noise_model.jl")
+
 struct Model
   f!::Function                  # residual function
   x0::Array{Float64, 1}         # initial values of x
@@ -122,12 +124,9 @@ function simulation_plots(T, sols, vars; kwargs...)
   ps
 end
 
-function pendulumK(u, w, k, θ)
-  let θs = [1., 1., 1., 1.]
-    θs[k] = θ
-    pendulum(u, w, θs)
-  end
-end
+const abstol = 1e-7
+const reltol = 1e-7
+const maxiters = Int(1e10)
 
 function simulate(m::Model, N::Int, Ts::Float64)
   let
@@ -137,9 +136,46 @@ function simulate(m::Model, N::Int, Ts::Float64)
     prob = DAEProblem(
       m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
 
-    solve(prob, IDA(), abstol = 1e-9, reltol = 1e-9, maxiters = Int(1e10), saveat = saveat)
+    solve(
+      prob,
+      IDA(),
+      abstol = abstol,
+      reltol = reltol,
+      maxiters = maxiters,
+      saveat = saveat
+    )
   end
 end
+
+function simulate_xw(xw::XW, m::Model, N::Int, Ts::Float64)
+  T = N * Ts
+  saveat = 0:Ts:T
+
+  prob = DAEProblem(
+    m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
+
+  integrator = init(
+    prob,
+    IDA(),
+    abstol = abstol,
+    reltol = reltol,
+    maxiters = maxiters,
+    saveat = saveat
+  )
+
+  for i in integrator
+    xw.x = xw.next_x
+    xw.t = integrator.t
+    xw.k += 1
+  end
+
+  integrator.sol
+end
+
+# mk_w = discrete_time_noise_model_1(10000000, 10, 10.0)
+# xw = XW(zeros(2), zeros(2), 0.0, 1)
+# m = pendulum(pi/4, t -> 0., mk_w(xw, 1), [0.3, 3.0, 9.81, 0.1])
+# sol = simulate_xw(xw, m, 100, 0.05)
 
 function simulate_h(m::Model, N::Int, Ts::Float64, h::Function)
   sol = simulate(m, N, Ts)
