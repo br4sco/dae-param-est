@@ -7,7 +7,7 @@ function x_inter(t::Float64,
                  B::Array{Float64, 2},
                  x::Array{Array{Float64, 1}, 1},
                  x0::Array{Float64, 1},
-                 ϵ::Float64=10e-12)
+                 ϵ::Float64=10e-25)
 
     n = Int(t÷Ts)           # t lies between t0 + k*Ts and t0 + (k+1)*Ts
     δ = t - n*Ts
@@ -15,6 +15,7 @@ function x_inter(t::Float64,
 
     # Values of δ smaller than ϵ are treated as 0
     if δ < ϵ
+        @info "δ = $(δ) < ϵ at t = $(t)"
         if n == 0
             return x0
         else
