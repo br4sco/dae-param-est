@@ -7,7 +7,7 @@ include("simulation.jl")
 seed = 1234
 Random.seed!(seed)
 
-M = 1000                        # numer of noise realizations
+M = 5000                        # numer of noise realizations
 N = 100                         # Number of steps
 Ts = 0.05                       # Stepsize
 T = N*Ts
@@ -16,7 +16,7 @@ ts = 0:Ts:T
 filename = "run_$(M)_$(N)"
 
 u_scale = 0.0
-w_scale = 2.0
+w_scale = 6.0
 
 σ = 0.02                        # observation noise variance
 output_state = 3                # y-position
@@ -27,6 +27,7 @@ uu = mk_spectral_mc_noise_model_1(10.0, 0.05, 1, u_scale)(1)
 u = t -> u_scale * uu(t)
 
 mk_w = mk_spectral_mc_noise_model_1(50.0, 0.01, M + 1, w_scale)
+# mk_w = exact_noise_interpolation_model_1(N, Ts, M + 1, w_scale)
 
 m = 0.3                         # [kg]
 L = 6.25                        # [m], gives period T = 5s (T ≅ 2√L) not
@@ -97,7 +98,7 @@ function est()
   cs_baseline, cs
 end
 
-# cs_baseline, cs = est()
+cs_baseline, cs = est()
 
 data = DataFrame(θ = θs, cost = cs, cost_baseline = cs_baseline)
 meta_data = DataFrame(
