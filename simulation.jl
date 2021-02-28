@@ -200,14 +200,17 @@ function simulate_h_m(
 
   M = length(ms)
   Y = hcat([[Threads.Atomic{Float64}(0.0) for i=1:(N+1)] for j=1:M]...)
+  Y = zeros(N+1, M)
   p = Progress(M, 1, "Running $(M) simulations...", 50)
   @inbounds Threads.@threads for m = 1:M
     model = mk_model(ms[m])
     y = simulate_h(model, N, Ts, h)
-    for k = 1:(N+1)
-      Threads.atomic_add!(Y[k, m], y[k])
-    end
+    # for n = 1:(N+1)
+      # Threads.atomic_add!(Y[k, m], y[k])
+    Y[:, m] .+= y
+    # end
     next!(p)
   end
-  map(y -> y[], Y)
+  # map(y -> y[], Y)
+  Y
 end
