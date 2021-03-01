@@ -11,14 +11,14 @@ Random.seed!(seed)
 # === experiment parameters ===
 Ts = 0.05                       # stepsize
 
-M = 100                                  # number of noise realizations
+M = 2000                                 # number of noise realizations
 m_true = 7                               # pick the true system
 ms = filter(m -> m != m_true, 1:(M + 1)) # enumerate the realizations
 
 noise_method_name = "Spectral Monte-Carlo"
 
 u_scale = 0.2                   # input scale
-w_scale = 0.4                   # noise scale
+w_scale = 0.8                   # noise scale
 
 uu = mk_spectral_mc_noise_model_1(10.0, 0.05, 1, u_scale)(1)
 u = t -> u_scale * uu(t)
@@ -91,7 +91,7 @@ function plot_system_at_true_param(N)
                         linecolor=:gray, linealpha=0.5)
 
   map((p, v) ->
-      plot!(p, sol_true, tspan=(0, T), vars=[v], label="true system", linecolor=:red),
+      plot!(p, sol_true, tspan=(0, T), vars=[v], linecolor=:red),
       ps, vars)
 
   plot(ps...)
@@ -176,7 +176,8 @@ function run(id, N)
     w_scale = w_scale,
     noise_method_name = noise_method_name,
     seed = seed,
-    m_true = m_true
+    m_true = m_true,
+    output_state = output_state
   )
 
   CSV.write("$(filename)_data.csv", data)
