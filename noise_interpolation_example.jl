@@ -2,6 +2,7 @@ using Plots, CSV, DataFrames
 import Random
 include("noise_interpolation.jl")
 include("noise_generation.jl")
+include("simulation.jl")
 Random.seed!(1234)
 
 # 2-dimensional, pole excess 1
@@ -33,11 +34,18 @@ const C = [0 1]
 # const Ts = 0.05             # Sampling frequency of noise model
 # const N  = size(x_dat)[1]   # Number of simulated time steps of noise model
 
+
+Ts_model = 0.05
+N_model = 100
+T = N_model * Ts_model
+
 # NEW DATA GENERATION
-const Ts = 0.05             # Sampling frequency of noise model
+Ts = 1e-6                       # Sampling frequency of noise model
 save_data = false
-N = 100     # Noise samples, excluding the initial one, x_e(0)
-M = 10000
+N = Int(ceil(T / Ts))        # Noise samples, excluding the initial one, x_e(0)
+@info "N = $(N)"
+M = 1
+
 P = 2       # You can ignore this one for now, just keep it at 2
 nx = size(A)[1]
 noise_model = discretize_ct_model(A, B, C, Ts, zeros(nx, ))
@@ -59,8 +67,11 @@ function w(t::Float64)
     return (C*x_inter(t, Ts, A, B, x_mat[:, 1], noise_model.x0))[1]
 end
 
-δ = 0.025
+model = pendulum(pi / 4, t -> 0., t -> 0., [0.3, 6.25, 9.81, 0.01])
+sol = simulate(model, N_model, Ts_model)
+@info "min(h) = $(min(diff(sol.t)...))"
+plot(sol, vars = [1, 3, 8], layout = (3, 1))
 
-plot(0:0.01:N*Ts, w)
+# plot(0:δ:N*δ, w)
 # w(0.172)
 # savefig("./plots.png")
