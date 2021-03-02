@@ -11,7 +11,7 @@ Random.seed!(seed)
 # === experiment parameters ===
 Ts = 0.05                       # stepsize
 
-M = 2000                                 # number of noise realizations
+M = 100                                 # number of noise realizations
 m_true = 7                               # pick the true system
 ms = filter(m -> m != m_true, 1:(M + 1)) # enumerate the realizations
 
@@ -21,10 +21,12 @@ u_scale = 0.2                   # input scale
 w_scale = 0.8                   # noise scale
 
 uu = mk_spectral_mc_noise_model_1(10.0, 0.05, 1, u_scale)(1)
-u = t -> u_scale * uu(t)
+function u(t)
+  u_scale * uu(t)
+end
 
 mk_w = mk_spectral_mc_noise_model_1(50.0, 0.01, M + 1, w_scale)
-# mk_w = exact_noise_interpolation_model_1(N, Ts, M + 1, w_scale)
+# mk_w = exact_noise_interpolation_model_1(Int(ceil(5.0 / 1e-5)), 1e-5, M + 1, w_scale)
 
 σ = 0.02                        # observation noise variance
 
@@ -44,10 +46,10 @@ mk_θs = θ -> [m, θ, g, k]
 φ0 = pi / 4                     # Initial angle of pendulum from negative
                                 # y-axis
 
-mk_model = (w, θ) -> pendulum(φ0, u, w, θ)
+mk_model(w, θ) = pendulum(φ0, u, w, θ)
 
 # === cost function ===
-cost = (yhat, y) -> mean((yhat - y).^2)
+cost(yhat, y) = mean((yhat - y).^2)
 
 Δθ = 0.2
 δθ = 0.05
@@ -56,19 +58,19 @@ cost = (yhat, y) -> mean((yhat - y).^2)
 nθ = length(θs)
 
 function mk_sim(N)
-  (m, θ) -> simulate(mk_model(mk_w(m), mk_θs(θ)), N, Ts)
+  f(m, θ) = simulate(mk_model(mk_w(m), mk_θs(θ)), N, Ts)
 end
 
 function mk_sim_h(N)
-  (m, θ) -> simulate_h(mk_model(mk_w(m), mk_θs(θ)), N, Ts, h)
+  f(m, θ) = simulate_h(mk_model(mk_w(m), mk_θs(θ)), N, Ts, h)
 end
 
 function mk_sim_h_baseline(N)
-  θ -> simulate_h(mk_model(t -> 0., mk_θs(θ)), N, Ts, h)
+  f(θ) = simulate_h(mk_model(t -> 0., mk_θs(θ)), N, Ts, h)
 end
 
 function mk_sim_h_m(N)
-  (ms, θ) -> simulate_h_m(m -> mk_model(mk_w(m), mk_θs(θ)), N, Ts, h, ms)
+  f(ms, θ) = simulate_h_m(m -> mk_model(mk_w(m), mk_θs(θ)), N, Ts, h, ms)
 end
 
 # Visualize the effect of the noise at the true θ
@@ -137,6 +139,38 @@ function plot_baseline_costs(N)
   vline!(pl, [θ0], linecolor = :gray, lines = :dot, label="θ0")
 end
 
+function plot_mean_vs_true_trajectory(N)
+  sim_h = mk_sim_h(N)
+  sim_h_m = mk_sim_h_m(N)
+
+  σs = σ * rand(Normal(), N + 1)
+  y = sim_h(m_true, θ0) + σs
+  yhat = mean(sim_h_m(ms, θ0), dims = 2)
+
+  pl = plot(xlabel="time [s]",
+            title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
+
+  plot!(pl, [yhat y], fillrange=[y yhat], fillalpha=0.2, c=:yellow, label="")
+  plot!(pl, yhat, linecolor = :green, linewidth = 1, label = "mean")
+  plot!(pl, y, linecolor = :red, linewidth = 1, label = "true trajectory")
+end
+
+function plot_baseline_vs_true_trajectory(N)
+  sim_h_baseline = mk_sim_h_baseline(N)
+  sim_h = mk_sim_h(N)
+
+  σs = σ * rand(Normal(), N + 1)
+  y = sim_h(m_true, θ0) + σs
+  yhat = sim_h_baseline(θ0)
+
+  pl = plot(xlabel="time [s]",
+            title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
+
+  plot!(pl, [yhat y], fillrange=[y yhat], fillalpha=0.2, c=:yellow, label="")
+  plot!(pl, yhat, linecolor = :green, linewidth = 1, label = "baseline")
+  plot!(pl, y, linecolor = :red, linewidth = 1, label = "true trajectory")
+end
+
 function run(id, N)
   T = N*Ts
   ts = 0:Ts:T
@@ -157,7 +191,9 @@ function run(id, N)
     for (i, θ) in enumerate(θs)
       @info "θ point $(i) of $(nθ)"
       cs_baseline[i] = cost(sim_h_baseline(θ), y)
-      cs[i] = cost(mean(sim_h_m(ms, θ), dims=2), y)
+      Y = sim_h_m(ms, θ)
+      @info "mean(Y) = $(mean(Y)), var(Y) = $(var(Y))"
+      cs[i] = cost(mean(Y, dims = 2), y)
     end
 
     cs_baseline, cs

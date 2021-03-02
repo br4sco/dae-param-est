@@ -7,7 +7,7 @@ using DelimitedFiles
 using Plots
 using ProgressMeter
 
-include("noise_model.jl")
+# include("noise_model.jl")
 
 struct Model
   f!::Function                  # residual function
@@ -128,7 +128,7 @@ const abstol = 1e-7
 const reltol = 1e-7
 const maxiters = Int(1e10)
 
-function simulate(m::Model, N::Int, Ts::Float64)
+function simulate(m::Model, N::Int, Ts::Float64; kwargs...)
   let
     T = N * Ts
     saveat = 0:Ts:T
@@ -143,34 +143,35 @@ function simulate(m::Model, N::Int, Ts::Float64)
       reltol = reltol,
       maxiters = maxiters,
       saveat = saveat
+      ; kwargs...
     )
   end
 end
 
-function simulate_xw(xw::XW, m::Model, N::Int, Ts::Float64)
-  T = N * Ts
-  saveat = 0:Ts:T
+# function simulate_xw(xw::XW, m::Model, N::Int, Ts::Float64)
+#   T = N * Ts
+#   saveat = 0:Ts:T
 
-  prob = DAEProblem(
-    m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
+#   prob = DAEProblem(
+#     m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
 
-  integrator = init(
-    prob,
-    IDA(),
-    abstol = abstol,
-    reltol = reltol,
-    maxiters = maxiters,
-    saveat = saveat
-  )
+#   integrator = init(
+#     prob,
+#     IDA(),
+#     abstol = abstol,
+#     reltol = reltol,
+#     maxiters = maxiters,
+#     saveat = saveat
+#   )
 
-  for i in integrator
-    xw.x = xw.next_x
-    xw.t = integrator.t
-    xw.k += 1
-  end
+#   for i in integrator
+#     xw.x = xw.next_x
+#     xw.t = integrator.t
+#     xw.k += 1
+#   end
 
-  integrator.sol
-end
+#   integrator.sol
+# end
 
 # mk_w = discrete_time_noise_model_1(10000000, 10, 10.0)
 # xw = XW(zeros(2), zeros(2), 0.0, 1)
@@ -199,14 +200,14 @@ function simulate_h_m(
 )::Array{Float64, 2}
 
   M = length(ms)
-  Y = hcat([[Threads.Atomic{Float64}(0.0) for i=1:(N+1)] for j=1:M]...)
+  # Y = hcat([[Threads.Atomic{Float64}(0.0) for i=1:(N+1)] for j=1:M]...)
   Y = zeros(N+1, M)
   p = Progress(M, 1, "Running $(M) simulations...", 50)
-  @inbounds Threads.@threads for m = 1:M
+  Threads.@threads for m = 1:M
     model = mk_model(ms[m])
     y = simulate_h(model, N, Ts, h)
     # for n = 1:(N+1)
-      # Threads.atomic_add!(Y[k, m], y[k])
+    # Threads.atomic_add!(Y[k, m], y[k])
     Y[:, m] .+= y
     # end
     next!(p)

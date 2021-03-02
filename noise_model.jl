@@ -38,11 +38,9 @@ function mk_spectral_mc_noise_model(Gw, ωmax, dω, M, scale)
     sd = map(spectral_density(Gw), ωs)
 
     function mk_w(m::Int)
-
-        function w(t::Float64)::Float64
-          scale * sum(2 * sqrt.(dω * sd) .* cos.(ωs * t + ΦS[:, m]))
-        end
-
+      function w(t::Float64)::Float64
+        scale * sum(2 * sqrt.(dω * sd) .* cos.(ωs * t + ΦS[:, m]))
+      end
     end
   end
 end
@@ -81,7 +79,7 @@ function mk_discrete_unconditioned_noise_model(A, B, C, K, M, scale, ϵ=10e-25)
   end
 end
 
-function mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M)
+function mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
   let
     nx = size(A, 1)
     P = 2
@@ -89,12 +87,11 @@ function mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M)
 
     data_uniform, irrelevant_var = generate_noise(N, M, P, nx, false)
     # Computes all M realizations of filtered white noise
-    x_mat =
-      simulate_noise_process(noise_model, data_uniform)
+    x_mat = simulate_noise_process(noise_model, data_uniform)
 
     function mk_w(m::Int)
       function w(t::Float64)::Float64
-        first(C*x_inter(t, Ts, A, B, x_mat[:, m], noise_model.x0))
+        scale * first(C*x_inter(t, Ts, A, B, x_mat[:, m], noise_model.x0))
       end
     end
   end
@@ -129,7 +126,7 @@ function mk_spectral_mc_noise_model_1(ωmax, dω, M, scale)
   mk_spectral_mc_noise_model(Gw, ωmax, dω, M, scale)
 end
 
-function exact_noise_interpolation_model_1(p::NoiseModelParams)
+function exact_noise_interpolation_model_1(N, Ts, M, scale)
   let
     f = linear_filter_1()
     sys = ss(tf(f.a, f.b))
@@ -137,7 +134,7 @@ function exact_noise_interpolation_model_1(p::NoiseModelParams)
     B = sys.B
     C = sys.C
     x0 = zeros(size(A, 1))
-    mk_exact_noise_interpolation_model(A, B, C, p.N, x0, p.Ts, p.M)
+    mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
   end
 end
 
@@ -147,8 +144,13 @@ function discrete_time_noise_model_1(K, M, scale)
   A = sys.A
   B = sys.B
   C = sys.C
-  x0 = zeros(size(A, 1))
+  x0 = zeros(size(A, 1), )
   mk_discrete_unconditioned_noise_model(A, B, C, K, M, scale)
 end
 
-mk_w = discrete_time_noise_model_1(100000, 10)
+# N = 100
+# δ = 1e-9
+# δ = 0.05
+# w = mk_spectral_mc_noise_model_1(50, 0.01, 1, 1.0)(1)
+# w = exact_noise_interpolation_model_1(N, 0.05, 1, 1.0)(1)
+# plot(0:δ:N*δ, w, xlabel="time [s]", title = "spectral, δ = $(δ)")

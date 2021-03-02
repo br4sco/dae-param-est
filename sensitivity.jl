@@ -7,7 +7,7 @@ include("simulation.jl")
 
 Random.seed!(1234)
 
-N = 100
+N = 1000
 Ts = 0.05
 T = N*Ts
 ts = 0:Ts:T
@@ -31,7 +31,7 @@ end
 
 nx = length(xidxs)
 
-mk_model = θ -> pendulum2(pi / 4, u, t -> 0., θ)
+mk_model = θ -> pendulum(pi / 4, u, t -> 0., θ)
 sim = θ -> simulate(mk_model(θ), N, Ts)
 
 m = 0.3                         # [kg]
