@@ -126,7 +126,7 @@ end
 
 const abstol = 1e-7
 const reltol = 1e-7
-const maxiters = Int(1e10)
+const maxiters = Int64(1e10)
 
 function simulate(m::Model, N::Int, Ts::Float64; kwargs...)
   let
