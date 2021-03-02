@@ -9,6 +9,7 @@ function x_inter(t::Float64,
                  x0::Array{Float64, 1},
                  ϵ::Float64=10e-25)
 
+    @warn "The function x_inter() in noise_interpolation.jl has been deprecated, use noise_inter() from new_noise_interpolation.jl instead"
     n = Int(t÷Ts)           # t lies between t0 + k*Ts and t0 + (k+1)*Ts
     δ = t - n*Ts
     nx = size(A)[1]
