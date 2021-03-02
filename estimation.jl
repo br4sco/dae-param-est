@@ -11,7 +11,7 @@ Random.seed!(seed)
 # === experiment parameters ===
 Ts = 0.05                       # stepsize
 
-M = 100                                 # number of noise realizations
+M = 500                                 # number of noise realizations
 m_true = 7                               # pick the true system
 ms = filter(m -> m != m_true, 1:(M + 1)) # enumerate the realizations
 
@@ -142,16 +142,20 @@ end
 function plot_mean_vs_true_trajectory(N)
   sim_h = mk_sim_h(N)
   sim_h_m = mk_sim_h_m(N)
+  sim_h_baseline = mk_sim_h_baseline(N)
 
   σs = σ * rand(Normal(), N + 1)
   y = sim_h(m_true, θ0) + σs
   yhat = mean(sim_h_m(ms, θ0), dims = 2)
+  yhat_baseline = sim_h_baseline(θ0)
 
   pl = plot(xlabel="time [s]",
             title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
 
   plot!(pl, [yhat y], fillrange=[y yhat], fillalpha=0.2, c=:yellow, label="")
+  plot!(pl, [yhat_baseline y], fillrange=[y yhat_baseline], fillalpha=0.2, c=:blue, label="")
   plot!(pl, yhat, linecolor = :green, linewidth = 1, label = "mean")
+  plot!(pl, yhat_baseline, linecolor = :blue, linewidth = 1, label = "baseline")
   plot!(pl, y, linecolor = :red, linewidth = 1, label = "true trajectory")
 end
 

@@ -3,10 +3,10 @@ using DataFrames
 using Plots
 using LaTeXStrings
 
-M = 2000
-N = 300
+M = 5000
+N = 100
 
-filename = "run_4_$(M)_$(N)"
+filename = "run_5_$(M)_$(N)"
 
 data = CSV.File("$(filename)_data.csv") |> DataFrame
 meta_data = CSV.File("$(filename)_meta_data.csv") |> DataFrame

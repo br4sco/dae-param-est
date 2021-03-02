@@ -1,5 +1,29 @@
 using Statistics, CSV, DataFrames, ControlSystems
 
+struct CT_SS_Model
+    # Continuous-time state-space model on the form
+    # dx/dt = A*x + B*u
+    # y = C*x
+    # where x is the state, u is the input and y is the output
+    A::Array{Float64, 2}
+    B::Array{Float64, 2}
+    C::Array{Float64, 2}
+    x0::Array{Float64, 1}
+end
+
+struct DT_SS_Model
+    # Discrete-time state-space model on the form
+    # x[k+1] = Ad*x[k] + Bd*u[k]
+    # y[k] = Cd*x[k]
+    # where x is the state, u is the input and y is the output
+    Ad::Array{Float64, 2}
+    Bd::Array{Float64, 2}
+    Cd::Array{Float64, 2}
+    x0::Array{Float64, 1}
+    Ts::Float64                     # Sampling period of the system
+end
+
+# This struct is deprecated, use DT_SS_Model instead
 struct NoiseModel
     # Time-discrete noise model is on the form
     # x[k+1] = Ad*x[k] + Bd*z[k]
@@ -14,15 +38,19 @@ struct NoiseModel
     Ts::Float64
 end
 
-function discretize_ct_model(A, B, C, Ts, x0)::NoiseModel
-    nx = size(A, 1)
+function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
     Mexp    = [-A B*(B'); zeros(size(A)) A']
     MTs     = exp(Mexp*Ts)
     AdTs    = MTs[nx+1:end, nx+1:end]'
     Bd2Ts   = Hermitian(AdTs*MTs[1:nx, nx+1:end])
-    CholTs     = cholesky(Bd2Ts)
+    CholTs  = cholesky(Bd2Ts)
     BdTs    = CholTs.L
-    return NoiseModel(AdTs, BdTs, C, x0, Ts)
+    return DT_SS_Model(AdTs, BdTs, C, x0, Ts)
+end
+
+function discretize_ct_model(A, B, C, Ts, x0)
+    @warn "The function discretize_ct_model() from noise_generation.jl has been deprecated, use discretize_ct_noise_model() instead"
+    discretize_ct_noise_model(A, B, C, Ts, x0)
 end
 
 function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64, save_data::Bool=true)
@@ -31,6 +59,8 @@ function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64, save_data::Bool
     # M: Number of different realizations of the noise process
     # P: Number of inter-sample noise samples stored
     # nx: Dimension of each noise sample
+
+    @warn "The function generate_noise() from noise_generation.jl is deprecated, use generate_noise_new() instead"
 
     # Let z[i,m,j] be the j:th element of the i:th sample of the m:th
     # realization of the process z. Then z_uniform should be interpreted as
@@ -58,32 +88,32 @@ function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64, save_data::Bool
     return z_uniform, z_inter
 end
 
+function generate_noise_new(N::Int64, M::Int64, P::Int64, nx::Int64)
+    # N: Number of samples of uniformly sampled noise process after time 0
+    # M: Number of different realizations of the noise process
+    # P: Number of inter-sample noise samples stored
+    # nx: Dimension of each noise sample
+
+    # z_all_uniform[m][i][j] is the j:th element of the i:th sample of
+    # realization m
+    # N+1 since times including 0 and N are included, to match convention
+    # used by ControlSystems.jl lsim()-function
+    # z_all_uniform = fill(fill(NaN, (N+1, nx)), M)
+    z_all_uniform = [ randn(N+1,nx) for m=1:M]
+    # z_all_inter[m][i][p][j] is the j:th element of the p:th sample in
+    # interval i of realization m
+    # z_all_inter = fill(fill(fill(NaN, (P, nx)), N), M)
+    z_all_inter = [ [ randn(P,nx) for i=1:N] for m=1:M]
+
+    return z_all_uniform, z_all_inter
+end
+
 function load_data(N::Int64, M::Int64, P::Int64, nx::Int64)
     z_uni_mat = CSV.read("z_uniform.csv", DataFrame)
     # z_inter_mat = CSV.read("z_inter.csv", DataFrame)
     z_uniform = [ z_uni_mat[i,j] for i=1:size(z_uni_mat)[1], j=1:size(z_uni_mat)[2]]
     # z_intersample = [ z_inter_mat[i,j] for i=1:size(z_inter_mat)[1], j=1:size(z_inter_mat)[2]]
     return z_uniform#, z_intersample
-
-    # # IGNORE EVERYTHING BELOW THIS COMMENT!
-    # z_uniform = fill(fill(NaN, (nx,1)), (N,M))
-    # z_inter   = fill(fill(NaN, (nx,1)), (N,M,P))
-    # for i = 1:N
-    #     for m = 1:M
-    #         for j = 1:nx
-    #             z_uniform[i,m][j] = z_uni_mat[i, j+nx*(m-1)]
-    #             for p = 1:P
-    #                 z_inter[i,m,p][j] = z_inter_mat[i, j+P*(p-1)+(P*nx)*(m-1)]
-    #             end
-    #         end
-    #     end
-    # end
-
-    # # z_uniform[i, m][j] is the j:th element of the i:th sample of the m:th
-    # # realization of the noise process z
-    # # z_inter[i,m,p][j] is the j:th element of the p:th sample in the i:th
-    # # inter-sample interval of realization m of the noise process
-    # return z_uniform, z_inter
 end
 
 function load_metadata()
@@ -96,7 +126,8 @@ function load_metadata()
     end
 end
 
-function simulate_noise_process(mdl::NoiseModel, data::Array{Float64,2})::Array{Array{Float64, 1}, 2}
+function simulate_noise_process(mdl::DT_SS_Model, data::Array{Float64,2})::Array{Array{Float64, 1}, 2}
+    @warn "The function simulate_noise_process() from noise_generation.jl is deprecated, use simulate_noise_process_new() instead"
     (Np1, Mnx) = size(data)
     Ts = mdl.Ts
     N = Np1 - 1     # We have noise for times 0 to N, so a total of N+1 samples
@@ -116,9 +147,29 @@ function simulate_noise_process(mdl::NoiseModel, data::Array{Float64,2})::Array{
     return x_process
 end
 
+function simulate_noise_process_new(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1})
+    # data[m][i, j] should be the j:th component of the noise at time i of
+    # realization m
+    M = size(data)[1]
+    N = size(data[1])[1]-1
+    nx = size(data[1])[2]
+    sys = ss(mdl.Ad, mdl.Bd, mdl.Cd, 0.0, mdl.Ts)
+    t = 0:mdl.Ts:N*mdl.Ts
+    # Allocating space for noise process
+    x_process = [ fill(NaN, (nx,)) for i=1:N, m=1:M]
+    for m=1:M
+        y, t, x = lsim(sys, data[m], t, x0=mdl.x0)
+        for i=1:N
+            x_process[i,m][:] = x[i+1,:]    # i+1, since first elemt of x is at time 0
+        end
+    end
+
+    return x_process
+end
+
 # DEBUG For checking if the simulated noise process seems to have the expected
 # statistical properties
-function test_generated_data(mdl::NoiseModel, x_process::Array{Array{Float64, 2}})
+function test_generated_data(mdl::DT_SS_Model, x_process::Array{Array{Float64, 2}})
     (N, M) = size(x_process)
     nx = size(x_process[1,1])[1]
     Ad = mdl.Ad
