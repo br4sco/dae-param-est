@@ -94,18 +94,35 @@ function generate_noise_new(N::Int64, M::Int64, P::Int64, nx::Int64)
     # P: Number of inter-sample noise samples stored
     # nx: Dimension of each noise sample
 
-    # z_all_uniform[m][i][j] is the j:th element of the i:th sample of
+    # z_all_uniform[m][i,j] is the j:th element of the i:th sample of
     # realization m
     # N+1 since times including 0 and N are included, to match convention
     # used by ControlSystems.jl lsim()-function
-    # z_all_uniform = fill(fill(NaN, (N+1, nx)), M)
     z_all_uniform = [ randn(N+1,nx) for m=1:M]
-    # z_all_inter[m][i][p][j] is the j:th element of the p:th sample in
+    # z_all_inter[m][i][p,j] is the j:th element of the p:th sample in
     # interval i of realization m
-    # z_all_inter = fill(fill(fill(NaN, (P, nx)), N), M)
     z_all_inter = [ [ randn(P,nx) for i=1:N] for m=1:M]
 
     return z_all_uniform, z_all_inter
+end
+
+function generate_noise_newer(N::Int64, M::Int64, P::Int64, nx::Int64, rng::MersenneTwister)
+    # N: Number of samples of uniformly sampled noise process after time 0
+    # M: Number of different realizations of the noise process
+    # P: Number of inter-sample noise samples stored
+    # nx: Dimension of each noise sample
+
+    # z_all_uniform[m][i,j] is the j:th element of the i:th sample of
+    # realization m
+    # N+1 since times including 0 and N are included, to match convention
+    # used by ControlSystems.jl lsim()-function
+    z_all_uniform = [ randn(N+1,nx) for m=1:M]
+    saved_rng = copy(rng)
+    # z_all_inter[m][i][p,j] is the j:th element of the p:th sample in
+    # interval i of realization m
+    z_all_inter = [ [ randn(P,nx) for i=1:N] for m=1:M]
+
+    return z_all_uniform, z_all_inter, saved_rng
 end
 
 function load_data(N::Int64, M::Int64, P::Int64, nx::Int64)
