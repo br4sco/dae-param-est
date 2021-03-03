@@ -42,7 +42,7 @@ end
 
 const u_scale = 2.0                   # input scale
 # const w_scale = 0.04                # noise scale
-const w_scale = 4.0                   # noise scale
+const w_scale = 8.0                   # noise scale
 
 u(t::Float64) = u_scale * noise_fun(m_u)(t)
 wm(m::Int) = t -> w_scale * noise_fun(m)(t)
@@ -191,7 +191,11 @@ function run(id, N)
 
   cs_baseline, cs = est()
 
+  yhat = mean(solve_m(m -> solvew(wm(m), θ0), N, ms), dims = 2)
+  yhat_baseline = solvew(t -> 0., θ0)
+
   data = DataFrame(θ = θs, cost = cs, cost_baseline = cs_baseline)
+  data_extra = DataFrame(y = y, yhat = yhat, yhat_baseline = yhat_baseline)
   meta_data = DataFrame(
     θ0 = θ0,
     N = N,
@@ -206,5 +210,6 @@ function run(id, N)
   )
 
   CSV.write(joinpath("data", "$(filename)_data.csv"), data)
+  CSV.write(joinpath("data", "$(filename)_data_extra.csv"), data_extra)
   CSV.write(joinpath("data", "$(filename)_meta_data.csv"), meta_data)
 end
