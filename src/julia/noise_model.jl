@@ -103,7 +103,7 @@ function gen_unconditioned_noise(
       Bd = cholesky(Hermitian(Σ)).L
       x = Ad * x_prev + Bd * zs[:, n]
       ws[n + 1] += first(C * x)
-      x_prev = z
+      x_prev = x
     end
     ws
   end
