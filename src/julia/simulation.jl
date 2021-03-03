@@ -1,4 +1,5 @@
 import Interpolations.CubicSplineInterpolation
+import Interpolations.LinearInterpolation
 import Random
 
 using DifferentialEquations
@@ -17,9 +18,9 @@ struct Model
   ic_check::Array{Float64, 1}   # residual at t0 (DEBUG)
 end
 
-function interpolation(Ts::Float64, N::Int, xs::Array{Float64, 1})
-  let ts = range(0, N * Ts, length=length(xs))
-    CubicSplineInterpolation(ts, xs)
+function interpolation(T::Float64, xs::Array{Float64, 1})
+  let ts = range(0, T, length=length(xs))
+    LinearInterpolation(ts, xs)
   end
 end
 
@@ -128,23 +129,45 @@ const abstol = 1e-7
 const reltol = 1e-7
 const maxiters = Int64(1e6)
 
+function problem(m::Model, N::Int, Ts::Float64)
+  T = N * Ts
+  DAEProblem( m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
+end
+
+function solve(prob; kwargs...)
+  DifferentialEquations.solve(prob, IDA(); kwargs...)
+end
+
+function apply_outputfun(h, sol)
+  if sol.retcode != :Success
+    return ones(N+1) * Inf
+  end
+
+  return map(h, sol.u)
+end
+
+function solve_m(solve::Function, N::Int, ms::Array{Int, 1})::Array{Float64, 2}
+  M = length(ms)
+  Y = zeros(N + 1, M)
+  p = Progress(M, 1, "Running $(M) simulations...", 50)
+  Threads.@threads for m = 1:M
+    y = solve(ms[m])
+    Y[:, m] .+= y
+    next!(p)
+  end
+  Y
+end
+
+# Old API
+
 function simulate(m::Model, N::Int, Ts::Float64; kwargs...)
   let
     T = N * Ts
     saveat = 0:Ts:T
 
-    prob = DAEProblem(
-      m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
+    prob = problem(m, N, Ts)
 
-    solve(
-      prob,
-      IDA(),
-      abstol = abstol,
-      reltol = reltol,
-      maxiters = maxiters,
-      saveat = saveat
-      ; kwargs...
-    )
+    solve(prob, saveat = saveat; kwargs...)
   end
 end
 
@@ -180,12 +203,7 @@ end
 
 function simulate_h(m::Model, N::Int, Ts::Float64, h::Function)
   sol = simulate(m, N, Ts)
-
-  if sol.retcode != :Success
-    return ones(N+1) * Inf
-  end
-
-  return map(h, sol.u)
+  apply_outputfun(h, sol)
 end
 
 function simulate_m(mk_model::Function, N::Int, Ts::Float64)

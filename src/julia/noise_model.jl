@@ -3,6 +3,8 @@ using Plots
 using Random
 using Distributions
 using DelimitedFiles
+using ProgressMeter
+
 include("noise_interpolation.jl")
 include("noise_generation.jl")
 
@@ -45,38 +47,101 @@ function mk_spectral_mc_noise_model(Gw, ωmax, dω, M, scale)
   end
 end
 
-function mk_discrete_unconditioned_noise_model(A, B, C, K, M, scale, ϵ=10e-25)
+# function mk_discrete_unconditioned_noise_model(A, B, C, K, M, scale, ϵ=10e-25)
+#   let
+#     nx = size(A, 1)
+#     ZS = [rand(Normal(), nx, K) for m in 1:M]
+#     G = [-A (B * B'); zeros(size(A)) A']
+#
+#     function mk_w(xw, m)
+#       let
+#         zs = ZS[m]
+#         function w(t::Float64)::Float64
+#
+#           δ = t - xw.t
+#
+#           if δ < ϵ
+#             @info "δ = $(δ) < ϵ at t = $(t)"
+#             return scale * first(C * xw.x)
+#           end
+#
+#           F = G * δ
+#           expF = exp(F)
+#           Ad = expF[nx+1:end, nx+1:end]'
+#           Σ = Ad * expF[1:nx, nx+1:end]
+#           Bd = cholesky(Hermitian(Σ)).L
+#           x = Ad * xw.x + Bd * zs[:, xw.k]
+#
+#           xw.next_x = x
+#
+#           return scale * first(C * x)
+#         end
+#       end
+#     end
+#   end
+# end
+
+function gen_unconditioned_noise(
+  A::Array{Float64, 2},
+  B::Array{Float64, 2},
+  C::Array{Float64, 2},
+  Ts::Float64,
+  zs::Array{Float64, 2})
+
   let
     nx = size(A, 1)
-    ZS = [rand(Normal(), nx, K) for m in 1:M]
+    N = size(zs, 2)
     G = [-A (B * B'); zeros(size(A)) A']
+    ws = zeros(N + 1)
+    x_prev = zeros(nx, 1)
 
-    function mk_w(xw, m)
-      let
-        zs = ZS[m]
-        function w(t::Float64)::Float64
-
-          δ = t - xw.t
-
-          if δ < ϵ
-            @info "δ = $(δ) < ϵ at t = $(t)"
-            return scale * first(C * xw.x)
-          end
-
-          F = G * δ
-          expF = exp(F)
-          Ad = expF[nx+1:end, nx+1:end]'
-          Σ = Ad * expF[1:nx, nx+1:end]
-          Bd = cholesky(Hermitian(Σ)).L
-          x = Ad * xw.x + Bd * zs[:, xw.k]
-
-          xw.next_x = x
-
-          return scale * first(C * x)
-        end
-      end
+    for n = 1:N
+      F = G * Ts
+      expF = exp(F)
+      Ad = expF[nx+1:end, nx+1:end]'
+      Σ = Ad * expF[1:nx, nx+1:end]
+      Bd = cholesky(Hermitian(Σ)).L
+      x = Ad * x_prev + Bd * zs[:, n]
+      ws[n + 1] += first(C * x)
+      x_prev = z
     end
+    ws
   end
+end
+
+function gen_noise_m(gen_noise, ZS)
+  M = length(ZS)
+  K = size(ZS[1], 2)
+  WS = zeros(K + 1, M)
+  p = Progress(M, 1, "Generating $(M) noise realizations...", 30)
+  Threads.@threads for m = 1:M
+    WS[:, m] .+= gen_noise(ZS[m])
+    next!(p)
+  end
+  WS
+end
+
+function write_unconditioned_noise(filter, id, M, δ, T)
+  A, B, C = ss_of_linear_filter(filter())
+  nx = size(A, 1)
+  K = length(0:δ:T)
+  ZS = [rand(Normal(), nx, K) for m in 1:M]
+  WS = gen_noise_m(zs -> gen_unconditioned_noise(A, B, C, δ, zs), ZS)
+  path = joinpath("data", "unconditioned_noise_$(id)_$(M)_$(δ)_$(T).csv")
+  writedlm(path, WS, ',')
+end
+
+function write_unconditioned_noise_1(M, δ, T)
+  write_unconditioned_noise(linear_filter_1, 1, M, δ, T)
+end
+
+function read_unconditioned_noise(id::Int, M::Int, δ::Float64, T::Float64)::Array{Float64, 2}
+  path = joinpath("data", "unconditioned_noise_$(id)_$(M)_$(δ)_$(T).csv")
+  readdlm(path, ',')
+end
+
+function read_unconditioned_noise_1(M, δ, T)
+  read_unconditioned_noise(1, M, δ, T)
 end
 
 function mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
@@ -118,6 +183,12 @@ function linear_filter_2()
   a = [n3, n4]
   b = [d1, d2, d3, d4]
   LinearFilter(a, b)
+end
+
+function ss_of_linear_filter(f::LinearFilter)
+  let s = ss(tf(f.a, f.b))
+    s.A, s.B, s.C
+  end
 end
 
 function mk_spectral_mc_noise_model_1(ωmax, dω, M, scale)

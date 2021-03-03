@@ -9,82 +9,83 @@ seed = 1234
 Random.seed!(seed)
 
 # === experiment parameters ===
-Ts = 0.05                       # stepsize
+const Ts = 0.05                                            # stepsize
 
-M = 500                                 # number of noise realizations
-m_true = 7                               # pick the true system
-ms = filter(m -> m != m_true, 1:(M + 1)) # enumerate the realizations
+M = 10                                                     # number of noise realizations
+const m_true = 12                                           # pick the true system
+const m_u = 1                                              # input realization
+const ms = filter(m -> m != m_true && m != m_u, 1:(M + 2)) # enumerate the realizations
 
-noise_method_name = "Spectral Monte-Carlo"
+# noise_method_name = "Spectral Monte-Carlo"
+# noise_fun = mk_spectral_mc_noise_model_1(50.0, 0.01, M + 2, 1.0)
 
-u_scale = 0.2                   # input scale
-w_scale = 0.8                   # noise scale
+const noise_method_name = "Pre-generated unconditioned noise"
+const WS = read_unconditioned_noise_1(1100, 0.005, 100.0)
+noise_fun(m::Int) = interpolation(100.0, WS[:, m])
 
-uu = mk_spectral_mc_noise_model_1(10.0, 0.05, 1, u_scale)(1)
-function u(t)
-  u_scale * uu(t)
-end
+const u_scale = 0.2                   # input scale
+# const w_scale = 0.04                # noise scale
+const w_scale = 0.02                  # noise scale
 
-mk_w = mk_spectral_mc_noise_model_1(50.0, 0.01, M + 1, w_scale)
-# mk_w = exact_noise_interpolation_model_1(Int(ceil(5.0 / 1e-5)), 1e-5, M + 1, w_scale)
+u(t::Float64) = u_scale * noise_fun(m_u)(t)
+wm(m::Int) = t -> w_scale * noise_fun(m)(t)
 
-σ = 0.02                        # observation noise variance
+const σ = 0.002                         # observation noise variance
 
 # === physical model ===
-output_state = 1                # 1 = x, 3 = y
-h = x -> x[output_state]
+# const output_state = 1                                       # 1 = x, 3 = y
+# h(sol) = apply_outputfun(x -> x[output_state], sol)          # output function
+h(sol) = apply_outputfun(x -> atan(x[1] / -x[3]), sol)          # output function
 
-m = 0.3                         # [kg]
-L = 6.25                        # [m], gives period T = 5s (T ≅ 2√L) not
+const m = 0.3                         # [kg]
+const L = 6.25                        # [m], gives period T = 5s (T ≅ 2√L) not
                                 # accounting for friction.
-g = 9.81                        # [m/s^2]
-k = 0.01                        # [1/s^2]
+const g = 9.81                        # [m/s^2]
+const k = 0.01                        # [1/s^2]
 
-θ0 = L                          # We try to estimate the pendulum length
-mk_θs = θ -> [m, θ, g, k]
+const θ0 = L                          # We try to estimate the pendulum length
+mk_θs(θ) = [m, θ, g, k]
 
-φ0 = pi / 4                     # Initial angle of pendulum from negative
+const φ0 = 0.                         # Initial angle of pendulum from negative
                                 # y-axis
 
-mk_model(w, θ) = pendulum(φ0, u, w, θ)
+mk_problem(w, θ, N) = problem(pendulum(φ0, u, w, mk_θs(θ)), N, Ts)
 
 # === cost function ===
 cost(yhat, y) = mean((yhat - y).^2)
 
-Δθ = 0.2
-δθ = 0.05
+const Δθ = 0.2
+const δθ = 0.05
 
-θs = (θ0 - Δθ * θ0):δθ:(θ0 + Δθ * θ0) |> collect
-nθ = length(θs)
+const θs = (θ0 - Δθ * θ0):δθ:(θ0 + Δθ * θ0) |> collect
+const nθ = length(θs)
 
-function mk_sim(N)
-  f(m, θ) = simulate(mk_model(mk_w(m), mk_θs(θ)), N, Ts)
-end
-
-function mk_sim_h(N)
-  f(m, θ) = simulate_h(mk_model(mk_w(m), mk_θs(θ)), N, Ts, h)
-end
-
-function mk_sim_h_baseline(N)
-  f(θ) = simulate_h(mk_model(t -> 0., mk_θs(θ)), N, Ts, h)
-end
-
-function mk_sim_h_m(N)
-  f(ms, θ) = simulate_h_m(m -> mk_model(mk_w(m), mk_θs(θ)), N, Ts, h, ms)
-end
+# function mk_sim(N)
+#   f(m, θ) = simulate(mk_model(mk_w(m), mk_θs(θ)), N, Ts)
+# end
+#
+# function mk_sim_h(N)
+#   f(m, θ) = simulate_h(mk_model(mk_w(m), mk_θs(θ)), N, Ts, h)
+# end
+#
+# function mk_sim_h_baseline(N)
+#   f(θ) = simulate_h(mk_model(t -> 0., mk_θs(θ)), N, Ts, h)
+# end
+#
+# function mk_sim_h_m(N)
+#   f(ms, θ) = simulate_h_m(m -> mk_model(mk_w(m), mk_θs(θ)), N, Ts, h, ms)
+# end
 
 # Visualize the effect of the noise at the true θ
 function plot_system_at_true_param(N)
   T = N*Ts
-
-  sim = mk_sim(N)
-  sol_true = sim(m_true, θ0)
-  @info "true solution retcode: $(sol_true.retcode)"
-
-  simm = θ -> pmap(m -> sim(m, θ), ms[1:min(10, end)])
+  solvem(m) = solve(mk_problem(wm(m), θ0, N); saveat = 0:Ts:T)
 
   # We simulate at the true θ to do get a feel for the problem
-    sols = simm(L)
+  sol_true = solvem(m_true)
+  @info "true solution retcode: $(sol_true.retcode)"
+
+  sols = pmap(solvem , ms[1:min(10, end)])
   @info "failed simulations $(count(s -> s.retcode != :Success, sols))"
 
   vars = [(0,1), (0,3), (0,8)]
@@ -100,24 +101,22 @@ function plot_system_at_true_param(N)
 end
 
 function plot_baseline_costs(N)
+  T = N*Ts
+  ts = 0:Ts:T
 
   first_ms = ms[1:min(10, end)]
   nms = length(first_ms)
 
-  sim_h_baseline = mk_sim_h_baseline(N)
-  sim_h = mk_sim_h(N)
-  sim_h_m = mk_sim_h_m(N)
+  solvew(w, θ) = solve(mk_problem(w, θ, N), saveat=ts) |> h
 
   σs = σ * rand(Normal(), N + 1)
+  y = solvew(wm(m_true), θ0) + σs
+  Y = solve_m(m -> solvew(wm(m), θ0), N, first_ms)
 
   cs = zeros(nms, nθ)
-
-  y = sim_h(m_true, θ0)
-  Y = sim_h_m(first_ms, θ0)
-
   for (i, θ) in enumerate(θs)
     @info "θ point $(i) of $(nθ)"
-    yhat = sim_h_baseline(θ)
+    yhat = solvew(t -> 0., θ)
     for m = 1:nms
       cs[m, i] = cost(yhat, Y[:, m] + σs)
     end
@@ -128,7 +127,7 @@ function plot_baseline_costs(N)
             title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
 
   plot!(pl,
-        θ -> cost(sim_h_baseline(θ), y + σs),
+        θ -> cost(solvew(t -> 0., θ), y),
         θs,
         label="m = $(m_true), true system", linecolor = :red, linewidth = 3)
 
@@ -139,54 +138,51 @@ function plot_baseline_costs(N)
   vline!(pl, [θ0], linecolor = :gray, lines = :dot, label="θ0")
 end
 
-function plot_mean_vs_true_trajectory(N)
-  sim_h = mk_sim_h(N)
-  sim_h_m = mk_sim_h_m(N)
-  sim_h_baseline = mk_sim_h_baseline(N)
-
-  σs = σ * rand(Normal(), N + 1)
-  y = sim_h(m_true, θ0) + σs
-  yhat = mean(sim_h_m(ms, θ0), dims = 2)
-  yhat_baseline = sim_h_baseline(θ0)
-
-  pl = plot(xlabel="time [s]",
-            title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
-
-  plot!(pl, [yhat y], fillrange=[y yhat], fillalpha=0.2, c=:yellow, label="")
-  plot!(pl, [yhat_baseline y], fillrange=[y yhat_baseline], fillalpha=0.2, c=:blue, label="")
-  plot!(pl, yhat, linecolor = :green, linewidth = 1, label = "mean")
-  plot!(pl, yhat_baseline, linecolor = :blue, linewidth = 1, label = "baseline")
-  plot!(pl, y, linecolor = :red, linewidth = 1, label = "true trajectory")
-end
-
-function plot_baseline_vs_true_trajectory(N)
-  sim_h_baseline = mk_sim_h_baseline(N)
-  sim_h = mk_sim_h(N)
-
-  σs = σ * rand(Normal(), N + 1)
-  y = sim_h(m_true, θ0) + σs
-  yhat = sim_h_baseline(θ0)
-
-  pl = plot(xlabel="time [s]",
-            title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
-
-  plot!(pl, [yhat y], fillrange=[y yhat], fillalpha=0.2, c=:yellow, label="")
-  plot!(pl, yhat, linecolor = :green, linewidth = 1, label = "baseline")
-  plot!(pl, y, linecolor = :red, linewidth = 1, label = "true trajectory")
-end
-
+# function plot_mean_vs_true_trajectory(N)
+#   sim_h = mk_sim_h(N)
+#   sim_h_m = mk_sim_h_m(N)
+#   sim_h_baseline = mk_sim_h_baseline(N)
+#
+#   σs = σ * rand(Normal(), N + 1)
+#   y = sim_h(m_true, θ0) + σs
+#   yhat = mean(sim_h_m(ms, θ0), dims = 2)
+#   yhat_baseline = sim_h_baseline(θ0)
+#
+#   pl = plot(xlabel="time [s]",
+#             title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
+#
+#   plot!(pl, [yhat y], fillrange=[y yhat], fillalpha=0.2, c=:yellow, label="")
+#   plot!(pl, [yhat_baseline y], fillrange=[y yhat_baseline], fillalpha=0.2, c=:blue, label="")
+#   plot!(pl, yhat, linecolor = :green, linewidth = 1, label = "mean")
+#   plot!(pl, yhat_baseline, linecolor = :blue, linewidth = 1, label = "baseline")
+#   plot!(pl, y, linecolor = :red, linewidth = 1, label = "true trajectory")
+# end
+#
+# function plot_baseline_vs_true_trajectory(N)
+#   sim_h_baseline = mk_sim_h_baseline(N)
+#   sim_h = mk_sim_h(N)
+#
+#   σs = σ * rand(Normal(), N + 1)
+#   y = sim_h(m_true, θ0) + σs
+#   yhat = sim_h_baseline(θ0)
+#
+#   pl = plot(xlabel="time [s]",
+#             title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
+#
+#   plot!(pl, [yhat y], fillrange=[y yhat], fillalpha=0.2, c=:yellow, label="")
+#   plot!(pl, yhat, linecolor = :green, linewidth = 1, label = "baseline")
+#   plot!(pl, y, linecolor = :red, linewidth = 1, label = "true trajectory")
+# end
+#
 function run(id, N)
   T = N*Ts
   ts = 0:Ts:T
 
   filename = "run_$(id)_$(M)_$(N)"
 
-  sim_h = mk_sim_h(N)
-  sim_h_baseline = mk_sim_h_baseline(N)
-  sim_h_m = mk_sim_h_m(N)
+  solvew(w, θ) = solve(mk_problem(w, θ, N), saveat=ts) |> h
 
-  y = sim_h(m_true, θ0) + σ * rand(Normal(), N + 1)
-  plot(ts, y)
+  y = solvew(wm(m_true), θ0) + σ * rand(Normal(), N + 1)
 
   function est()
     cs = zeros(nθ)
@@ -194,8 +190,8 @@ function run(id, N)
 
     for (i, θ) in enumerate(θs)
       @info "θ point $(i) of $(nθ)"
-      cs_baseline[i] = cost(sim_h_baseline(θ), y)
-      Y = sim_h_m(ms, θ)
+      cs_baseline[i] = cost(solvew(t -> 0., θ), y)
+      Y = solve_m(m -> solvew(wm(m), θ), N, ms)
       @info "mean(Y) = $(mean(Y)), var(Y) = $(var(Y))"
       cs[i] = cost(mean(Y, dims = 2), y)
     end
@@ -220,6 +216,6 @@ function run(id, N)
     output_state = output_state
   )
 
-  CSV.write("$(filename)_data.csv", data)
-  CSV.write("$(filename)_meta_data.csv", meta_data)
+  CSV.write(joinpath("data", "$(filename)_data.csv"), data)
+  CSV.write(joinpath("data", "$(filename)_meta_data.csv"), meta_data)
 end

@@ -3,13 +3,13 @@ using DataFrames
 using Plots
 using LaTeXStrings
 
-M = 5000
+M = 10
 N = 100
 
-filename = "run_5_$(M)_$(N)"
+filename = "run_test_$(M)_$(N)"
 
-data = CSV.File("$(filename)_data.csv") |> DataFrame
-meta_data = CSV.File("$(filename)_meta_data.csv") |> DataFrame
+data = CSV.File(joinpath("data", "$(filename)_data.csv")) |> DataFrame
+meta_data = CSV.File(joinpath("data", "$(filename)_meta_data.csv")) |> DataFrame
 
 function plot_costs()
 
