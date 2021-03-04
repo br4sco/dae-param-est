@@ -13,7 +13,7 @@ Random.seed!(seed)
 # === experiment parameters ===
 const Ts = 0.05                                            # stepsize
 
-M = 10                                                    # number of noise realizations
+M = 1000                                                    # number of noise realizations
 const m_true = 12                                          # pick the true system
 const m_u = 1                                              # input realization
 const ms = filter(m -> m != m_true && m != m_u, 1:(M + 2)) # enumerate the realizations
@@ -22,7 +22,7 @@ const ms = filter(m -> m != m_true && m != m_u, 1:(M + 2)) # enumerate the reali
 # noise_fun = mk_spectral_mc_noise_model_1(50.0, 0.01, M + 2, 1.0)
 
 const δ = 0.005
-const Tw = 100.0
+const Tw = 400.0
 const Mw = 1100
 const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
 const WS = read_unconditioned_noise_1(Mw, δ, Tw)
@@ -42,7 +42,7 @@ end
 
 const u_scale = 2.0                   # input scale
 # const w_scale = 0.04                # noise scale
-const w_scale = 8.0                   # noise scale
+const w_scale = 1.0                   # noise scale
 
 u(t::Float64) = u_scale * noise_fun(m_u)(t)
 wm(m::Int) = t -> w_scale * noise_fun(m)(t)
@@ -147,19 +147,19 @@ function plot_mean_vs_true_trajectory(N)
 
   σs = σ * rand(Normal(), N + 1)
   y = solvew(wm(m_true), θ0) + σs
-  yhat = mean(solve_m(m -> solvew(wm(m), θ0), N, ms), dims = 2)
+  yhat = reshape(mean(solve_m(m -> solvew(wm(m), θ0), N, ms), dims = 2), :)
   yhat_baseline = solvew(t -> 0., θ0)
 
   plot_outputs(y, yhat, yhat_baseline)
 end
 
-function run(id, N)
+function run(id, N, w_scale)
   T = N*Ts
   ts = 0:Ts:T
 
   filename = "run_$(id)_$(M)_$(N)"
 
-  solvew(w, θ) = solve(mk_problem(w, θ, N), saveat=ts) |> h
+  solvew(w, θ) = solve(mk_problem(t -> w_scale * w(t), θ, N), saveat=ts) |> h
 
   y = solvew(wm(m_true), θ0) + σ * rand(Normal(), N + 1)
 
@@ -202,3 +202,5 @@ function run(id, N)
   CSV.write(joinpath("data", "$(filename)_data_extra.csv"), data_extra)
   CSV.write(joinpath("data", "$(filename)_meta_data.csv"), meta_data)
 end
+
+run(8, 4000, 8.0)

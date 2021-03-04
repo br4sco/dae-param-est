@@ -9,20 +9,24 @@ end
 function plot_costs(θs, costs, costs_baseline, θ0)
   pl = plot(
     xlabel=L"\theta",
-    ylabel=L"\texttt{cost}(\theta)",
-    title = "u_scale = $(meta_data.u_scale), w_scale = $(meta_data.w_scale), N = $(meta_data.N), M = $(meta_data.M)"
-  )
+    ylabel=L"\texttt{cost}(\theta)")
 
   plot!(pl, θs, costs_baseline, label="baseline", linecolor=:red)
+  n_min_b = argmin(costs_baseline)
+  plot!(pl, [θs[n_min_b]], [costs_baseline[n_min_b]],
+    color=:red, seriestype = :scatter, label = "", alpha = 0.5)
+
   plot!(pl, θs, costs, label="our attempt", linecolor=:black)
+  n_min = argmin(costs)
+  plot!(pl, [θs[n_min]], [costs[n_min]],
+    color=:black, seriestype = :scatter, label = "", alpha = 0.5)
 
   vline!(pl, [θ0], linecolor=:gray, lines = :dot, label="θ0")
   pl
 end
 
 function plot_outputs(y, yhat, yhat_baseline)
-  pl = plot(xlabel="time [s]",
-            title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
+  pl = plot(xlabel="time [s]")
 
   plot!(pl, [yhat y], fillrange=[y yhat],
     fillalpha=0.2, c=:yellow, label="")

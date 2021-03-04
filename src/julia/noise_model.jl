@@ -8,23 +8,23 @@ using ProgressMeter
 include("noise_interpolation.jl")
 include("noise_generation.jl")
 
-struct NoiseModelParams
-  M::Int
-  N::Int
-  Ts::Float64
-end
+# struct NoiseModelParams
+#   M::Int
+#   N::Int
+#   Ts::Float64
+# end
 
 struct LinearFilter
   a::Array{Float64}
   b::Array{Float64}
 end
 
-mutable struct XW
-  x::Array{Float64, 1}
-  next_x::Array{Float64, 1}
-  t::Float64
-  k::Int
-end
+# mutable struct XW
+#   x::Array{Float64, 1}
+#   next_x::Array{Float64, 1}
+#   t::Float64
+#   k::Int
+# end
 
 function spectral_density(Gw)
   function sd(ω::Float64)::Float64
