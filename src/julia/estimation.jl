@@ -13,7 +13,7 @@ Random.seed!(seed)
 # === experiment parameters ===
 const Ts = 0.05                                            # stepsize
 
-M = 1000                                                    # number of noise realizations
+M = 10                                                    # number of noise realizations
 const m_true = 12                                          # pick the true system
 const m_u = 1                                              # input realization
 const ms = filter(m -> m != m_true && m != m_u, 1:(M + 2)) # enumerate the realizations
@@ -69,7 +69,7 @@ const φ0 = 0. / 8                     # Initial angle of pendulum from negative
 mk_problem(w, θ, N) = problem(pendulum(φ0, u, w, mk_θs(θ)), N, Ts)
 
 # === cost function ===
-cost(yhat, y) = mean((yhat - y).^2)
+cost(yhat::Array{Float64, 1}, y::Array{Float64, 1}) = mean((yhat - y).^2)
 
 const Δθ = 0.2
 const δθ = 0.05
@@ -183,7 +183,7 @@ function run(id, N)
       cs_baseline[i] = cost(solvew(t -> 0., θ), y)
       Y = solve_m(m -> solvew(wm(m), θ), N, ms)
       @info "mean(Y) = $(mean(Y)), var(Y) = $(var(Y))"
-      cs[i] = cost(mean(Y, dims = 2), y)
+      cs[i] = cost(reshape(mean(Y, dims = 2), :), y)
     end
 
     cs_baseline, cs
@@ -191,7 +191,7 @@ function run(id, N)
 
   cs_baseline, cs = est()
 
-  yhat = mean(solve_m(m -> solvew(wm(m), θ0), N, ms), dims = 2)
+  yhat = reshape(mean(solve_m(m -> solvew(wm(m), θ0), N, ms), dims = 2), :)
   yhat_baseline = solvew(t -> 0., θ0)
 
   data = DataFrame(θ = θs, cost = cs, cost_baseline = cs_baseline)
