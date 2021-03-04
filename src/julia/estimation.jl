@@ -150,18 +150,7 @@ function plot_mean_vs_true_trajectory(N)
   yhat = mean(solve_m(m -> solvew(wm(m), θ0), N, ms), dims = 2)
   yhat_baseline = solvew(t -> 0., θ0)
 
-  pl = plot(xlabel="time [s]",
-            title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
-
-  plot!(pl, [yhat y], fillrange=[y yhat],
-    fillalpha=0.2, c=:yellow, label="")
-
-  plot!(pl, [yhat_baseline y], fillrange=[y yhat_baseline],
-    fillalpha=0.2, c=:blue, label="")
-
-  plot!(pl, y, linecolor = :red, linewidth = 1, label = "true trajectory")
-  plot!(pl, yhat, linecolor = :green, linewidth = 1, label = "mean")
-  plot!(pl, yhat_baseline, linecolor = :blue, linewidth = 1, label = "baseline")
+  plot_outputs(y, yhat, yhat_baseline)
 end
 
 function run(id, N)

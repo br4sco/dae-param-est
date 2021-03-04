@@ -3,28 +3,17 @@ using DataFrames
 using Plots
 using LaTeXStrings
 
-M = 10
-N = 100
+include("helpers.jl")
 
-filename = "run_test_$(M)_$(N)"
+M = 500
+N = 500
+id = 6
+
+filename = "run_$(id)_$(M)_$(N)"
 
 data = CSV.File(joinpath("data", "$(filename)_data.csv")) |> DataFrame
 meta_data = CSV.File(joinpath("data", "$(filename)_meta_data.csv")) |> DataFrame
 
-function plot_costs()
-
-  pl = plot(
-    xlabel=L"\theta",
-    ylabel=L"\texttt{cost}(\theta)",
-    title = "u_scale = $(meta_data.u_scale), w_scale = $(meta_data.w_scale), N = $(meta_data.N), M = $(meta_data.M)"
-  )
-
-  plot!(pl, data.θ, data.cost_baseline, label="baseline", linecolor=:red)
-  plot!(pl, data.θ, data.cost, label="our attempt", linecolor=:black)
-
-  vline!(pl, [meta_data.θ0], linecolor=:gray, lines = :dot, label="θ0")
-  pl
-end
-
 print(meta_data)
-plot_costs()
+
+plot_costs(data.θ, data.cost, data.cost_baseline, meta_data.θ0)
