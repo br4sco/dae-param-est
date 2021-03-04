@@ -29,11 +29,16 @@ save_data = false
 N = 100     # Noise samples, excluding the initial one, x_e(0)
 M = 100
 P = 4       # Number of inter-sample samples stored
+# N = 4     # Noise samples, excluding the initial one, x_e(0)
+# M = 2
+# P = 1       # Number of inter-sample samples stored
 nx = size(A)[1]
 noise_model = discretize_ct_noise_model(A, B, C, Ts, zeros(nx,))
 noise_uniform_dat, noise_inter_dat, rng = generate_noise_newer(N, M, P, nx, rng_original)
 # Computes all M realizations of filtered white noise
 x_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
+
+# println(noise_inter_dat)# DEBUG
 
 num_samples = zeros(Int64, N)
 
@@ -57,8 +62,8 @@ end
 
 δ = 0.025
 
-println(w_new(0.172))
-println(w(0.172))
-# plot(0:0.01:N*Ts, w)
+# w_new(0.172)
+# w(0.172)
+plot(0:0.01:N*Ts, w)
 # plot(0:0.01:N*Ts, w_new)
-# savefig("./plots.png")
+# # # savefig("./plots.png")

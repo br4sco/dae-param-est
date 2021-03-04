@@ -98,10 +98,24 @@ function generate_noise_new(N::Int64, M::Int64, P::Int64, nx::Int64)
     # realization m
     # N+1 since times including 0 and N are included, to match convention
     # used by ControlSystems.jl lsim()-function
-    z_all_uniform = [ randn(N+1,nx) for m=1:M]
+    z_all_uniform = [ randn(N+1, nx) for m=1:M]
     # z_all_inter[m][i][p,j] is the j:th element of the p:th sample in
     # interval i of realization m
-    z_all_inter = [ [ randn(P,nx) for i=1:N] for m=1:M]
+    # DEBUG: Generates z_all_inter in this way so that it can easily be compared
+    # with newest noise interpolation method. Can't simply transpose randn()
+    # since then its datatype stops being Array{Float64, 2}, and the code isn't
+    # written generally enough to be able to handle that
+    z_all_inter_skew = [ [ randn(nx, P) for i=1:N] for m=1:M]
+    z_all_inter = [ [ fill(NaN, P, nx) for i=1:N] for m=1:M]
+    for m=1:M
+        for i=1:N
+            for p=1:P
+                for j=1:nx
+                    z_all_inter[m][i][p,j] = z_all_inter_skew[m][i][j,p]
+                end
+            end
+        end
+    end
 
     return z_all_uniform, z_all_inter
 end
@@ -116,11 +130,25 @@ function generate_noise_newer(N::Int64, M::Int64, P::Int64, nx::Int64, rng::Mers
     # realization m
     # N+1 since times including 0 and N are included, to match convention
     # used by ControlSystems.jl lsim()-function
-    z_all_uniform = [ randn(N+1,nx) for m=1:M]
+    z_all_uniform = [ randn(rng, N+1, nx) for m=1:M]
     saved_rng = copy(rng)
     # z_all_inter[m][i][p,j] is the j:th element of the p:th sample in
     # interval i of realization m
-    z_all_inter = [ [ randn(P,nx) for i=1:N] for m=1:M]
+    # DEBUG: Generates z_all_inter in this way so that it can easily be compared
+    # with newest noise interpolation method. Can't simply transpose randn()
+    # since then its datatype stops being Array{Float64, 2}, and the code isn't
+    # written generally enough to be able to handle that
+    z_all_inter_skew = [ [ randn(rng, nx, P) for i=1:N] for m=1:M]
+    z_all_inter = [ [ fill(NaN, P, nx) for i=1:N] for m=1:M]
+    for m=1:M
+        for i=1:N
+            for p=1:P
+                for j=1:nx
+                    z_all_inter[m][i][p,j] = z_all_inter_skew[m][i][j,p]
+                end
+            end
+        end
+    end
 
     return z_all_uniform, z_all_inter, saved_rng
 end
