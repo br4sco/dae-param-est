@@ -65,8 +65,11 @@ function noise_inter(t::Float64,
     CΣ   = cholesky(Σ)
     Σr   = CΣ.L
 
+    # println("First: $(z_inter[1][1,1])")
+
     if num_inter_samples[n+1] < P
         white_noise = z_inter[n+1][num_inter_samples[n+1]+1,:]
+        # println("New: $(white_noise)")
         num_inter_samples[n+1] += 1
     else
         white_noise = randn(Float64, (nx, 1))

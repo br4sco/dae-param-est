@@ -8,31 +8,13 @@ mutable struct InterSampleData
     # i:th interval. Also here the number of rows should be dynamically updated
     states::Array{Array{Float64,2},1}
     sample_times::Array{Array{Float64,1},1}
-    P::Int64    # Number of pre-generated realizations per interval
+    Q::Int64    # Max number of stored samples per interval
 end
 
-function initialize_isd(P::Int64, N::Int64, nx::Int64)::InterSampleData
+function initialize_isd(Q::Int64, N::Int64, nx::Int64)::InterSampleData
     isd_states = [zeros(0,nx) for j=1:N]
     isd_sample_times = [zeros(0) for j=1:N]
-    return InterSampleData(isd_states, isd_sample_times, P)
-end
-
-function jump_realizations(rng::MersenneTwister, num_realizations::Int64)::MersenneTwister
-    num_realizations += 1   # DEBUG
-    steps = (num_realizations)÷2  # Each step corresponds to generating two Float64 numbers
-    remainder = mod(num_realizations, 0:1)
-
-    old_rng = MersenneTwister(123)
-    rng = Future.randjump(old_rng, big(10)^20)
-
-    new_rng = Future.randjump(rng, steps)
-    println("Steps: $steps, remainder: $remainder")
-
-    if remainder == 1
-        # Move rng state forward one more Float64-realization, sort of like taking half a step
-        rand(new_rng)
-    end
-    return new_rng
+    return InterSampleData(isd_states, isd_sample_times, Q)
 end
 
 function noise_inter_new(t::Float64,
@@ -40,35 +22,44 @@ function noise_inter_new(t::Float64,
                      A::Array{Float64, 2},
                      B::Array{Float64, 2},
                      x::Array{Array{Float64, 1}, 1},
-                     rng::MersenneTwister,
+                     z_inter::Array{Array{Float64, 2}, 1},
                      isd::InterSampleData,
                      x0::Array{Float64, 1},
                      ϵ::Float64=10e-12)
 
-     # println("OKAY: $(randn(rng))")
-
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
     δ = t - n*Ts
     nx = size(A)[1]
-    P = isd.P
-    num_inter_samples = size(isd.states[n+1])[1]
+    Q = isd.Q
+    P = size(z_inter[1])[1]
+    N = size(isd.states)[1]
+    # This case is usually handled by the check further down for δ smaller
+    # than ϵ, but if n == N, isd.states[n+1] will give BoundsError, so we
+    # need to put this if-statement here to avoid that. We only check for n==N,
+    # and not n >= N so that there will be a crash if times after the last
+    # sample are requested
+    if n == N
+        return x[N]
+    else
+        num_inter_samples = size(isd.states[n+1])[1]
+    end
     tl = n*Ts
     tu = (n+1)*Ts
     il = 0      # for il>0,   tl = isd.sample_times[n][il]
-    iu = P+1    # for iu<P+1, tu = isd.sample_times[n][iu]
+    iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
 
     # setting il, tl, iu, tu
     if num_inter_samples > 0
-        for p = 1:num_inter_samples
+        for q = 1:num_inter_samples
             # interval index = n+1
-            t_inter = isd.sample_times[n+1][p]
+            t_inter = isd.sample_times[n+1][q]
             if t_inter > tl && t_inter < t
                 tl = t_inter
-                il = p
+                il = q
             end
             if t_inter < tu && t_inter > t
                 tu = t_inter
-                iu = p
+                iu = q
             end
         end
     end
@@ -81,7 +72,7 @@ function noise_inter_new(t::Float64,
     if il > 0
         xl = isd.states[n+1][il,:]
     end
-    if iu < P+1
+    if iu < Q+1
         xu = isd.states[n+1][iu,:]
     end
 
@@ -118,20 +109,15 @@ function noise_inter_new(t::Float64,
     Σr = CΣ.L
 
     if num_inter_samples < P
-        num_jumps = n*P*nx + (num_inter_samples)*nx
-        new_rng = jump_realizations(rng, num_jumps)
-        realization = randn(new_rng, Float64, (nx,1))
-        println("Newer: $(realization)")
+        white_noise = z_inter[n+1][num_inter_samples+1,:]
     else
-        @warn "Ran out of pre-generated white noise realizations for interval $(n+1)"
-        # TODO: NOTE: WARNING: YOU ARE USING GLOBAL RNG HERE, YOU HAVE TO MAKE
-        # SURE THAT IT'S SEEDED APPROPRIATELY OUTSIDE OF THIS FUNCTIONS!!!!!!
-        realization = randn(Float64, (nx, 1))
+        # @warn "Ran out of pre-generated white noise realizations for interval $(n+1)"
+        white_noise = randn(Float64, (nx, 1))
     end
 
-    x_new = μ + Σr*realization
+    x_new = μ + Σr*white_noise
 
-    if num_inter_samples < P
+    if num_inter_samples < Q
         isd.states[n+1] = [isd.states[n+1]; x_new']
         isd.sample_times[n+1] = [isd.sample_times[n+1]; t]
     end
