@@ -23,9 +23,7 @@ C = [0 1]
 # B = reshape([0.5; 0.0; 0.0; 0.0], (4,1))
 # C = [0 0 0 1]
 
-# const Ts = 0.05             # Sampling frequency of noise model
 const Ts = 0.05             # Sampling frequency of noise model
-save_data = false
 # N = 100     # Noise samples, excluding the initial one, x_e(0)
 N = 2     # Noise samples, excluding the initial one, x_e(0)
 M = 100
@@ -36,14 +34,9 @@ Q = 4       # Number of inter-sample states stored
 # P = 1       # Number of inter-sample samples stored
 nx = size(A)[1]
 noise_model = discretize_ct_noise_model(A, B, C, Ts, zeros(nx,))
-rng_seed = 123  # RNG seed used for data-generation
 noise_uniform_dat, noise_inter_dat = generate_noise_new(N, M, P, nx)
 # Computes all M realizations of filtered white noise
 x_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
-
-# println(noise_inter_dat)# DEBUG
-
-num_samples = zeros(Int64, N)
 
 isd = initialize_isd(Q, N, nx)
 

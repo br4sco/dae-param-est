@@ -1,6 +1,6 @@
 using Plots, CSV, DataFrames
 import Random
-include("noise_interpolation.jl")
+include("new_noise_interpolation.jl")
 include("noise_generation.jl")
 include("simulation.jl")
 Random.seed!(1234)
@@ -24,50 +24,38 @@ const C = [0 1]
 # const B = reshape([0.5; 0.0; 0.0; 0.0], (4,1))
 # const C = [0 0 0 1]
 
-# # OLD DATA GENERATION
-# nx = size(A)[1]
-# x_dat = CSV.read("x_mat.csv", DataFrame)
-# # x[k] contains the state vector from time t0 + Ts*k
-# x  = [ [x_dat[row, 1]; x_dat[row, 2]] for row in 1:1:size(x_dat)[1]]
-#
-# const t0 = 0                # Initial time of noise model simulation
-# const Ts = 0.05             # Sampling frequency of noise model
-# const N  = size(x_dat)[1]   # Number of simulated time steps of noise model
-
-
 Ts_model = 0.05
 N_model = 100
 T = N_model * Ts_model
 
-# NEW DATA GENERATION
 Ts = 1e-6                       # Sampling frequency of noise model
-save_data = false
 N = Int(ceil(T / Ts))        # Noise samples, excluding the initial one, x_e(0)
 @info "N = $(N)"
 M = 1
-
-P = 2       # You can ignore this one for now, just keep it at 2
+P = 4       # Number of inter-sample samples stored
+Q = 1000       # Number of inter-sample states stored. Should have Q >= P
 nx = size(A)[1]
-noise_model = discretize_ct_model(A, B, C, Ts, zeros(nx, ))
-metadata = load_metadata()
-# If meta-paramters have changed, re-generate noise
-if metadata != [N, M, P, nx]
-    # Generates white noise realizations, NOT realizations of filtered white noise
-    data_uniform, irrelevant_var = generate_noise(N, M, P, nx, save_data)
-else
-    # data_uniform, data_inter = load_data(N,M,P,nx)
-    data_uniform = load_data(N,M,P,nx)
-end
+noise_model = discretize_ct_noise_model(A, B, C, Ts, zeros(nx,))
+noise_uniform_dat, noise_inter_dat = generate_noise_new(N, M, P, nx)
 # Computes all M realizations of filtered white noise
-x_mat = simulate_noise_process(noise_model, data_uniform)
+x_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
 
-# Using only the first realization right now. Each column of x corresponds to
-# one realization, and each row to one time instant
+# isd is short for "inter-sample data"
+isd = initialize_isd(Q, N, nx)
+
+m = 1
+
+# Using only the m:th realization right now. Each column of x_mat corresponds to
+# one realization, and each row to one time instant. Each element is itself
+# a state-vector (Array{Float64, 1}), not a scalar
 function w(t::Float64)
-    return (C*x_inter(t, Ts, A, B, x_mat[:, 1], noise_model.x0))[1]
+    return (C*noise_inter(t, Ts, A, B, x_mat[:, m], noise_inter_dat[m],
+            isd, noise_model.x0))[1]
 end
 
-model = pendulum(pi / 4, t -> 0., t -> 0., [0.3, 6.25, 9.81, 0.01])
+# pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})
+# model = pendulum(pi / 4, t -> 0., t -> 0., [0.3, 6.25, 9.81, 0.01])
+model = pendulum(pi / 4, t -> 0., w, [0.3, 6.25, 9.81, 0.01])
 sol = simulate(model, N_model, Ts_model)
 @info "min(h) = $(min(diff(sol.t)...))"
 plot(sol, vars = [1, 3, 8], layout = (3, 1))
