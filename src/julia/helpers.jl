@@ -25,7 +25,7 @@ function plot_costs(θs, costs, costs_baseline, θ0)
   pl
 end
 
-function plot_outputs(y, yhat, yhat_baseline, N, Ts)
+function plot_outputs(y, yhat, yhat_baseline, N, Ts, N_trans)
   T = N * Ts
   ts = 0.0:Ts:T
 
@@ -40,4 +40,5 @@ function plot_outputs(y, yhat, yhat_baseline, N, Ts)
   plot!(pl, ts, y, linecolor = :red, linewidth = 1, label = "true trajectory")
   plot!(pl, ts, yhat, linecolor = :green, linewidth = 1, label = "mean")
   plot!(pl, ts, yhat_baseline, linecolor = :blue, linewidth = 1, label = "baseline")
+  vline!(pl, [N_trans * Ts], linecolor=:gray, lines = :dot, label="")
 end

@@ -1,0 +1,2 @@
+θ0,N,Ts,M,σ,u_scale,w_scale,noise_method_name,seed,m_true
+6.25,1000,0.1,500,0.002,0.0,0.2,Pre-generated unconditioned noise (δ = 0.005),1234,12

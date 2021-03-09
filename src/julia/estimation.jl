@@ -13,18 +13,18 @@ Random.seed!(seed)
 # === experiment parameters ===
 const Ts = 0.1                  # stepsize
 const N_trans = 250             # number of steps of the transient
-const M = 1000                  # number of noise realizations
-const ms = collect(1:1000)      # enumerate the realizations
+const M = 500                   # number of noise realizations
+const ms = collect(1:M)         # enumerate the realizations
 const m_true_start = 1001       # the start of the true systems
-const n_true = 2                # number of true systems
+const n_true = 10               # number of true systems
 const ms_true =                 # true systems
-  collect(m_true_start:(m_true_start + n_true))
+  collect(m_true_start:(m_true_start + n_true - 1))
 const σ = 0.002                 # observation noise variance
 
 # === noise model ===
-const δ = 0.005
-const Tw = 400.0
-const Mw = 1100
+const δ = 0.01
+const Tw = 550.0
+const Mw = 1500
 const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
 const WS = read_unconditioned_noise_1(Mw, δ, Tw)
 const K = size(WS, 1) - 1
@@ -43,13 +43,13 @@ wm(m::Int) = t -> noise_fun(m)(t)
 
 # === physical model parameters ===
 const u_scale = 0.0             # input scale
-const w_scale = 0.4             # noise scale
+const w_scale = 3.0             # noise scale
 
 const m = 0.3                   # [kg]
 const L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not
                                 # accounting for friction.
 const g = 9.81                  # [m/s^2]
-const k = 0.01                  # [1/s^2]
+const k = 0.05                  # [1/s^2]
 
 const φ0 = pi / 8              # Initial angle of pendulum from negative y-axis
 
@@ -149,14 +149,15 @@ function run1(dir, id, m_true, N)
     m_true = m_true
   )
 
-  CSV.write(joinpath("data", dir, "$(filename)_data.csv"), data)
-  CSV.write(joinpath("data", dir, "$(filename)_data_extra.csv"), data_extra)
+  CSV.write(joinpath("data", dir, "$(filename)_cost_data.csv"), data)
+  CSV.write(joinpath("data", dir, "$(filename)_output_data.csv"), data_extra)
   CSV.write(joinpath("data", dir, "$(filename)_meta_data.csv"), meta_data)
 end
 
 function run(dir, N)
   mkdir(joinpath("data", dir))
   for (id, m_true) in enumerate(ms_true)
+    @info "run $(id) of $(length(ms_true))"
     run1(dir, id, m_true, N_trans + N)
   end
 end
