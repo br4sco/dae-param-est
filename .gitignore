@@ -64,3 +64,4 @@ testing_conditional_distributions.m
 # dont track plots
 *.svg
 *.png
+src/julia/test_randjump_deleteme.jl
