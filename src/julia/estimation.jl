@@ -11,16 +11,17 @@ seed = 1234
 Random.seed!(seed)
 
 # === experiment parameters ===
-const Ts = 0.1                                             # stepsize
+const Ts = 0.1                  # stepsize
+const N_trans = 250             # number of steps of the transient
+const M = 1000                  # number of noise realizations
+const ms = collect(1:1000)      # enumerate the realizations
+const m_true_start = 1001       # the start of the true systems
+const n_true = 2                # number of true systems
+const ms_true =                 # true systems
+  collect(m_true_start:(m_true_start + n_true))
+const σ = 0.002                 # observation noise variance
 
-M = 1000                                                   # number of noise realizations
-const m_true = 12                                          # pick the true system
-const m_u = 1                                              # input realization
-const ms = filter(m -> m != m_true && m != m_u, 1:(M + 2)) # enumerate the realizations
-
-# noise_method_name = "Spectral Monte-Carlo"
-# noise_fun = mk_spectral_mc_noise_model_1(50.0, 0.01, M + 2, 1.0)
-
+# === noise model ===
 const δ = 0.005
 const Tw = 400.0
 const Mw = 1100
@@ -38,50 +39,47 @@ function noise_fun(m::Int)
   end
 end
 
-# noise_fun(m::Int) = LinearInterpolation(tsw, WS[:, m])
+wm(m::Int) = t -> noise_fun(m)(t)
 
-const u_scale = 0.0                   # input scale
-# const w_scale = 0.04                # noise scale
-const w_scale = 8.0                   # noise scale
+# === physical model parameters ===
+const u_scale = 0.0             # input scale
+const w_scale = 0.4             # noise scale
+
+const m = 0.3                   # [kg]
+const L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not
+                                # accounting for friction.
+const g = 9.81                  # [m/s^2]
+const k = 0.01                  # [1/s^2]
+
+const φ0 = pi / 8              # Initial angle of pendulum from negative y-axis
 
 # u(t::Float64) = u_scale * noise_fun(m_u)(t)
 u(t::Float64) = 0.0
-wm(m::Int) = t -> w_scale * noise_fun(m)(t)
 
-const σ = 0.002                         # observation noise variance
-
-# === physical model ===
-const output_state = 1                                       # 1 = x, 3 = y
-# h(sol) = apply_outputfun(x -> x[output_state], sol)          # output function
 h(sol) = apply_outputfun(x -> atan(x[1] / -x[3]), sol)          # output function
 # h(sol) = apply_outputfun(x -> atan(x[1] / -x[3])^2, sol)          # output function
 # h(sol) = apply_outputfun(x[])
 
-const m = 0.3                         # [kg]
-const L = 6.25                        # [m], gives period T = 5s (T ≅ 2√L) not
-                                      # accounting for friction.
-const g = 9.81                        # [m/s^2]
-const k = 0.01                        # [1/s^2]
-
-const θ0 = L                          # We try to estimate the pendulum length
+# === Parameter params ===
 mk_θs(θ) = [m, θ, g, k]
 
-const φ0 = pi / 8              # Initial angle of pendulum from negative
-                                # y-axis
+const θ0 = L                    # We try to estimate the pendulum length
+const Δθ = 0.2
+const δθ = 0.08
+const θs = (θ0 - Δθ * θ0):δθ:(θ0 + Δθ * θ0) |> collect
+const nθ = length(θs)
+
 
 mk_problem(w, θ, N) = problem(pendulum(φ0, u, w, mk_θs(θ)), N, Ts)
 
 # === cost function ===
-cost(yhat::Array{Float64, 1}, y::Array{Float64, 1}) = mean((yhat - y).^2)
+cost(yhat::Array{Float64, 1}, y::Array{Float64, 1}) =
+  mean((yhat[N_trans:end] - y[N_trans:end]).^2)
 
-const Δθ = 0.2
-const δθ = 0.08
-
-const θs = (θ0 - Δθ * θ0):δθ:(θ0 + Δθ * θ0) |> collect
-const nθ = length(θs)
+# === helper functions ===
 
 # Visualize the effect of the noise at the true θ
-function plot_system_at_true_param(N)
+function plot_system_at_true_param(ms_true, ms, N)
   T = N*Ts
   solvem(m) = solve(mk_problem(wm(m), θ0, N); saveat = 0:Ts:T)
 
@@ -89,7 +87,7 @@ function plot_system_at_true_param(N)
   sol_true = solvem(m_true)
   @info "true solution retcode: $(sol_true.retcode)"
 
-  sols = pmap(solvem , ms[1:min(10, end)])
+  sols = pmap(solvem , ms)
   @info "failed simulations $(count(s -> s.retcode != :Success, sols))"
 
   vars = [(0,1), (0,3), (0,8)]
@@ -104,59 +102,8 @@ function plot_system_at_true_param(N)
   plot(ps...)
 end
 
-function plot_baseline_costs(N)
-  T = N*Ts
-  ts = 0:Ts:T
 
-  first_ms = ms[1:min(10, end)]
-  nms = length(first_ms)
-
-  solvew(w, θ) = solve(mk_problem(w, θ, N), saveat=ts) |> h
-
-  σs = σ * rand(Normal(), N + 1)
-  y = solvew(wm(m_true), θ0) + σs
-  Y = solve_m(m -> solvew(wm(m), θ0), N, first_ms)
-
-  cs = zeros(nms, nθ)
-  for (i, θ) in enumerate(θs)
-    @info "θ point $(i) of $(nθ)"
-    yhat = solvew(t -> 0., θ)
-    for m = 1:nms
-      cs[m, i] = cost(yhat, Y[:, m] + σs)
-    end
-  end
-
-  pl = plot(xlabel=L"\theta",
-            ylabel=L"\texttt{cost}(\theta)",
-            title = "u_scale = $(u_scale), w_scale = $(w_scale), N = $(N)")
-
-  plot!(pl,
-        θ -> cost(solvew(t -> 0., θ), y),
-        θs,
-        label="m = $(m_true), true system", linecolor = :red, linewidth = 3)
-
-  for (i, m) in enumerate(first_ms)
-    plot!(pl, θs, cs[i, :], linealpha = 0.5, label = "m = $(m)")
-  end
-
-  vline!(pl, [θ0], linecolor = :gray, lines = :dot, label="θ0")
-end
-
-function plot_mean_vs_true_trajectory(N)
-  T = N*Ts
-  ts = 0:Ts:T
-
-  solvew(w, θ) = solve(mk_problem(w, θ, N), saveat=ts) |> h
-
-  σs = σ * rand(Normal(), N + 1)
-  y = solvew(wm(m_true), θ0) + σs
-  yhat = reshape(mean(solve_m(m -> solvew(wm(m), θ0), N, ms), dims = 2), :)
-  yhat_baseline = solvew(t -> 0., θ0)
-
-  plot_outputs(y, yhat, yhat_baseline)
-end
-
-function run(id, N, w_scale)
+function run1(dir, id, m_true, N)
   T = N*Ts
   ts = 0:Ts:T
 
@@ -191,6 +138,7 @@ function run(id, N, w_scale)
   meta_data = DataFrame(
     θ0 = θ0,
     N = N,
+    N_trans = N_trans,
     Ts = Ts,
     M = M,
     σ = σ,
@@ -201,9 +149,14 @@ function run(id, N, w_scale)
     m_true = m_true
   )
 
-  CSV.write(joinpath("data", "$(filename)_data.csv"), data)
-  CSV.write(joinpath("data", "$(filename)_data_extra.csv"), data_extra)
-  CSV.write(joinpath("data", "$(filename)_meta_data.csv"), meta_data)
+  CSV.write(joinpath("data", dir, "$(filename)_data.csv"), data)
+  CSV.write(joinpath("data", dir, "$(filename)_data_extra.csv"), data_extra)
+  CSV.write(joinpath("data", dir, "$(filename)_meta_data.csv"), meta_data)
 end
 
-run("test6", 1000, 0.4)
+function run(dir, N)
+  mkdir(joinpath("data", dir))
+  for (id, m_true) in enumerate(ms_true)
+    run1(dir, id, m_true, N_trans + N)
+  end
+end

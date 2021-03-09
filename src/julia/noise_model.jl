@@ -127,7 +127,7 @@ function write_unconditioned_noise(filter, id, M, δ, T)
   K = length(0:δ:T)
   ZS = [rand(Normal(), nx, K) for m in 1:M]
   WS = gen_noise_m(zs -> gen_unconditioned_noise(A, B, C, δ, zs), ZS)
-  path = joinpath("data", "unconditioned_noise_1_$(id)_$(M)_$(δ)_$(T).csv")
+  path = joinpath("data", "unconditioned_noise_$(id)_$(M)_$(δ)_$(T).csv")
   writedlm(path, WS, ',')
 end
 
@@ -135,8 +135,8 @@ function write_unconditioned_noise_1(id, M, δ, T)
   write_unconditioned_noise(linear_filter_1, id, M, δ, T)
 end
 
-function read_unconditioned_noise_1(id::Int, M::Int, δ::Float64, T::Float64)::Array{Float64, 2}
-  path = joinpath("data", "unconditioned_noise_1_$(id)_$(M)_$(δ)_$(T).csv")
+function read_unconditioned_noise(id::Int, M::Int, δ::Float64, T::Float64)::Array{Float64, 2}
+  path = joinpath("data", "unconditioned_noise_$(id)_$(M)_$(δ)_$(T).csv")
   readdlm(path, ',')
 end
 
