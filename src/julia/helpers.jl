@@ -25,16 +25,19 @@ function plot_costs(θs, costs, costs_baseline, θ0)
   pl
 end
 
-function plot_outputs(y, yhat, yhat_baseline)
+function plot_outputs(y, yhat, yhat_baseline, N, Ts)
+  T = N * Ts
+  ts = 0.0:Ts:T
+
   pl = plot(xlabel="time [s]")
 
-  plot!(pl, [yhat y], fillrange=[y yhat],
+  plot!(pl, ts, [yhat y], fillrange=[y yhat],
     fillalpha=0.2, c=:yellow, label="")
 
-  plot!(pl, [yhat_baseline y], fillrange=[y yhat_baseline],
+  plot!(pl, ts, [yhat_baseline y], fillrange=[y yhat_baseline],
     fillalpha=0.2, c=:blue, label="")
 
-  plot!(pl, y, linecolor = :red, linewidth = 1, label = "true trajectory")
-  plot!(pl, yhat, linecolor = :green, linewidth = 1, label = "mean")
-  plot!(pl, yhat_baseline, linecolor = :blue, linewidth = 1, label = "baseline")
+  plot!(pl, ts, y, linecolor = :red, linewidth = 1, label = "true trajectory")
+  plot!(pl, ts, yhat, linecolor = :green, linewidth = 1, label = "mean")
+  plot!(pl, ts, yhat_baseline, linecolor = :blue, linewidth = 1, label = "baseline")
 end

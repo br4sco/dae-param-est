@@ -48,7 +48,7 @@ function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}):
 
         out[1] = vx - xp - μ * 2x
         out[2] = vy - yp - μ * 2y
-        out[3] = vxp - λ * x / m + k * vx * abs(vx) / m - (ut + wt) / m
+        out[3] = vxp - λ * x / m + k * vx * abs(vx) / m - (ut + wt * wt) / m
         out[4] = vyp - λ * y / m + k * vy * abs(vy) / m + g
         out[5] = x^2 + y^2 - L^2
         out[6] = 2(x * vx + y * vy)

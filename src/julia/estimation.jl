@@ -11,9 +11,9 @@ seed = 1234
 Random.seed!(seed)
 
 # === experiment parameters ===
-const Ts = 0.05                                            # stepsize
+const Ts = 0.1                                             # stepsize
 
-M = 1000                                                    # number of noise realizations
+M = 1000                                                   # number of noise realizations
 const m_true = 12                                          # pick the true system
 const m_u = 1                                              # input realization
 const ms = filter(m -> m != m_true && m != m_u, 1:(M + 2)) # enumerate the realizations
@@ -40,11 +40,12 @@ end
 
 # noise_fun(m::Int) = LinearInterpolation(tsw, WS[:, m])
 
-const u_scale = 2.0                   # input scale
+const u_scale = 0.0                   # input scale
 # const w_scale = 0.04                # noise scale
-const w_scale = 1.0                   # noise scale
+const w_scale = 8.0                   # noise scale
 
-u(t::Float64) = u_scale * noise_fun(m_u)(t)
+# u(t::Float64) = u_scale * noise_fun(m_u)(t)
+u(t::Float64) = 0.0
 wm(m::Int) = t -> w_scale * noise_fun(m)(t)
 
 const σ = 0.002                         # observation noise variance
@@ -53,6 +54,8 @@ const σ = 0.002                         # observation noise variance
 const output_state = 1                                       # 1 = x, 3 = y
 # h(sol) = apply_outputfun(x -> x[output_state], sol)          # output function
 h(sol) = apply_outputfun(x -> atan(x[1] / -x[3]), sol)          # output function
+# h(sol) = apply_outputfun(x -> atan(x[1] / -x[3])^2, sol)          # output function
+# h(sol) = apply_outputfun(x[])
 
 const m = 0.3                         # [kg]
 const L = 6.25                        # [m], gives period T = 5s (T ≅ 2√L) not
@@ -63,8 +66,8 @@ const k = 0.01                        # [1/s^2]
 const θ0 = L                          # We try to estimate the pendulum length
 mk_θs(θ) = [m, θ, g, k]
 
-const φ0 = 0. / 8                     # Initial angle of pendulum from negative
-                                      # y-axis
+const φ0 = pi / 8              # Initial angle of pendulum from negative
+                                # y-axis
 
 mk_problem(w, θ, N) = problem(pendulum(φ0, u, w, mk_θs(θ)), N, Ts)
 
@@ -72,7 +75,7 @@ mk_problem(w, θ, N) = problem(pendulum(φ0, u, w, mk_θs(θ)), N, Ts)
 cost(yhat::Array{Float64, 1}, y::Array{Float64, 1}) = mean((yhat - y).^2)
 
 const Δθ = 0.2
-const δθ = 0.05
+const δθ = 0.08
 
 const θs = (θ0 - Δθ * θ0):δθ:(θ0 + Δθ * θ0) |> collect
 const nθ = length(θs)
@@ -203,4 +206,4 @@ function run(id, N, w_scale)
   CSV.write(joinpath("data", "$(filename)_meta_data.csv"), meta_data)
 end
 
-run(8, 4000, 8.0)
+run("test6", 1000, 0.4)
