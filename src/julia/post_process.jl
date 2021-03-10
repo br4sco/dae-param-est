@@ -53,11 +53,54 @@ function post_process_dir(dir)
   mean_cost = mean(cost, dims = 2)
 
   pl = plot()
-  # pl = plot!(pl, θs, mean_cost, ribbon = var(cost, dims = 2),
-  #           fillalpha = .5, label="our attempt", color=:black)
+  pl = plot!(pl, θs, mean_cost, ribbon = var(cost, dims = 2),
+            fillalpha = .5, label="our attempt", color=:black)
 
   pl = plot!(pl, θs, mean(cost_baseline, dims = 2), ribbon = var(cost_baseline, dims = 2),
              fillalpha = .5, label="baseline", color=:red)
 
   vline!(pl, [θ0], linecolor=:green, lines = :dot, label="θ0")
 end
+
+function collect_dir_data(dir)
+  mdp = joinpath("data", dir, "*meta_data.csv")
+  dp = joinpath("data", dir, "*cost_data.csv")
+
+  mdsp = glob(mdp)
+  dsp = glob(dp)
+
+  mds = map(f -> CSV.File(f) |> DataFrame, mdsp)
+  ds = map(f -> CSV.File(f) |> DataFrame, dsp)
+
+  n = length(ds)
+
+  print(mds[1])
+
+  θ0 = mds[1].θ0
+  θs = ds[1].θ
+  nθ = length(θs)
+
+  cost_baseline = zeros(nθ, n)
+  cost = zeros(nθ, n)
+
+  for (i, d) in enumerate(ds)
+    cost_baseline[:, i] .+= d.cost_baseline
+    cost[:, i] .+= d.cost
+  end
+
+  θs, cost, cost_baseline
+end
+
+function baseline_mean_min()
+  Y = calc_m(m -> calc_y_true(m), ms_true)
+  ys_bl = map(calc_yhat_bl, θs)
+  is =
+    mapslices(argmin,
+              vcat(map(yhat -> mean((Y .- yhat).^2, dims = 1), ys_bl)...),
+              dims = 1)
+  θs[is]
+end
+
+err = (baseline_mean_min() - θ0)^2
+print(mean(err))
+print(var(err))

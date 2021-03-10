@@ -13,10 +13,13 @@ Random.seed!(seed)
 # === experiment parameters ===
 const Ts = 0.1                  # stepsize
 const N_trans = 250             # number of steps of the transient
-const M = 500                   # number of noise realizations
+const N_max = 3000              # number if steps after the transient
+const T = (N_trans + N_max)*Ts
+const ts = 0:Ts:T
+const M = 1000                  # number of noise realizations
 const ms = collect(1:M)         # enumerate the realizations
 const m_true_start = 1001       # the start of the true systems
-const n_true = 10               # number of true systems
+const n_true = 100              # number of true systems
 const ms_true =                 # true systems
   collect(m_true_start:(m_true_start + n_true - 1))
 const σ = 0.002                 # observation noise variance
@@ -39,11 +42,11 @@ function noise_fun(m::Int)
   end
 end
 
-wm(m::Int) = t -> noise_fun(m)(t)
+wm(m::Int) = t -> w_scale * noise_fun(m)(t)
 
 # === physical model parameters ===
-const u_scale = 0.0             # input scale
-const w_scale = 3.0             # noise scale
+const u_scale = 0.2             # input scale
+const w_scale = 2.0             # noise scale
 
 const m = 0.3                   # [kg]
 const L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not
@@ -51,14 +54,22 @@ const L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not
 const g = 9.81                  # [m/s^2]
 const k = 0.05                  # [1/s^2]
 
-const φ0 = pi / 8              # Initial angle of pendulum from negative y-axis
+const φ0 = 0. / 8              # Initial angle of pendulum from negative y-axis
 
 # u(t::Float64) = u_scale * noise_fun(m_u)(t)
-u(t::Float64) = 0.0
+u(t::Float64) = u_scale * noise_fun(1500)(t)
 
-h(sol) = apply_outputfun(x -> atan(x[1] / -x[3]), sol)          # output function
-# h(sol) = apply_outputfun(x -> atan(x[1] / -x[3])^2, sol)          # output function
-# h(sol) = apply_outputfun(x[])
+f(x) = atan(x[1] / -x[3])
+# f(x) = x[1]
+
+# h_bl(sol) = apply_outputfun(f, sol)
+# h_mean(sol) = 2 * h(sol)
+# h_true(sol) =
+#   apply_outputfun(x -> f(x) * (1 + rand(Normal())^2) +  σ * rand(Normal()), sol)
+
+h_bl(sol) = apply_outputfun(f, sol)
+h_mean(sol) = h(sol)
+h_true(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === Parameter params ===
 mk_θs(θ) = [m, θ, g, k]
@@ -69,14 +80,59 @@ const δθ = 0.08
 const θs = (θ0 - Δθ * θ0):δθ:(θ0 + Δθ * θ0) |> collect
 const nθ = length(θs)
 
-
-mk_problem(w, θ, N) = problem(pendulum(φ0, u, w, mk_θs(θ)), N, Ts)
+mk_problem(w, θ, N) = problem(pendulum(φ0, u, w, mk_θs(θ)), N_trans + N, Ts)
 
 # === cost function ===
 cost(yhat::Array{Float64, 1}, y::Array{Float64, 1}) =
   mean((yhat[N_trans:end] - y[N_trans:end]).^2)
 
 # === helper functions ===
+solvew(w, θ, N) = solve(mk_problem(t -> w(t), θ, N), saveat=ts)
+calc_yhat_bl(θ) = solvew(t -> 0., θ, N_max) |> h_bl
+calc_y_true(m) = solvew(wm(m), θ0, N_max) |> h_true
+
+calc_yhat(m, θ, N) = solvew(wm(m), θ, N) |> h_mean
+calc_m(prob, ms) = solve_m(m -> prob(m), ms)
+
+# === pre-computed values ===
+const Y = calc_m(m -> calc_y_true(m), ms_true)
+const ys_bl = map(calc_yhat_bl, θs)
+
+function calc_baseline_cost(N)
+  CS_b = zeros(nθ, n_true)
+
+  for n = 1:n_true
+    CS_b[:, n] .+= map(yhat -> cost(yhat[1:N_trans + N], Y[1:N_trans + N, n]), ys_bl)
+  end
+
+  CS_b
+end
+
+function plot_baseline_costs(N)
+  CS_b = calc_baseline_cost(N)
+
+  pl = plot(θs, mean(CS_b, dims = 2), ribbon = var(CS_b, dims = 2),
+             fillalpha = .5, label="baseline", color=:red)
+
+  vline!(pl, [θ0], linecolor=:green, lines = :dot, label="θ0")
+end
+
+function baseline_mins(N)
+  CS_b = calc_baseline_cost(N)
+  is = mapslices(argmin, CS_b, dims = 1)
+  θs[is]
+end
+
+function print_baseline_mse(N)
+  mse = mean((baseline_mins(N) .- θ0).^2)
+  println("mse: $(mse)")
+end
+
+function print_baseline_bias(N)
+  bias = mean(baseline_mins(N)) - θ0
+  println("bias: $(bias)")
+end
+
 
 # Visualize the effect of the noise at the true θ
 function plot_system_at_true_param(ms_true, ms, N)
@@ -102,16 +158,12 @@ function plot_system_at_true_param(ms_true, ms, N)
   plot(ps...)
 end
 
-
 function run1(dir, id, m_true, N)
-  T = N*Ts
-  ts = 0:Ts:T
-
   filename = "run_$(id)_$(M)_$(N)"
 
-  solvew(w, θ) = solve(mk_problem(t -> w_scale * w(t), θ, N), saveat=ts) |> h
-
-  y = solvew(wm(m_true), θ0) + σ * rand(Normal(), N + 1)
+  y = Y[1:N, m_true]
+  CS_b = calc_baseline_cost(N)
+  cs_baseline = CS_b[:, m_true]
 
   function est()
     cs = zeros(nθ)
@@ -119,10 +171,9 @@ function run1(dir, id, m_true, N)
 
     for (i, θ) in enumerate(θs)
       @info "θ point $(i) of $(nθ)"
-      cs_baseline[i] = cost(solvew(t -> 0., θ), y)
-      Y = solve_m(m -> solvew(wm(m), θ), N, ms)
-      @info "mean(Y) = $(mean(Y)), var(Y) = $(var(Y))"
-      cs[i] = cost(reshape(mean(Y, dims = 2), :), y)
+      Yhat = calc_m(m -> calc_yhat(m, θ, N), ms)
+      @info "mean(Yhat) = $(mean(Yhat)), var(Yhat) = $(var(Yhat))"
+      cs[i] = cost(reshape(mean(Yhat, dims = 2), :), y)
     end
 
     cs_baseline, cs
@@ -130,8 +181,9 @@ function run1(dir, id, m_true, N)
 
   cs_baseline, cs = est()
 
-  yhat = reshape(mean(solve_m(m -> solvew(wm(m), θ0), N, ms), dims = 2), :)
-  yhat_baseline = solvew(t -> 0., θ0)
+  yhat =
+    reshape(mean(calc_m(m -> calc_yhat(m, θ0, N), ms), dims = 2), :)
+  yhat_baseline = ys_bl[m_true]
 
   data = DataFrame(θ = θs, cost = cs, cost_baseline = cs_baseline)
   data_extra = DataFrame(y = y, yhat = yhat, yhat_baseline = yhat_baseline)
@@ -158,6 +210,6 @@ function run(dir, N)
   mkdir(joinpath("data", dir))
   for (id, m_true) in enumerate(ms_true)
     @info "run $(id) of $(length(ms_true))"
-    run1(dir, id, m_true, N_trans + N)
+    run1(dir, id, id, N)
   end
 end

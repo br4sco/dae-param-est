@@ -146,11 +146,13 @@ function apply_outputfun(h, sol)
   return map(h, sol.u)
 end
 
-function solve_m(solve::Function, N::Int, ms::Array{Int, 1})::Array{Float64, 2}
+function solve_m(solve::Function, ms::Array{Int, 1})::Array{Float64, 2}
   M = length(ms)
-  Y = zeros(N + 1, M)
-  p = Progress(M, 1, "Running $(M) simulations...", 50)
-  Threads.@threads for m = 1:M
+  y1 = solve(ms[1])
+  Y = zeros(length(y1), M)
+  Y[:, 1] += y1
+  p = Progress(M, 1, "Running $(M - 1) simulations...", 50)
+  Threads.@threads for m = 2:M
     y = solve(ms[m])
     Y[:, m] .+= y
     next!(p)
