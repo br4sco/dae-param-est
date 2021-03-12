@@ -9,12 +9,16 @@ mutable struct InterSampleData
     states::Array{Array{Float64,2},1}
     sample_times::Array{Array{Float64,1},1}
     Q::Int64    # Max number of stored samples per interval
+    #num_sampled_samples[i] is the number of times a state has been sampled
+    # in interval i
+    num_sampled_samples::Array{Int64, 1}
 end
 
 function initialize_isd(Q::Int64, N::Int64, nx::Int64)::InterSampleData
     isd_states = [zeros(0,nx) for j=1:N]
     isd_sample_times = [zeros(0) for j=1:N]
-    return InterSampleData(isd_states, isd_sample_times, Q)
+    num_samples = zeros(Int64, N)
+    return InterSampleData(isd_states, isd_sample_times, Q, num_samples)
 end
 
 function noise_inter(t::Float64,
@@ -41,7 +45,7 @@ function noise_inter(t::Float64,
     if n == N
         return x[N]
     else
-        num_inter_samples = size(isd.states[n+1])[1]
+        num_stored_samples = size(isd.states[n+1])[1]
     end
     tl = n*Ts
     tu = (n+1)*Ts
@@ -49,8 +53,8 @@ function noise_inter(t::Float64,
     iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
 
     # setting il, tl, iu, tu
-    if num_inter_samples > 0
-        for q = 1:num_inter_samples
+    if num_stored_samples > 0
+        for q = 1:num_stored_samples
             # interval index = n+1
             t_inter = isd.sample_times[n+1][q]
             if t_inter > tl && t_inter < t
@@ -108,8 +112,9 @@ function noise_inter(t::Float64,
     CΣ = cholesky(Σ)
     Σr = CΣ.L
 
-    if num_inter_samples < P
-        white_noise = z_inter[n+1][num_inter_samples+1,:]
+    if isd.num_sampled_samples[n+1] < P
+        white_noise = z_inter[n+1][num_stored_samples+1,:]
+        isd.num_sampled_samples[n+1] += 1
     else
         # @warn "Ran out of pre-generated white noise realizations for interval $(n+1)"
         white_noise = randn(Float64, (nx, 1))
@@ -117,7 +122,7 @@ function noise_inter(t::Float64,
 
     x_new = μ + Σr*white_noise
 
-    if num_inter_samples < Q
+    if num_stored_samples < Q
         isd.states[n+1] = [isd.states[n+1]; x_new']
         isd.sample_times[n+1] = [isd.sample_times[n+1]; t]
     end
