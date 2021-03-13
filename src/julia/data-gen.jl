@@ -154,21 +154,14 @@ function read_baseline_Y(expid)
   readdlm(p, ",")
 end
 
-function calc_mean_Y(M, N)
-  if (ndata + 1 + M > M_max)
-    throw(ErrorException("dataset and model overlap"))
-  end
-
-  if (N > N_max)
-    throw(ErrorException("N > N_max"))
-  end
-
+function calc_mean_Y()
+  M = M_max - 1 - ndata
   ms = collect(1:M)
-  Ym = zeros(N + 1, nθ)
+  Ym = zeros(N_max + 1, nθ)
 
   for (i, θ) in enumerate(θs)
     @info "solving for point ($(i)/$(nθ)) of θ"
-    Y = solve_in_parallel(m -> solvew(wm(m), θ, N) |> h, ms)
+    Y = solve_in_parallel(m -> solvew(wm(m), θ, N_max) |> h, ms)
     Ym[:, i] .+= reshape(mean(Y, dims = 2), :)
   end
   Ym
