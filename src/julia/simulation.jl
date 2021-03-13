@@ -125,10 +125,6 @@ function simulation_plots(T, sols, vars; kwargs...)
   ps
 end
 
-const abstol = 1e-7
-const reltol = 1e-7
-const maxiters = Int64(1e6)
-
 function problem(m::Model, N::Int, Ts::Float64)
   T = N * Ts
   DAEProblem( m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
@@ -140,20 +136,21 @@ end
 
 function apply_outputfun(h, sol)
   if sol.retcode != :Success
-    return ones(N+1) * Inf
+    throw(ErrorException("Solution retcode: $(sol.retcode)"))
   end
 
-  return map(h, sol.u)
+  map(h, sol.u)
 end
 
-function solve_m(solve::Function, ms::Array{Int, 1})::Array{Float64, 2}
-  M = length(ms)
-  y1 = solve(ms[1])
+function solve_in_parallel(solve, is)
+  M = length(is)
+  p = Progress(M, 1, "Running $(M) simulations...", 50)
+  y1 = solve(is[1])
   Y = zeros(length(y1), M)
   Y[:, 1] += y1
-  p = Progress(M, 1, "Running $(M - 1) simulations...", 50)
+  next!(p)
   Threads.@threads for m = 2:M
-    y = solve(ms[m])
+    y = solve(is[m])
     Y[:, m] .+= y
     next!(p)
   end
