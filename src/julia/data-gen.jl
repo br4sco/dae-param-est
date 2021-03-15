@@ -12,23 +12,15 @@ Random.seed!(seed)
 # ==================
 
 # === TIME ===
+const δ = 0.01                  # noise sampling time
 const Ts = 0.1                  # stepsize
-const N_trans = 250             # number of steps of the transient
 
 # === NOISE ===
 # load pre-generated realizations
-const δ = 0.01                  # noise sampling time
-const Tw = 550.0
-const Mw = 1500
 const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
-const WS = read_unconditioned_noise_1(Mw, δ, Tw)
-
-const K = size(WS, 1) - 1       # number of steps taken for the noise
-const M_max = size(WS, 2)       # number of realizations avalible in the noise
-                                # data
 
 # We do linear interpolation between exact values because it's fast
-function interpw(m::Int)
+function interpw(WS::Array{Float64, 2}, m::Int)
   function w(t::Float64)
     k = Int(floor(t / δ)) + 1
     w0 = WS[k, m]
@@ -40,14 +32,43 @@ end
 # const tsw = collect(0:δ:(δ * K))
 # interpw(w::Int) = Spline1D(tsw, WS[:, m]; k=2, bc="error", s=0.0)
 
-# we compute the maximum number of steps we can take with this noise data
-const N_max = Int(floor(K * δ / Ts))
-const T_max = N_max * Ts
+# === DATASET ===
+# noise realizations
+const WS_data =
+  readdlm(joinpath("data",
+                   "unconditioned_noise_data_501_001_102500_1234.csv"),
+          ',')
+
+const M_data = size(WS_data, 2) - 1
+
+# m'th noise realization of the dataset
+wm_data(m::Int) = interpw(WS_data, m)
+
+# we choose the last realization of the noise as input
+u(t) = wm_data(M_data + 1)(t)
+
+# === MODEL ===
+
+# noise realizations
+const WS =
+  readdlm(joinpath("data",
+                   "unconditioned_noise_model_500_001_102500_1234.csv"),
+          ',')
+
+wm(m::Int) = interpw(WS, m)
+
+# we compute the maximum number of steps we can take
+const K = min(size(WS_data, 1), size(WS, 1)) - 2
+const N = Int(floor(K * δ / Ts))
+# const N = 500
+
+# number of realizations in the model
+const M = size(WS, 2)
 
 # === MODEL (AND DATA) PARAMETERS ===
 const σ = 0.002                 # observation noise variance
 const u_scale = 0.2             # input scale
-const w_scale = 2.0             # noise scale
+const w_scale = 0.6             # noise scale
 
 const m = 0.3                   # [kg]
 const L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not
@@ -57,29 +78,20 @@ const k = 0.05                  # [1/s^2]
 
 const φ0 = 0. / 8              # Initial angle of pendulum from negative y-axis
 
-# === INPUT FUNCTION ===
-# we choose the last realization of the noise as input
-u(t::Float64) = u_scale * interpw(M_max)(t)
-
-# === PROCESS NOISE FUNCTION ===
-function wm(m::Int)             # gives the m'th realization
-  let itp = interpw(m)
-    t -> w_scale * itp(t)
-  end
-end
-
 # === OUTPUT FUNCTIONS ===
 f(x::Array{Float64, 1}) = atan(x[1] / -x[3]) # applied on the state at each step
 h(sol) = apply_outputfun(f, sol)             # for our model
 h_baseline(sol) = apply_outputfun(f, sol)    # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
-mk_θs(θ) = [m, θ, g, k]
-realize_model(w, θ, N) = problem(pendulum(φ0, u, w, mk_θs(θ)), N, Ts)
+const θ0 = L                    # true value of θ
+mk_θs(θ) = [m, L, g, θ]
+realize_model(w, θ, N) =
+  problem(pendulum(φ0, t -> u_scale * u(t), w, mk_θs(θ)), N, Ts)
 
 # === SOLVER PARAMETERS ===
-const abstol = 1e-6
-const reltol = 1e-3
+const abstol = 1e-7
+const reltol = 1e-4
 # const abstols = [abstol, abstol, abstol, abstol, Inf, Inf, Inf, Inf]
 const maxiters = Int64(1e6)
 
@@ -90,19 +102,12 @@ solvew(w, θ, N; kwargs...) = solve(realize_model(w, θ, N),
                                    maxiters = maxiters;
                                    kwargs...)
 
-# === DATASET ===
-const θ0 = L                    # true value of θ
-const ndata = 100               # the size of the dataset
-
-# we pick the last realizations (excluding the input to form the dataset)
-const ms_data = (M_max - ndata):(M_max - 1) |> collect
-
 # data set output function
 h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === EXPERIMENT PARAMETERS ===
-const Δθ = 0.2θ0               # determines the interval around θ0
-const hθ = 15                  # number of steps in the left/right interval
+const Δθ = 0.2θ0                # determines the interval around θ0
+const hθ = 15                   # number of steps in the left/right interval
 const δθ = round(Δθ / hθ; sigdigits = 1)
 const θs = (θ0 - hθ * δθ):δθ:(θ0 + hθ * δθ) |> collect
 const nθ = length(θs)
@@ -117,7 +122,10 @@ exp_path(id) = joinpath(data_dir, id)
 mk_exp_dir(id) =  id |> exp_path |> mkdir
 
 function calc_Y()
-  solve_in_parallel(m -> solvew(wm(m), θ0, N_max) |> h_data, ms_data)
+  ms = collect(1:M_data)
+  solve_in_parallel(m ->
+                    solvew(t -> w_scale * wm_data(m)(t), θ0, N) |> h_data,
+                    ms)
 end
 
 function write_Y(expid, Y)
@@ -131,7 +139,7 @@ function read_Y(expid)
 end
 
 function calc_baseline_Y()
-  solve_in_parallel(θ -> solvew(t -> 0., θ, N_max) |> h_baseline, θs)
+  solve_in_parallel(θ -> solvew(t -> 0., θ, N) |> h_baseline, θs)
 end
 
 function write_theta(expid)
@@ -155,13 +163,14 @@ function read_baseline_Y(expid)
 end
 
 function calc_mean_Y()
-  M = M_max - 1 - ndata
   ms = collect(1:M)
-  Ym = zeros(N_max + 1, nθ)
+  Ym = zeros(N + 1, nθ)
 
   for (i, θ) in enumerate(θs)
     @info "solving for point ($(i)/$(nθ)) of θ"
-    Y = solve_in_parallel(m -> solvew(wm(m), θ, N_max) |> h, ms)
+    Y = solve_in_parallel(m ->
+                          solvew(t -> w_scale * wm(m)(t), θ, N) |> h,
+                          ms)
     Ym[:, i] .+= reshape(mean(Y, dims = 2), :)
   end
   Ym

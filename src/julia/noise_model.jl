@@ -121,28 +121,16 @@ function gen_noise_m(gen_noise, ZS)
   WS
 end
 
-function write_unconditioned_noise(filter, id, M, δ, T)
+function gen_unconditioned_noise(filter, M, δ, K)
   A, B, C = ss_of_linear_filter(filter())
   nx = size(A, 1)
-  K = length(0:δ:T)
   ZS = [rand(Normal(), nx, K) for m in 1:M]
   WS = gen_noise_m(zs -> gen_unconditioned_noise(A, B, C, δ, zs), ZS)
-  path = joinpath("data", "unconditioned_noise_$(id)_$(M)_$(δ)_$(T).csv")
-  writedlm(path, WS, ',')
+  WS
 end
 
-function write_unconditioned_noise_1(id, M, δ, T)
-  write_unconditioned_noise(linear_filter_1, id, M, δ, T)
-end
-
-function read_unconditioned_noise(id::Int, M::Int, δ::Float64, T::Float64)::Array{Float64, 2}
-  path = joinpath("data", "unconditioned_noise_$(id)_$(M)_$(δ)_$(T).csv")
-  readdlm(path, ',')
-end
-
-function read_unconditioned_noise_1(M, δ, T)
-  read_unconditioned_noise(1, M, δ, T)
-end
+gen_unconditioned_noise_1(M, δ, K) =
+  gen_unconditioned_noise(linear_filter_1, M, δ, K)
 
 function mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
   let
