@@ -9,7 +9,7 @@ using LaTeXStrings
 const N_trans = 500
 
 const data_dir = "data"
-const expid = "L_06_10_alsvin"
+const expid = "L_06_10_ha1_alsvin"
 
 exp_path(id) = joinpath(data_dir, id)
 
