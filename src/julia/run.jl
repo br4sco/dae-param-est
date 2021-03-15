@@ -1,6 +1,6 @@
 include("data-gen.jl")
 
-const exp = "L_06_10_c"
+const exp = "L_06_10_d"
 
 mk_exp_dir(exp)
 
