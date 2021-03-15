@@ -36,7 +36,7 @@ end
 # noise realizations
 const WS_data =
   readdlm(joinpath("data",
-                   "unconditioned_noise_data_501_001_102500_1234.csv"),
+                   "unconditioned_noise_data_501_001_102500_1234_alsvin.csv"),
           ',')
 
 const M_data = size(WS_data, 2) - 1
@@ -52,7 +52,7 @@ u(t) = wm_data(M_data + 1)(t)
 # noise realizations
 const WS =
   readdlm(joinpath("data",
-                   "unconditioned_noise_model_500_001_102500_1234.csv"),
+                   "unconditioned_noise_model_500_001_102500_1234_alsvin.csv"),
           ',')
 
 wm(m::Int) = interpw(WS, m)
@@ -68,6 +68,7 @@ const M = size(WS, 2)
 # === MODEL (AND DATA) PARAMETERS ===
 const σ = 0.002                 # observation noise variance
 const u_scale = 0.2             # input scale
+const u_bias = 0.0              # input bias
 const w_scale = 0.6             # noise scale
 
 const m = 0.3                   # [kg]
@@ -87,13 +88,13 @@ h_baseline(sol) = apply_outputfun(f, sol)    # for the baseline method
 const θ0 = L                    # true value of θ
 mk_θs(θ) = [m, L, g, θ]
 realize_model(w, θ, N) =
-  problem(pendulum(φ0, t -> u_scale * u(t), w, mk_θs(θ)), N, Ts)
+  problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
 
 # === SOLVER PARAMETERS ===
-const abstol = 1e-7
-const reltol = 1e-4
+const abstol = 1e-8
+const reltol = 1e-5
 # const abstols = [abstol, abstol, abstol, abstol, Inf, Inf, Inf, Inf]
-const maxiters = Int64(1e6)
+const maxiters = Int64(1e7)
 
 solvew(w, θ, N; kwargs...) = solve(realize_model(w, θ, N),
                                    saveat=0:Ts:(N*Ts),
@@ -121,11 +122,11 @@ const data_dir = "data"
 exp_path(id) = joinpath(data_dir, id)
 mk_exp_dir(id) =  id |> exp_path |> mkdir
 
+calc_y(m) = solvew(t -> w_scale * wm_data(m)(t), θ0, N) |> h_data
+
 function calc_Y()
   ms = collect(1:M_data)
-  solve_in_parallel(m ->
-                    solvew(t -> w_scale * wm_data(m)(t), θ0, N) |> h_data,
-                    ms)
+  solve_in_parallel(calc_y, ms)
 end
 
 function write_Y(expid, Y)
@@ -138,9 +139,9 @@ function read_Y(expid)
   readdlm(p, ",")
 end
 
-function calc_baseline_Y()
-  solve_in_parallel(θ -> solvew(t -> 0., θ, N) |> h_baseline, θs)
-end
+calc_baseline_y(θ) = solvew(t -> 0., θ, N) |> h_baseline
+
+calc_baseline_Y() = solve_in_parallel(calc_baseline_y, θs)
 
 function write_theta(expid)
   p = joinpath(exp_path(expid), "theta.csv")
@@ -162,15 +163,15 @@ function read_baseline_Y(expid)
   readdlm(p, ",")
 end
 
+calc_mean_y(θ, m) = solvew(t -> w_scale * wm(m)(t), θ, N) |> h
+
 function calc_mean_Y()
   ms = collect(1:M)
   Ym = zeros(N + 1, nθ)
 
   for (i, θ) in enumerate(θs)
     @info "solving for point ($(i)/$(nθ)) of θ"
-    Y = solve_in_parallel(m ->
-                          solvew(t -> w_scale * wm(m)(t), θ, N) |> h,
-                          ms)
+    Y = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
     Ym[:, i] .+= reshape(mean(Y, dims = 2), :)
   end
   Ym
