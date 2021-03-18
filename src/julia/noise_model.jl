@@ -121,6 +121,13 @@ function gen_noise_m(gen_noise, ZS)
   WS
 end
 
+function gen_unconditioned_noise_ZS(filter, ZS, δ)
+  A, B, C = ss_of_linear_filter(filter())
+  nx = size(A, 1)
+  WS = gen_noise_m(zs -> gen_unconditioned_noise(A, B, C, δ, zs), ZS)
+  WS
+end
+
 function gen_unconditioned_noise(filter, M, δ, K)
   A, B, C = ss_of_linear_filter(filter())
   nx = size(A, 1)
@@ -128,6 +135,9 @@ function gen_unconditioned_noise(filter, M, δ, K)
   WS = gen_noise_m(zs -> gen_unconditioned_noise(A, B, C, δ, zs), ZS)
   WS
 end
+
+gen_unconditioned_noise_1(ZS, δ) =
+  gen_unconditioned_noise_ZS(linear_filter_1, ZS, δ)
 
 gen_unconditioned_noise_1(M, δ, K) =
   gen_unconditioned_noise(linear_filter_1, M, δ, K)

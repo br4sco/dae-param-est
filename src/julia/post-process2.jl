@@ -9,7 +9,11 @@ using LaTeXStrings
 const N_trans = 500
 
 const data_dir = "data"
-const expid = "L_06_10_ha1_alsvin"
+const expid = "L_06_25_alsvin_high"
+# const expid = "candidate_1"
+
+const atol = 1e-8
+const rtol = 1e-5
 
 exp_path(id) = joinpath(data_dir, id)
 
@@ -38,12 +42,26 @@ function read_meta_data(expid)
   CSV.File(p) |> DataFrame
 end
 
+function errY(Y)
+  let
+    X = map(tan, Y)
+    ΔX = map(x -> max(abs(x), atol),  rtol * X )
+    ΔX ./ (1 .+ X.^2)
+  end
+end
+
 cost(y::Array{Float64, 1}, yhat::Array{Float64, 1}) = mean((y - yhat).^2)
+cost_err(y::Array{Float64, 1}, yhat::Array{Float64, 1}, Δyhat::Array{Float64, 1}) =
+  2mean(map(abs, (y - yhat) .* Δyhat))
 
 const md = read_meta_data(expid)
 const Y = read_Y(expid)
 const Yb = read_baseline_Y(expid)
 const Ym = read_mean_Y(expid)
+# const Ym = zeros(size(Yb))
+
+const ΔYb = errY(Yb)
+const ΔYm = errY(Ym)
 
 const N = size(Y, 1)
 const Ts = md.Ts[1]
@@ -54,12 +72,12 @@ const nθ = length(θs)
 const i0 = Int(ceil(nθ / 2))
 const θ0 = θs[i0]
 
-plot_y_at_theta0(m, start = 0, stop = N) =
+plot_y_at_theta0(m::Int, start = 1, stop = N) =
   plot(ts[start:stop],
        [Y[start:stop, m], Yb[start:stop, i0], Ym[start:stop, i0]],
        labels = ["true" "baseline" "mean"])
 
-calc_costs(Yhat, N) =
+calc_costs(Yhat::Array{Float64, 2}, N::Int) =
   mapslices(y ->
             mapslices(yhat -> cost(y[N_trans:N], yhat[N_trans:N]),
                       Yhat,
@@ -67,11 +85,30 @@ calc_costs(Yhat, N) =
             Y,
             dims = 1)
 
-const costsb = calc_costs(Yb, N)
-const costsm = calc_costs(Ym, N)
+function calc_costs_err(Yhat::Array{Float64, 2}, N::Int)
+  ΔYhat = errY(Yhat)
+  nerr = size(Yhat, 2)
+  E = size(Y, 2)
+  err = ones(nerr, E) * Inf
+  for i = 1:nerr
+    for e = 1:E
+      err[i, e] =
+        cost_err(Y[N_trans:N, e], Yhat[N_trans:N, i], ΔYhat[N_trans:N, i])
+    end
+  end
+  err
+end
 
-function plot_costm(m)
+
+const costsb = calc_costs(Yb, N)
+const Δcostsb = calc_costs_err(Yb, N)
+const costsm = calc_costs(Ym, N)
+const Δcostsm = calc_costs_err(Ym, N)
+
+function plot_costm(m::Int)
+
   p = plot(θs, costsm[:, m],
+           ribbon = Δcostsm[:, m],
            label = "realization $(m)",
            xlabel = L"\theta",
            ylabel = L"cost(\theta)",
@@ -79,8 +116,9 @@ function plot_costm(m)
   vline!(p, [θ0], linestyle = :dash, label = "θ0")
 end
 
-function plot_costb(m)
+function plot_costb(m::Int)
   p = plot(θs, costsb[:, m],
+           ribbon = Δcostsb[:, m],
            label = "realization $(m)",
            xlabel = L"\theta",
            ylabel = L"cost(\theta)",
@@ -88,10 +126,22 @@ function plot_costb(m)
   vline!(p, [θ0], linestyle = :dash, label = "θ0")
 end
 
-function calc_theta_hats(Y, N)
+function calc_theta_hats(Y::Array{Float64, 2}, N::Int)
   cost = calc_costs(Y, N)
   argmincost = mapslices(argmin, cost, dims = 1)[:]
   θs[argmincost]
+end
+
+calc_θhatsb(N) = calc_theta_hats(Yb, N)
+calc_Δθhatsb(N) = map(abs, calc_theta_hats(Yb + ΔYb, N) - calc_θhatsb(N))
+calc_θhatsm(N) = calc_theta_hats(Ym, N)
+calc_Δθhatsm(N) = map(abs, calc_theta_hats(Ym + ΔYm, N) - calc_θhatsm(N))
+
+function write_theta_hats(Ns::Array{Int, 1})
+  θhatbs = hcat(map(N -> calc_theta_hats(Yb, N), Ns)...)
+  θhatms = hcat(map(N -> calc_theta_hats(Ym, N), Ns)...)
+  writedlm(joinpath(exp_path(expid), "theta_hat_baseline.csv"), θhatbs, ',')
+  writedlm(joinpath(exp_path(expid), "theta_hat_mean.csv"), θhatms, ',')
 end
 
 function plot_thetahat_density_b!(p, N)
@@ -122,9 +172,14 @@ function plot_thetahat_boxs(Ns)
   θhatbs = map(N -> calc_theta_hats(Yb, N), Ns)
   θhatms = map(N -> calc_theta_hats(Ym, N), Ns)
   θhats = hcat(θhatbs..., θhatms...)
-  labels = reshape([map(N -> "baseline $(N)", Ns); map(N -> "mean $(N)", Ns)], (1, :))
+  labels = reshape([map(N -> "bl $(N)", Ns); map(N -> "m $(N)", Ns)], (1, :))
   idxs = 1:(2length(Ns))
-  p = boxplot(θhats, xticks = (idxs, labels), label = "", ylabel = L"\hat{\theta}")
+  p = boxplot(θhats,
+              xticks = (idxs, labels),
+              label = "",
+              ylabel = L"\hat{\theta}",
+              notch = false)
+
   hline!(p, [θ0], label = L"\theta_0", linestyle = :dot, linecolor = :gray)
 end
 
