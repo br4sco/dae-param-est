@@ -208,7 +208,9 @@ function write_meta_data(expid)
                  u_scale = u_scale,
                  w_scale = w_scale,
                  noise_method_name = noise_method_name,
-                 seed = seed)
+                 seed = seed,
+                 atol = abstol,
+                 rtol = reltol)
   CSV.write(p, df)
 end
 
