@@ -1,11 +1,11 @@
 using PyPlot
 using DelimitedFiles
 
-thb = readdlm("data/L_06_25_alsvin_scale_10_3/theta_hat_baseline.csv", ',')
-thm = readdlm("data/L_06_25_alsvin_scale_10_3/theta_hat_mean.csv", ',')
+thb = readdlm("data/experiments/L_06_25_alsvin_high/theta_hat_baseline.csv", ',')
+thm = readdlm("data/experiments/L_06_25_alsvin_high/theta_hat_mean.csv", ',')
 
 th0 = 6.25
-labels = ["1000", "2000", "5000", "10000"]
+labels = ["5000", "10000", "15000", "20000", "25000"]
 
 fig, ax = subplots(1,2, sharey = true)
 

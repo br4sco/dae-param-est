@@ -29,7 +29,7 @@ end
 function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
       # the residual function
-      function f!(out, zp, z, θ, t)
+      function f!(res, zp, z, θ, t)
         x = z[1]
         xp = zp[1]
         vx = z[2]
@@ -43,17 +43,15 @@ function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}):
         λ = zp[5]
         μ = zp[6]
 
-        ut = z[7]
-        wt = z[8]
+        out = z[7]
 
-        out[1] = vx - xp - μ * 2x
-        out[2] = vy - yp - μ * 2y
-        out[3] = vxp - λ * x / m + k * vx * abs(vx) / m - (ut + wt * wt) / m
-        out[4] = vyp - λ * y / m + k * vy * abs(vy) / m + g
-        out[5] = x^2 + y^2 - L^2
-        out[6] = 2(x * vx + y * vy)
-        out[7] = ut - u(t)
-        out[8] = wt - w(t)
+        res[1] = vx - xp - μ * 2x
+        res[2] = vy - yp - μ * 2y
+        res[3] = vxp - λ * x / m + k * vx * abs(vx) / m - (u(t) + w(t) * w(t)) / m
+        res[4] = vyp - λ * y / m + k * vy * abs(vy) / m + g
+        res[5] = x^2 + y^2 - L^2
+        res[6] = 2(x * vx + y * vy)
+        res[7] = out - atan(x / -y)
       end
 
       # initial values, the pendulum starts at rest
@@ -73,8 +71,7 @@ function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}):
         0.,                     # y'
         0.,                     # int λ
         0.,                     # int μ
-        u0,                     # u
-        w0,                     # w
+        atan(x0 / -y0),
       ]
 
       zp0 = [
@@ -85,7 +82,6 @@ function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}):
         λ0,                     # λ
         0.,                     # μ
         0.,                     # u'
-        0.,                     # w'
       ]
 
       dvars = Bool[
@@ -95,7 +91,6 @@ function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}):
         1,
         1,
         1,
-        0,
         0,
       ]
 

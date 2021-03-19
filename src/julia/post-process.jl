@@ -8,12 +8,12 @@ using LaTeXStrings
 
 const N_trans = 500
 
-const data_dir = "data"
-const expid = "L_06_25_alsvin_high"
-# const expid = "candidate_1"
+const data_dir = "data/experiemnts"
+# const expid = "L_06_25_alsvin_high"
+const expid = "candidate_4"
 
-const atol = 1e-8
-const rtol = 1e-5
+const atol = 1e-7
+const rtol = 1e-4
 
 exp_path(id) = joinpath(data_dir, id)
 
@@ -42,14 +42,7 @@ function read_meta_data(expid)
   CSV.File(p) |> DataFrame
 end
 
-function errY(Y)
-  let
-    X = map(tan, Y)
-    ΔX = map(x -> max(abs(x), atol),  rtol * X )
-    ΔX ./ (1 .+ X.^2)
-  end
-end
-
+errY(Y) = map(x -> max(x, atol), rtol * Y)
 cost(y::Array{Float64, 1}, yhat::Array{Float64, 1}) = mean((y - yhat).^2)
 cost_err(y::Array{Float64, 1}, yhat::Array{Float64, 1}, Δyhat::Array{Float64, 1}) =
   2mean(map(abs, (y - yhat) .* Δyhat))

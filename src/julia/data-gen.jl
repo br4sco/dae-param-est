@@ -68,11 +68,11 @@ const M = size(WS, 2)
 
 # === MODEL (AND DATA) PARAMETERS ===
 const σ = 0.002                 # observation noise variance
-# const u_scale = 0.2             # input scale
-const u_scale = 10.0            # input scale larger
+const u_scale = 0.2             # input scale
+# const u_scale = 10.0            # input scale larger
 const u_bias = 0.0              # input bias
-# const w_scale = 0.6             # noise scale
-const w_scale = 1.5             # noise scale larger
+const w_scale = 0.6             # noise scale
+# const w_scale = 5.0             # noise scale larger
 
 const m = 0.3                   # [kg]
 const L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not
@@ -83,9 +83,9 @@ const k = 0.05                  # [1/s^2]
 const φ0 = 0. / 8              # Initial angle of pendulum from negative y-axis
 
 # === OUTPUT FUNCTIONS ===
-f(x::Array{Float64, 1}) = atan(x[1] / -x[3]) # applied on the state at each step
-h(sol) = apply_outputfun(f, sol)             # for our model
-h_baseline(sol) = apply_outputfun(f, sol)    # for the baseline method
+f(x::Array{Float64, 1}) = x[7]            # applied on the state at each step
+h(sol) = apply_outputfun(f, sol)          # for our model
+h_baseline(sol) = apply_outputfun(f, sol) # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
 const θ0 = L                    # true value of θ
@@ -94,10 +94,10 @@ realize_model(w::Function, θ::Float64, N::Int) =
   problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
 
 # === SOLVER PARAMETERS ===
-const abstol = 1e-6
-const reltol = 1e-4
+const abstol = 1e-7
+const reltol = 1e-3
 # const abstols = [abstol, abstol, abstol, abstol, Inf, Inf, Inf, Inf]
-const maxiters = Int64(1e7)
+const maxiters = Int64(1e8)
 
 solvew(w::Function, θ::Float64, N::Int; kwargs...) =
   solve(realize_model(w, θ, N),
@@ -111,19 +111,17 @@ solvew(w::Function, θ::Float64, N::Int; kwargs...) =
 h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === EXPERIMENT PARAMETERS ===
-# const Δθ = 0.2θ0                # determines the interval around θ0
-const hθ = 15                   # number of steps in the left/right interval
-# const hθ = 30                   # number of steps in the left/right interval
-# const δθ = round(Δθ / hθ; sigdigits = 1)
+const lnθ = 15                   # number of steps in the left interval
+const rnθ = 15                   # number of steps in the right interval
 const δθ = 0.1
-const θs = (θ0 - hθ * δθ):δθ:(θ0 + hθ * δθ) |> collect
+const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
 const nθ = length(θs)
 
 # =======================
 # === DATA GENERATION ===
 # =======================
 
-const data_dir = "data"
+const data_dir = joinpath("data", "experiments")
 
 exp_path(id) = joinpath(data_dir, id)
 mk_exp_dir(id) =  id |> exp_path |> mkdir
