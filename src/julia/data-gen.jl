@@ -37,6 +37,7 @@ end
 # noise realizations
 const WS_data =
   readdlm(joinpath("data",
+                   "experiments",
                    "unconditioned_noise_data_501_001_250000_1234_alsvin.csv"),
           ',')
 
@@ -53,6 +54,7 @@ u(t::Float64) = wm_data(M_data + 1)(t)
 # noise realizations
 const WS =
   readdlm(joinpath("data",
+                   "experiments",
                    "unconditioned_noise_model_500_001_250000_1234_alsvin.csv"),
           ',')
 
@@ -95,7 +97,7 @@ realize_model(w::Function, θ::Float64, N::Int) =
 
 # === SOLVER PARAMETERS ===
 const abstol = 1e-7
-const reltol = 1e-3
+const reltol = 1e-4
 # const abstols = [abstol, abstol, abstol, abstol, Inf, Inf, Inf, Inf]
 const maxiters = Int64(1e8)
 
