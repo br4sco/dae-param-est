@@ -29,7 +29,8 @@ function noise_inter(t::Float64,
                      A::Array{Float64, 2},
                      B::Array{Float64, 2},
                      x::Array{Array{Float64, 1}, 1},
-                     z_inter::Array{Array{Float64, 2}, 1},
+                     #z_inter::Array{Array{Float64, 2}, 1},
+                     z_inter::Any,
                      isd::InterSampleData,
                      ϵ::Float64=10e-12)
 
@@ -37,7 +38,8 @@ function noise_inter(t::Float64,
     δ = t - n*Ts
     nx = size(A)[1]
     Q = isd.Q
-    P = size(z_inter[1])[1]
+    # P = size(z_inter[1])[1]
+    P = 0
     N = size(isd.states)[1]
     use_interpolation = isd.use_interpolation
     # This case is usually handled by the check further down for δ smaller
