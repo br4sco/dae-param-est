@@ -1,4 +1,4 @@
-using Plots, CSV, DataFrames
+using Plots
 import Random
 include("new_noise_interpolation.jl")
 include("noise_generation.jl")
@@ -28,7 +28,8 @@ const Ts = 0.05             # Sampling frequency of noise model
 N = 2     # Noise samples, excluding the initial one, x_e(0)
 M = 100
 P = 4       # Number of inter-sample samples stored
-Q = 4       # Number of inter-sample states stored
+Q = 0       # Number of inter-sample states stored
+use_interpolation = true
 # N = 8     # Noise samples, excluding the initial one, x_e(0)
 # M = 2
 # P = 1       # Number of inter-sample samples stored
@@ -38,7 +39,7 @@ noise_uniform_dat, noise_inter_dat = generate_noise_new(N, M, P, nx)
 # Computes all M realizations of filtered white noise
 x_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
 
-isd = initialize_isd(Q, N, nx)
+isd = initialize_isd(Q, N, nx, use_interpolation)
 
 m = 1
 
@@ -47,7 +48,7 @@ m = 1
 # a state-vector (Array{Float64, 1}), not a scalar
 function w(t::Float64)
     return (C*noise_inter(t, Ts, A, B, x_mat[:, m], noise_inter_dat[m],
-            isd, noise_model.x0))[1]
+            isd))[1]
 end
 
 δ = 0.025
@@ -58,5 +59,8 @@ end
 t = 0.0368
 # t = 0.172
 # t = 0.242
-plot(0:0.001:N*Ts, w)
+t_vec = 0:0.001:N*Ts
+w_vec = [w(t) for t=t_vec]
+plot(t_vec, w_vec)
+# plot(N*Ts-0.001:0.001:N*Ts, w)
 # # # savefig("./plots.png")
