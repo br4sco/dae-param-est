@@ -1,8 +1,11 @@
 using DataFrames
 using Dierckx
+using Distributions
 
-include("noise_model.jl")
+# include("noise_model.jl")
 include("simulation.jl")
+include("noise_generation.jl")
+include("new_noise_interpolation.jl")
 
 seed = 1234
 Random.seed!(seed)
@@ -17,8 +20,14 @@ const Ts = 0.1                  # stepsize
 # const Ts = 0.5                  # stepsize larger
 
 # === NOISE ===
-# load pre-generated realizations
-const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
+const Q = 0
+const M = 500
+const E = 500
+const Nw = 10000
+
+# === PR-GENERATED ===
+# const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
+const noise_method_name = "Pre-generated conditioned noise (δ = $(δ), Q = $(Q))"
 
 # We do linear interpolation between exact values because it's fast
 function interpw(WS::Array{Float64, 2}, m::Int)
@@ -30,49 +39,96 @@ function interpw(WS::Array{Float64, 2}, m::Int)
   end
 end
 
+function interpx(XS::Array{Float64, 2}, nx::Int, m::Int, t::Float64)
+  k = Int(floor(t / δ)) + 1
+  x0 = XS[k:(k + nx - 1), m]
+  x1 = XS[(k + nx):(k + 2nx - 1), m]
+  x0 .+ (t - (k - 1) * δ) .* (x1 .- x0) ./ δ
+end
+
 # const tsw = collect(0:δ:(δ * K))
 # interpw(w::Int) = Spline1D(tsw, WS[:, m]; k=2, bc="error", s=0.0)
 
-# === DATASET ===
-# noise realizations
-const WS_data =
-  readdlm(joinpath("data",
-                   "experiments",
-                   "unconditioned_noise_data_500_001_500000_1234_alsvin_b.csv"),
-          ',')
+# === PRE-GENERATED DATA ===
+# const WSd =
+#   readdlm(joinpath("data",
+#                    "experiments",
+#                    "unconditioned_noise_data_501_001_250000_1234_alsvin.csv"),
+#           ',')
 
-const M_data = size(WS_data, 2)
+# const WSu =
+#   readdlm(joinpath("data",
+#                    "experiments",
+#                    "unconditioned_noise_input_001_250000_1234_alsvin.csv"),
+#           ',')
 
-const WS_input =
-  readdlm(joinpath("data",
-                   "experiments",
-                   "unconditioned_noise_input_001_500000_1234_alsvin.csv"),
-          ',')
+# const WSm =
+#   readdlm(joinpath("data",
+#                    "experiments",
+#                    "unconditioned_noise_model_500_001_250000_1234_alsvin.csv"),
+#           ',')
 
-# m'th noise realization of the dataset
-wm_data(m::Int) = interpw(WS_data, m)
+# === NOISE INTERPOLATION ===
+const nx = 2
+const A = [0.0 1.0; -4^2 -0.8]
+const B = reshape([0.0 1.0], (2,1))
+const C = [1.0 0.0]
+# const A = [0 -4^2; 1 -0.8]
+# const B = reshape([1.0 0.0], (2,1))
+# const C = [0 1]
+const x0 = zeros(nx)
+const dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
 
-# we choose the last realization of the noise as input
-u(t::Float64) = interpw(WS_input, 1)(t)
+to_data(Z::Array{Float64, 2}) =
+  [Z[:, m:(m + nx - 1)] for m = 1:nx:(size(Z, 2) / nx)]
+
+read_Z(f::String) = readdlm(joinpath("data", "experiments", f), ',') |>
+  transpose |> copy |> to_data
+
+# const Zd = read_Z("Zd_501_25_1234.csv")
+# const Zm = read_Z("Zm_500_25_1234.csv")
+# const Zu = read_Z("Zu_25_1234.csv")
+# const Nw = min(size(Zd[1], 1), size(Zm[1], 1), size(Zu[1], 1))
+
+const Zd = [randn(Nw + 1, nx) for e = 1:E]
+const Zm = [randn(Nw + 1, nx) for m = 1:M]
+const Zu = [randn(Nw + 1, nx)]
+
+mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
+  hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
+
+const XWd = simulate_noise_process_new(dmdl, Zd) |> mangle_XW
+const XWm = simulate_noise_process_new(dmdl, Zm) |> mangle_XW
+const XWu = simulate_noise_process_new(dmdl, Zu) |> mangle_XW
+
+function mk_w(A::Array{Float64, 2},
+              B::Array{Float64, 2},
+              C::Array{Float64, 2} ,
+              XW::Array{Float64, 2},
+              m::Int)
+
+  let nx = size(A, 1)
+    t -> first(C * interpx(XW, nx, m, t))
+  end
+end
+
+# === CHOOSE NOISE INTERPOLATION METHOD ===
+wmd(e::Int) = mk_w(A, B, C, XWd, e)
+wmm(m::Int) = mk_w(A, B, C, XWm, m)
+u(t::Float64) = mk_w(A, B, C, XWu, 1)(t)
+
+# wmd(e::Int) = interpw(WSd, e)
+# wmm(m::Int) = interpw(WSm, m)
+# u(t::Float64) = interpw(WSd, M + 1)(t)
 
 # === MODEL ===
-
-# noise realizations
-const WS =
-  readdlm(joinpath("data",
-                   "experiments",
-                   "unconditioned_noise_model_500_001_500000_1234_alsvin.csv"),
-          ',')
-
-wm(m::Int) = interpw(WS, m)
-
 # we compute the maximum number of steps we can take
-const K = min(size(WS_data, 1), size(WS, 1)) - 2
-const N = Int(floor(K * δ / Ts))
+# const K = min(size(WSd, 1), size(WS, 1)) - 2
+const N = Int(floor(Nw * δ / Ts))
 # const N = 10000
 
 # number of realizations in the model
-const M = size(WS, 2)
+# const M = size(WS, 2)
 
 # === MODEL (AND DATA) PARAMETERS ===
 const σ = 0.002                 # observation noise variance
@@ -102,9 +158,8 @@ realize_model(w::Function, θ::Float64, N::Int) =
   problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
 
 # === SOLVER PARAMETERS ===
-const abstol = 1e-8
-const reltol = 1e-5
-# const abstols = [abstol, abstol, abstol, abstol, Inf, Inf, Inf, Inf]
+const abstol = 1e-7
+const reltol = 1e-4
 const maxiters = Int64(1e8)
 
 solvew(w::Function, θ::Float64, N::Int; kwargs...) =
@@ -134,11 +189,11 @@ const data_dir = joinpath("data", "experiments")
 exp_path(id) = joinpath(data_dir, id)
 mk_exp_dir(id) =  id |> exp_path |> mkdir
 
-calc_y(m::Int) = solvew(t -> w_scale * wm_data(m)(t), θ0, N) |> h_data
+calc_y(e::Int) = solvew(t -> w_scale * wmd(e)(t), θ0, N) |> h_data
 
 function calc_Y()
-  ms = collect(1:M_data)
-  solve_in_parallel(calc_y, ms)
+  es = collect(1:E)
+  solve_in_parallel(calc_y, es)
 end
 
 function write_Y(expid, Y)
@@ -178,7 +233,7 @@ function read_baseline_Y(expid)
 end
 
 calc_mean_y_N(N::Int, θ::Float64, m::Int) =
-  solvew(t -> w_scale * wm(m)(t), θ, N) |> h
+  solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
 
 calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
 

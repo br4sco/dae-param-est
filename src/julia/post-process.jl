@@ -5,21 +5,21 @@ using DataFrames
 using StatsPlots
 using Statistics
 using LaTeXStrings
+using Glob
 
 const N_trans = 500
 
-const data_dir = "data/experiemnts"
+const data_dir = "data/experiments"
 # const expid = "L_06_25_alsvin_high"
-const expid = "candidate_4"
+const expid = "candidate_7"
 
-const atol = 1e-7
-const rtol = 1e-4
 
 exp_path(id) = joinpath(data_dir, id)
 
 function read_Y(expid)
-  p = joinpath(exp_path(expid), "Y.csv")
-  readdlm(p, ',')
+  g = glob(joinpath(exp_path(expid), "Yd*.csv"))
+  Ys = map(p -> readdlm(p, ','), g)
+  hcat(Ys...)
 end
 
 function read_theta(expid)
@@ -53,6 +53,9 @@ const Yb = read_baseline_Y(expid)
 const Ym = read_mean_Y(expid)
 # const Ym = zeros(size(Yb))
 
+const atol = md.atol[1]
+const rtol = md.rtol[1]
+
 const ΔYb = errY(Yb)
 const ΔYm = errY(Ym)
 
@@ -63,7 +66,7 @@ const ts = 0:Ts:(Ts * (N - 1))
 const θs = read_theta(expid)
 const nθ = length(θs)
 const i0 = Int(ceil(nθ / 2))
-const θ0 = θs[i0]
+const θ0 = md.θ0[1]
 
 plot_y_at_theta0(m::Int, start = 1, stop = N) =
   plot(ts[start:stop],
@@ -135,6 +138,7 @@ function write_theta_hats(Ns::Array{Int, 1})
   θhatms = hcat(map(N -> calc_theta_hats(Ym, N), Ns)...)
   writedlm(joinpath(exp_path(expid), "theta_hat_baseline.csv"), θhatbs, ',')
   writedlm(joinpath(exp_path(expid), "theta_hat_mean.csv"), θhatms, ',')
+  writedlm(joinpath(exp_path(expid), "Ns.csv"), Ns, ',')
 end
 
 function plot_thetahat_density_b!(p, N)
