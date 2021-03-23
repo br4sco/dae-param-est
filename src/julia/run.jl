@@ -1,18 +1,18 @@
 include("data-gen.jl")
 
-const exp = "candidate_1"
+const exp = "candidate_7"
 
-mk_exp_dir(exp)
+# mk_exp_dir(exp)
 
 Y = calc_Y()
 write_Y(exp, Y)
 
-write_theta(exp)
+# write_theta(exp)
 
-Yb = calc_baseline_Y()
-write_baseline_Y(exp, Yb)
+# Yb = calc_baseline_Y()
+# write_baseline_Y(exp, Yb)
 
-Ym = calc_mean_Y()
-write_mean_Y(exp, Ym)
+# Ym = calc_mean_Y()
+# write_mean_Y(exp, Ym)
 
-write_meta_data(exp)
+# write_meta_data(exp)

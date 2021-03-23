@@ -38,16 +38,22 @@ end
 const WS_data =
   readdlm(joinpath("data",
                    "experiments",
-                   "unconditioned_noise_data_501_001_250000_1234_alsvin.csv"),
+                   "unconditioned_noise_data_500_001_500000_1234_alsvin_b.csv"),
           ',')
 
-const M_data = size(WS_data, 2) - 1
+const M_data = size(WS_data, 2)
+
+const WS_input =
+  readdlm(joinpath("data",
+                   "experiments",
+                   "unconditioned_noise_input_001_500000_1234_alsvin.csv"),
+          ',')
 
 # m'th noise realization of the dataset
 wm_data(m::Int) = interpw(WS_data, m)
 
 # we choose the last realization of the noise as input
-u(t::Float64) = wm_data(M_data + 1)(t)
+u(t::Float64) = interpw(WS_input, 1)(t)
 
 # === MODEL ===
 
@@ -55,7 +61,7 @@ u(t::Float64) = wm_data(M_data + 1)(t)
 const WS =
   readdlm(joinpath("data",
                    "experiments",
-                   "unconditioned_noise_model_500_001_250000_1234_alsvin.csv"),
+                   "unconditioned_noise_model_500_001_500000_1234_alsvin.csv"),
           ',')
 
 wm(m::Int) = interpw(WS, m)
@@ -96,8 +102,8 @@ realize_model(w::Function, θ::Float64, N::Int) =
   problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
 
 # === SOLVER PARAMETERS ===
-const abstol = 1e-7
-const reltol = 1e-4
+const abstol = 1e-8
+const reltol = 1e-5
 # const abstols = [abstol, abstol, abstol, abstol, Inf, Inf, Inf, Inf]
 const maxiters = Int64(1e8)
 
@@ -113,9 +119,9 @@ solvew(w::Function, θ::Float64, N::Int; kwargs...) =
 h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === EXPERIMENT PARAMETERS ===
-const lnθ = 15                   # number of steps in the left interval
-const rnθ = 15                   # number of steps in the right interval
-const δθ = 0.1
+const lnθ = 30                  # number of steps in the left interval
+const rnθ = 50                  # number of steps in the right interval
+const δθ = 0.08
 const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
 const nθ = length(θs)
 
@@ -136,12 +142,12 @@ function calc_Y()
 end
 
 function write_Y(expid, Y)
-  p = joinpath(exp_path(expid), "Y.csv")
+  p = joinpath(exp_path(expid), "Y_b.csv")
   writedlm(p, Y, ",")
 end
 
 function read_Y(expid)
-  p = joinpath(exp_path(expid), "Y.csv")
+  p = joinpath(exp_path(expid), "Y_b.csv")
   readdlm(p, ",")
 end
 
@@ -205,10 +211,13 @@ function write_meta_data(expid)
   df = DataFrame(Ts = Ts,
                  σ = σ,
                  φ0 = φ0,
+                 θ0 = θ0,
                  u_scale = u_scale,
                  w_scale = w_scale,
                  noise_method_name = noise_method_name,
-                 seed = seed)
+                 seed = seed,
+                 atol = abstol,
+                 rtol = reltol)
   CSV.write(p, df)
 end
 
