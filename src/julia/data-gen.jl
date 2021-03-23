@@ -106,10 +106,10 @@ function interpx(xl::Array{Float64, 1},
 end
 
 function mk_new_noise_interp(A::Array{Float64, 2},
-              B::Array{Float64, 2},
-              C::Array{Float64, 2} ,
-              XW::Array{Float64, 2},
-              m::Int)
+                             B::Array{Float64, 2},
+                             C::Array{Float64, 2} ,
+                             XW::Array{Float64, 2},
+                             m::Int)
 
   let
     nx = size(A, 1)
