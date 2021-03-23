@@ -36,124 +36,116 @@ function noise_inter(t::Float64,
                      x::Array{Float64, 2},
                      # m::Int
                      #z_inter::Array{Array{Float64, 2}, 1},
-                     # z_inter::Any,
-                     # isd::InterSampleData,
-                     # ϵ::Float64=10e-12)
-                     )
-  n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
+                     z_inter::Any,
+                     isd::InterSampleData,
+                     ϵ::Float64=10e-12,
+                     rng::MersenneTwister=Random.default_rng())
 
-  # if isd.Q == 0 && isd.use_interpolation
-  return x[n+1, :] + (x[n+2, :]-x[n+1, :])*(t-n*Ts)/((n+1)*Ts-n*Ts)
-  # k = Int(floor(t / Ts)) + 1
-  # w0 = X[k, m]
-  # w1 = X[k + 1, m]
-  # w0 + (t - (k - 1) * Ts) * (w1 - w0) / Ts
-  # end
+    n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
+    δ = t - n*Ts
+    nx = size(A)[1]
+    Q = isd.Q
+    # P = size(z_inter[1])[1]
+    P = 0
+    N = size(isd.states)[1]
+    use_interpolation = isd.use_interpolation
+    # This case is usually handled by the check further down for δ smaller
+    # than ϵ, but if n == N, isd.states[n+1] will give BoundsError, so we
+    # need to put this if-statement here to avoid that. We only check for n==N,
+    # and not n >= N so that there will be a crash if times after the last
+    # sample are requested
+    if n == N
+        return x[N+1]
+    else
+        num_stored_samples = size(isd.states[n+1])[1]
+    end
+    tl = n*Ts
+    tu = (n+1)*Ts
+    il = 0      # for il>0,   tl = isd.sample_times[n][il]
+    iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
 
-    # δ = t - n*Ts
-    # nx = size(A)[1]
-    # Q = isd.Q
-    # # P = size(z_inter[1])[1]
-    # P = 0
-    # N = size(isd.states)[1]
-    # use_interpolation = isd.use_interpolation
-    # # This case is usually handled by the check further down for δ smaller
-    # # than ϵ, but if n == N, isd.states[n+1] will give BoundsError, so we
-    # # need to put this if-statement here to avoid that. We only check for n==N,
-    # # and not n >= N so that there will be a crash if times after the last
-    # # sample are requested
-    # if n == N
-    #     return x[N+1]
-    # else
-    #     num_stored_samples = size(isd.states[n+1])[1]
-    # end
-    # tl = n*Ts
-    # tu = (n+1)*Ts
-    # il = 0      # for il>0,   tl = isd.sample_times[n][il]
-    # iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
+    # setting il, tl, iu, tu
+    if num_stored_samples > 0
+        for q = 1:num_stored_samples
+            # interval index = n+1
+            t_inter = isd.sample_times[n+1][q]
+            if t_inter > tl && t_inter <= t
+                tl = t_inter
+                il = q
+            end
+            if t_inter < tu && t_inter >= t
+                tu = t_inter
+                iu = q
+            end
+        end
+    end
+    δl = t-tl
+    δu = tu-t
 
-    # # setting il, tl, iu, tu
-    # if num_stored_samples > 0
-    #     for q = 1:num_stored_samples
-    #         # interval index = n+1
-    #         t_inter = isd.sample_times[n+1][q]
-    #         if t_inter > tl && t_inter < t
-    #             tl = t_inter
-    #             il = q
-    #         end
-    #         if t_inter < tu && t_inter > t
-    #             tu = t_inter
-    #             iu = q
-    #         end
-    #     end
-    # end
-    # δl = t-tl
-    # δu = tu-t
+    # Setting xl and xu
+    xl = x[n+1]     # x[1] == x0
+    xu = x[n+2]
+    if il > 0
+        xl = isd.states[n+1][il,:]
+    end
+    if iu < Q+1
+        xu = isd.states[n+1][iu,:]
+    end
 
-    # # Setting xl and xu
-    # xl = x[n+1]     # x[1] == x0
-    # xu = x[n+2]
-    # if il > 0
-    #     xl = isd.states[n+1][il,:]
-    # end
-    # if iu < Q+1
-    #     xu = isd.states[n+1][iu,:]
-    # end
+    # If no more samples are stored in this interval, allow for the use of
+    # linear interpolation instead, to ensure smoothness of realization
+    if num_stored_samples >= Q && use_interpolation
+        # @warn "Used linear interpolation"   # DEBUG
+        return xl + (xu-xl)*(t-tl)/(tu-tl)
+    end
 
-    # # If no more samples are stored in this interval, allow for the use of
-    # # linear interpolation instead, to ensure smoothness of realization
-    # if num_stored_samples >= Q && use_interpolation
-    #     # @warn "Used linear interpolation"   # DEBUG
-    #     return xl + (xu-xl)*(t-tl)/(tu-tl)
-    # end
+    # Values of δ smaller than ϵ are treated as 0
+    if δl < ϵ
+        return xl
+    elseif δu < ϵ
+        return xu
+    end
 
-    # # Values of δ smaller than ϵ are treated as 0
-    # if δl < ϵ
-    #     return xl
-    # elseif δu < ϵ
-    #     return xu
-    # end
+    Mexp    = [-A B*(B'); zeros(size(A)) A']
+    Ml      = exp(Mexp*δl)
+    Mu      = exp(Mexp*δu)
+    Adl     = Ml[nx+1:end, nx+1:end]'
+    Adu     = Mu[nx+1:end, nx+1:end]'
+    AdΔ     = Adu*Adl
+    B2dl    = Hermitian(Adl*Ml[1:nx, nx+1:end])
+    B2du    = Hermitian(Adu*Mu[1:nx, nx+1:end])
+    Cl      = cholesky(B2dl)
+    Cu      = cholesky(B2du)
+    Bdl     = Cl.L
+    Bdu     = Cu.L
 
-    # Mexp    = [-A B*(B'); zeros(size(A)) A']
-    # Ml      = exp(Mexp*δl)
-    # Mu      = exp(Mexp*δu)
-    # Adl     = Ml[nx+1:end, nx+1:end]'
-    # Adu     = Mu[nx+1:end, nx+1:end]'
-    # AdΔ     = Adu*Adl
-    # B2dl    = Hermitian(Adl*Ml[1:nx, nx+1:end])
-    # B2du    = Hermitian(Adu*Mu[1:nx, nx+1:end])
-    # Cl      = cholesky(B2dl)
-    # Cu      = cholesky(B2du)
-    # Bdl     = Cl.L
-    # Bdu     = Cu.L
+    σ_l = (Bdl*(Bdl'))
+    σ_u = (Bdu*(Bdu'))
+    σ_Δ = Adu*σ_l*(Adu') + σ_u
+    σ_Δ_l = Adu*σ_l
+    v_Δ = xu - AdΔ*xl
+    μ = Adl*xl + (σ_Δ_l')*(σ_Δ\v_Δ) # TODO: Might want to double-check that this also covers n=0, but it seems to be the case
+    # Hermitian()-call might not be necessary, but it probably depends on the
+    # model, so I leave it in to ensure that cholesky decomposition will work
+    Σ = Hermitian(σ_l - (σ_Δ_l')*(σ_Δ\(σ_Δ_l)))
+    CΣ = cholesky(Σ)
+    Σr = CΣ.L
 
-    # σ_l = (Bdl*(Bdl'))
-    # σ_u = (Bdu*(Bdu'))
-    # σ_Δ = Adu*σ_l*(Adu') + σ_u
-    # σ_Δ_l = Adu*σ_l
-    # v_Δ = xu - AdΔ*xl
-    # μ = Adl*xl + (σ_Δ_l')*(σ_Δ\v_Δ) # TODO: Might want to double-check that this also covers n=0, but it seems to be the case
-    # # Hermitian()-call might not be necessary, but it probably depends on the
-    # # model, so I leave it in to ensure that cholesky decomposition will work
-    # Σ = Hermitian(σ_l - (σ_Δ_l')*(σ_Δ\(σ_Δ_l)))
-    # CΣ = cholesky(Σ)
-    # Σr = CΣ.L
+    if isd.num_sampled_samples[n+1] < P
+        white_noise = z_inter[n+1][num_stored_samples+1,:]
+        isd.num_sampled_samples[n+1] += 1
+    else
+        # @warn "Ran out of pre-generated white noise realizations for interval $(n+1)"
+        white_noise = randn(rng, Float64, (nx, 1))
+    end
 
-    # if isd.num_sampled_samples[n+1] < P
-    #     white_noise = z_inter[n+1][num_stored_samples+1,:]
-    #     isd.num_sampled_samples[n+1] += 1
-    # else
-    #     # @warn "Ran out of pre-generated white noise realizations for interval $(n+1)"
-    #     white_noise = randn(Float64, (nx, 1))
-    # end
+    x_new = μ + Σr*white_noise
 
-    # x_new = μ + Σr*white_noise
+    if num_stored_samples < Q
+        isd.states[n+1] = [isd.states[n+1]; x_new']
+        isd.sample_times[n+1] = [isd.sample_times[n+1]; t]
+    end
 
-    # if num_stored_samples < Q
-    #     isd.states[n+1] = [isd.states[n+1]; x_new']
-    #     isd.sample_times[n+1] = [isd.sample_times[n+1]; t]
-    # end
-
-    # return x_new
+    return x_new
 
 end
