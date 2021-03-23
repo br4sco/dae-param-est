@@ -40,10 +40,11 @@ function interpw(WS::Array{Float64, 2}, m::Int)
 end
 
 function interpx(XS::Array{Float64, 2}, nx::Int, m::Int, t::Float64)
-  k = Int(floor(t / δ)) + 1
+  n = Int(floor(t / δ)) + 1
+  k = (n - 1) * nx + 1
   x0 = XS[k:(k + nx - 1), m]
   x1 = XS[(k + nx):(k + 2nx - 1), m]
-  x0 .+ (t - (k - 1) * δ) .* (x1 .- x0) ./ δ
+  x0 .+ (t - (n - 1) * δ) .* (x1 .- x0) ./ δ
 end
 
 # const tsw = collect(0:δ:(δ * K))
@@ -90,9 +91,9 @@ read_Z(f::String) = readdlm(joinpath("data", "experiments", f), ',') |>
 # const Zu = read_Z("Zu_25_1234.csv")
 # const Nw = min(size(Zd[1], 1), size(Zm[1], 1), size(Zu[1], 1))
 
-const Zd = [randn(Nw + 1, nx) for e = 1:E]
-const Zm = [randn(Nw + 1, nx) for m = 1:M]
-const Zu = [randn(Nw + 1, nx)]
+const Zd = [randn(Nw + 2, nx) for e = 1:E]
+const Zm = [randn(Nw + 2, nx) for m = 1:M]
+const Zu = [randn(Nw + 2, nx)]
 
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
@@ -107,8 +108,11 @@ function mk_w(A::Array{Float64, 2},
               XW::Array{Float64, 2},
               m::Int)
 
-  let nx = size(A, 1)
-    t -> first(C * interpx(XW, nx, m, t))
+  let
+    nx = size(A, 1)
+    function w(t::Float64)
+      first(C * interpx(XW, nx, m, t))
+    end
   end
 end
 
