@@ -12,38 +12,43 @@ mutable struct InterSampleData
     #num_sampled_samples[i] is the number of times a state has been sampled
     # in interval i
     num_sampled_samples::Array{Int64, 1}
+    use_interpolation::Bool # true if linear interpolation of states is used
+    # instead of conditional sampling when Q stored samples has been surpassed.
+    # It improves smoothness of realization in such a scenario.
 end
 
-function initialize_isd(Q::Int64, N::Int64, nx::Int64)::InterSampleData
+function initialize_isd(Q::Int64, N::Int64, nx::Int64, use_interpolation::Bool)::InterSampleData
     isd_states = [zeros(0,nx) for j=1:N]
     isd_sample_times = [zeros(0) for j=1:N]
     num_samples = zeros(Int64, N)
-    return InterSampleData(isd_states, isd_sample_times, Q, num_samples)
+    return InterSampleData(isd_states, isd_sample_times, Q, num_samples, use_interpolation)
 end
 
 function noise_inter(t::Float64,
-                     Ts::Float64,
+                     Ts::Float64,       # Sampling time of noise process
                      A::Array{Float64, 2},
                      B::Array{Float64, 2},
                      x::Array{Array{Float64, 1}, 1},
-                     z_inter::Array{Array{Float64, 2}, 1},
+                     #z_inter::Array{Array{Float64, 2}, 1},
+                     z_inter::Any,
                      isd::InterSampleData,
-                     x0::Array{Float64, 1},
                      ϵ::Float64=10e-12)
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
     δ = t - n*Ts
     nx = size(A)[1]
     Q = isd.Q
-    P = size(z_inter[1])[1]
+    # P = size(z_inter[1])[1]
+    P = 0
     N = size(isd.states)[1]
+    use_interpolation = isd.use_interpolation
     # This case is usually handled by the check further down for δ smaller
     # than ϵ, but if n == N, isd.states[n+1] will give BoundsError, so we
     # need to put this if-statement here to avoid that. We only check for n==N,
     # and not n >= N so that there will be a crash if times after the last
     # sample are requested
     if n == N
-        return x[N]
+        return x[N+1]
     else
         num_stored_samples = size(isd.states[n+1])[1]
     end
@@ -71,13 +76,20 @@ function noise_inter(t::Float64,
     δu = tu-t
 
     # Setting xl and xu
-    xl = if (n > 0) x[n] else x0 end
-    xu = x[n+1]
+    xl = x[n+1]     # x[1] == x0
+    xu = x[n+2]
     if il > 0
         xl = isd.states[n+1][il,:]
     end
     if iu < Q+1
         xu = isd.states[n+1][iu,:]
+    end
+
+    # If no more samples are stored in this interval, allow for the use of
+    # linear interpolation instead, to ensure smoothness of realization
+    if num_stored_samples >= Q && use_interpolation
+        # @warn "Used linear interpolation"   # DEBUG
+        return xl + (xu-xl)*(t-tl)/(tu-tl)
     end
 
     # Values of δ smaller than ϵ are treated as 0

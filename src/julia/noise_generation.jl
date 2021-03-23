@@ -168,16 +168,33 @@ function simulate_noise_process_new(mdl::DT_SS_Model, data::Array{Array{Float64,
     sys = ss(mdl.Ad, mdl.Bd, mdl.Cd, 0.0, mdl.Ts)
     t = 0:mdl.Ts:N*mdl.Ts
     # Allocating space for noise process
-    x_process = [ fill(NaN, (nx,)) for i=1:N, m=1:M]
+    x_process = [ fill(NaN, (nx,)) for i=1:N+1, m=1:M]
     for m=1:M
         y, t, x = lsim(sys, data[m], t, x0=mdl.x0)
-        for i=1:N
-            x_process[i,m][:] = x[i+1,:]    # i+1, since first elemt of x is at time 0
+        for i=1:N+1
+            x_process[i,m][:] = x[i,:]
         end
     end
 
+    # x_process[i,m][j] is the j:th element of the noise model state at sample
+    # i of realization m. Sample 1 corresponds to time 0
     return x_process
 end
+
+# function simulate_nonuniform_noise(mdl::CT_SS_Model, z::Array{Array{Float64,1},1}, times::Array{Float64,1})
+#     noise = [fill(NaN, size(mdl.x0))]
+#     x = mdl.x0
+#     noise[1] = x
+#     t_prev = times[1]
+#     for (i, t) = enumerate(times[2:end])
+#         Δt = t - t_prev
+#         t_prev = t
+#         d_mdl = discretize_ct_noise_model(mdl.A, mdl.B, mdl.C, Δt, x)
+#         x = d_mdl.Ad*x + d_mdl.Bd*z[i]
+#         noise[i+1] = x
+#     end
+#     return noise
+# end
 
 # DEBUG For checking if the simulated noise process seems to have the expected
 # statistical properties
