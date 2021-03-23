@@ -113,7 +113,7 @@ function mk_w(A::Array{Float64, 2},
 
   let
     nx = size(A, 1)
-    @inline function w(t::Float64)
+    function w(t::Float64)
       n = Int(floor(t / δ)) + 1
 
       k = (n - 1) * nx + 1
