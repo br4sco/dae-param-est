@@ -32,7 +32,8 @@ function noise_inter(t::Float64,
                      #z_inter::Array{Array{Float64, 2}, 1},
                      z_inter::Any,
                      isd::InterSampleData,
-                     ϵ::Float64=10e-12)
+                     ϵ::Float64=10e-12,
+                     rng::MersenneTwister=Random.default_rng())
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
     δ = t - n*Ts
@@ -62,11 +63,11 @@ function noise_inter(t::Float64,
         for q = 1:num_stored_samples
             # interval index = n+1
             t_inter = isd.sample_times[n+1][q]
-            if t_inter > tl && t_inter < t
+            if t_inter > tl && t_inter <= t
                 tl = t_inter
                 il = q
             end
-            if t_inter < tu && t_inter > t
+            if t_inter < tu && t_inter >= t
                 tu = t_inter
                 iu = q
             end
@@ -129,7 +130,7 @@ function noise_inter(t::Float64,
         isd.num_sampled_samples[n+1] += 1
     else
         # @warn "Ran out of pre-generated white noise realizations for interval $(n+1)"
-        white_noise = randn(Float64, (nx, 1))
+        white_noise = randn(rng, Float64, (nx, 1))
     end
 
     x_new = μ + Σr*white_noise

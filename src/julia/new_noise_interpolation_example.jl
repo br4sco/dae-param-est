@@ -1,4 +1,4 @@
-using Plots
+using Plots, Future
 import Random
 include("new_noise_interpolation.jl")
 include("noise_generation.jl")
@@ -27,8 +27,8 @@ const Ts = 0.05             # Sampling frequency of noise model
 # N = 100     # Noise samples, excluding the initial one, x_e(0)
 N = 2     # Noise samples, excluding the initial one, x_e(0)
 M = 100
-P = 4       # Number of inter-sample samples stored
-Q = 0       # Number of inter-sample states stored
+P = 0       # Number of inter-sample samples stored
+Q = 10       # Number of inter-sample states stored
 use_interpolation = true
 # N = 8     # Noise samples, excluding the initial one, x_e(0)
 # M = 2
@@ -64,3 +64,29 @@ w_vec = [w(t) for t=t_vec]
 plot(t_vec, w_vec)
 # plot(N*Ts-0.001:0.001:N*Ts, w)
 # # # savefig("./plots.png")
+
+# ---------- TESTING DETERMINISTIC COST FUNCTION --------------------
+# template_rng = MersenneTwister(123)
+# # Generates vector with 10 rng objects that give independent realizations
+# # multiplies of big(10)^20 is comventional jump step size, so probably
+# # shouldn't be changed
+# rng_vec = [Future.randjump(template_rng, i*big(10)^20) for i=0:9]
+#
+# # θs = 0.1:0.01:0.2
+# θs = [0.1, 0.11]
+# for θ in θs
+#     # Example for only one realization, m=3
+#     m = 3
+#     # Make sure to use new isd object for each θ and m
+#     isd_local = initialize_isd(Q, N, nx, use_interpolation)
+#     # IMPORTANT! copy rng object before defining function, so that every call
+#     # to w(t) uses the same rng object, and not e.g. a fresh copy of the template
+#     cp_rng = copy(rng_vec[m])
+#     # In general, the matrices A and B should depend on θ here
+#     function w(t::Float64)
+#         return (C*noise_inter(t, Ts, A, B, x_mat[:, m], noise_inter_dat[m],
+#                 isd_local, 10e-12, cp_rng))[1]
+#     end
+#     println(w(0.012))
+#     println(w(0.025))
+# end
