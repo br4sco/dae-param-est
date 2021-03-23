@@ -39,14 +39,6 @@ function interpw(WS::Array{Float64, 2}, m::Int)
   end
 end
 
-function interpx(XS::Array{Float64, 2}, nx::Int, m::Int, t::Float64)
-  n = Int(floor(t / δ)) + 1
-  k = (n - 1) * nx + 1
-  x0 = XS[k:(k + nx - 1), m]
-  x1 = XS[(k + nx):(k + 2nx - 1), m]
-  x0 .+ (t - (n - 1) * δ) .* (x1 .- x0) ./ δ
-end
-
 # const tsw = collect(0:δ:(δ * K))
 # interpw(w::Int) = Spline1D(tsw, WS[:, m]; k=2, bc="error", s=0.0)
 
@@ -102,6 +94,17 @@ const XWd = simulate_noise_process_new(dmdl, Zd) |> mangle_XW
 const XWm = simulate_noise_process_new(dmdl, Zm) |> mangle_XW
 const XWu = simulate_noise_process_new(dmdl, Zu) |> mangle_XW
 
+
+# new noise interpolation optimization attempt
+function interpx(xl::Array{Float64, 1},
+                 xu::Array{Float64, 1},
+                 t::Float64,
+                 δ::Float64,
+                 n::Int)
+
+  xl .+ (t - (n - 1) * δ) .* (xu .- xl) ./ δ
+end
+
 function mk_w(A::Array{Float64, 2},
               B::Array{Float64, 2},
               C::Array{Float64, 2} ,
@@ -110,17 +113,26 @@ function mk_w(A::Array{Float64, 2},
 
   let
     nx = size(A, 1)
-    function w(t::Float64)
-      first(C * interpx(XW, nx, m, t))
+    @inline function w(t::Float64)
+      n = Int(floor(t / δ)) + 1
+
+      k = (n - 1) * nx + 1
+      xl = XW[k:(k + nx - 1), m]
+      xu = XW[(k + nx):(k + 2nx - 1), m]
+
+      first(C * interpx(xl, xu, t, δ, n))
     end
   end
 end
 
 # === CHOOSE NOISE INTERPOLATION METHOD ===
+
+# new interpolation optimization attempt
 wmd(e::Int) = mk_w(A, B, C, XWd, e)
 wmm(m::Int) = mk_w(A, B, C, XWm, m)
 u(t::Float64) = mk_w(A, B, C, XWu, 1)(t)
 
+# interpolation over w(tk)
 # wmd(e::Int) = interpw(WSd, e)
 # wmm(m::Int) = interpw(WSm, m)
 # u(t::Float64) = interpw(WSd, M + 1)(t)
