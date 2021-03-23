@@ -105,7 +105,7 @@ function interpx(xl::Array{Float64, 1},
   xl .+ (t - (n - 1) * δ) .* (xu .- xl) ./ δ
 end
 
-function mk_w(A::Array{Float64, 2},
+function mk_new_noise_interp(A::Array{Float64, 2},
               B::Array{Float64, 2},
               C::Array{Float64, 2} ,
               XW::Array{Float64, 2},
@@ -128,9 +128,9 @@ end
 # === CHOOSE NOISE INTERPOLATION METHOD ===
 
 # new interpolation optimization attempt
-wmd(e::Int) = mk_w(A, B, C, XWd, e)
-wmm(m::Int) = mk_w(A, B, C, XWm, m)
-u(t::Float64) = mk_w(A, B, C, XWu, 1)(t)
+wmd(e::Int) = mk_new_noise_interp(A, B, C, XWd, e)
+wmm(m::Int) = mk_new_noise_interp(A, B, C, XWm, m)
+u(t::Float64) = mk_new_noise_interp(A, B, C, XWu, 1)(t)
 
 # interpolation over w(tk)
 # wmd(e::Int) = interpw(WSd, e)
