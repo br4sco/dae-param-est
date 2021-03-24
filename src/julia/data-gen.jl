@@ -142,19 +142,23 @@ function mk_other_noise_interp(A::Array{Float64, 2},
         nx = size(A, 1)
         function w(t::Float64)
             n = Int(floor(t / δ))
-            δt = t - n*δ
             isd = isds[m]
             Q = isd.Q
-            N = size(isd.states)[1]
-            use_interpolation = isd.use_interpolation
-
-            # --------------------------
             # XW[j+nx*i, m] is element j of the state at time i of realization m
             # i=0,...,Nw
             # n = Int(t÷δ) + 1
             k = n * nx + 1
             xl = XW[k:(k + nx - 1), m]
             xu = XW[(k + nx):(k + 2nx - 1), m]
+
+            if Q == 0 && isd.use_interpolation
+                # @warn "Used linear interpolation"
+                return first(C * interpx(xl, xu, t, δ, n))
+            end
+
+            δt = t - n*δ
+            N = size(isd.states)[1]
+            use_interpolation = isd.use_interpolation
 
             # ---------------------------
             # This case is usually handled by the check further down for δ smaller
@@ -255,7 +259,7 @@ end
 # === CHOOSE NOISE INTERPOLATION METHOD ===
 
 # isd = initialize_isd(100, Nw+1, nx, true)
-isds = [initialize_isd(0, Nw+1, nx, true) for e=1:E]
+isds = [initialize_isd(Q, Nw+1, nx, true) for e=1:E]
 # new interpolation optimization attempt
 # wmd(e::Int) = mk_new_noise_interp(A, B, C, XWd, e)
 wmd(e::Int) = mk_other_noise_interp(A, B, C, XWd, e, isds)

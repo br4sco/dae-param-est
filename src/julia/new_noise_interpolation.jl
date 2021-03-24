@@ -23,9 +23,15 @@ end
 # end
 
 function initialize_isd(Q::Int64, N::Int64, nx::Int64, use_interpolation::Bool)::InterSampleData
-    isd_states = [zeros(0,nx) for j=1:N]
-    isd_sample_times = [zeros(0) for j=1:N]
-    num_samples = zeros(Int64, N)
+    if Q > 0
+        isd_states = [zeros(0,nx) for j=1:N]
+        isd_sample_times = [zeros(0) for j=1:N]
+        num_samples = zeros(Int64, N)
+    else
+        isd_states = [zeros(0,nx)]
+        isd_sample_times = [zeros(0)]
+        num_samples = zeros(0)
+    end
     return InterSampleData(isd_states, isd_sample_times, Q, num_samples, use_interpolation)
 end
 
