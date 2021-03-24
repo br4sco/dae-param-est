@@ -23,8 +23,7 @@ const Ts = 0.1                  # stepsize
 const Q = 100
 const M = 500
 const E = 500
-# const Nw = 100000
-const Nw = 10000
+const Nw = 100000
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
 # === PR-GENERATED ===
