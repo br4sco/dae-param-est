@@ -23,7 +23,7 @@ const Ts = 0.1                  # stepsize
 const Q = 0
 const M = 500
 const E = 500
-const Nw = 10000
+const Nw = 100000
 
 # === PR-GENERATED ===
 # const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
@@ -39,8 +39,9 @@ function interpw(WS::Array{Float64, 2}, m::Int)
   end
 end
 
-# const tsw = collect(0:δ:(δ * K))
-# interpw(w::Int) = Spline1D(tsw, WS[:, m]; k=2, bc="error", s=0.0)
+# const tsw = collect(0:δ:(δ * Nw))
+# interpw(WS::Array{Float64, 2}, m::Int) =
+#   Spline1D(tsw, view(WS, 1:(Nw+1), m); k=2, bc="error", s=0.0)
 
 # === PRE-GENERATED DATA ===
 # const WSd =
@@ -96,8 +97,8 @@ const XWu = simulate_noise_process_new(dmdl, Zu) |> mangle_XW
 
 
 # new noise interpolation optimization attempt
-function interpx(xl::Array{Float64, 1},
-                 xu::Array{Float64, 1},
+function interpx(xl::AbstractArray{Float64, 1},
+                 xu::AbstractArray{Float64, 1},
                  t::Float64,
                  δ::Float64,
                  n::Int)
@@ -107,7 +108,7 @@ end
 
 function mk_new_noise_interp(A::Array{Float64, 2},
                              B::Array{Float64, 2},
-                             C::Array{Float64, 2} ,
+                             C::Array{Float64, 2},
                              XW::Array{Float64, 2},
                              m::Int)
 
@@ -117,6 +118,10 @@ function mk_new_noise_interp(A::Array{Float64, 2},
       n = Int(floor(t / δ)) + 1
 
       k = (n - 1) * nx + 1
+
+      # xl = view(XW, k:(k + nx - 1), m)
+      # xu = view(XW, (k + nx):(k + 2nx - 1), m)
+
       xl = XW[k:(k + nx - 1), m]
       xu = XW[(k + nx):(k + 2nx - 1), m]
 
@@ -213,12 +218,12 @@ function calc_Y()
 end
 
 function write_Y(expid, Y)
-  p = joinpath(exp_path(expid), "Y_b.csv")
+  p = joinpath(exp_path(expid), "Yd1.csv")
   writedlm(p, Y, ",")
 end
 
 function read_Y(expid)
-  p = joinpath(exp_path(expid), "Y_b.csv")
+  p = joinpath(exp_path(expid), "Yd1.csv")
   readdlm(p, ",")
 end
 
