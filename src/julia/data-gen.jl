@@ -20,10 +20,12 @@ const Ts = 0.1                  # stepsize
 # const Ts = 0.5                  # stepsize larger
 
 # === NOISE ===
-const Q = 0
+const Q = 100
 const M = 500
 const E = 500
-const Nw = 100000
+# const Nw = 100000
+const Nw = 10000
+const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
 # === PR-GENERATED ===
 # const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
@@ -84,9 +86,9 @@ read_Z(f::String) = readdlm(joinpath("data", "experiments", f), ',') |>
 # const Zu = read_Z("Zu_25_1234.csv")
 # const Nw = min(size(Zd[1], 1), size(Zm[1], 1), size(Zu[1], 1))
 
-const Zd = [randn(Nw + 2, nx) for e = 1:E]
-const Zm = [randn(Nw + 2, nx) for m = 1:M]
-const Zu = [randn(Nw + 2, nx)]
+const Zd = [randn(Nw + Nw_extra, nx) for e = 1:E]
+const Zm = [randn(Nw + Nw_extra, nx) for m = 1:M]
+const Zu = [randn(Nw + Nw_extra, nx)]
 
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
@@ -104,6 +106,24 @@ function interpx(xl::AbstractArray{Float64, 1},
                  n::Int)
 
   xl .+ (t - (n - 1) * δ) .* (xu .- xl) ./ δ
+end
+
+function interpx_general(xl::AbstractArray{Float64, 1},
+                 xu::AbstractArray{Float64, 1},
+                 t::Float64,
+                 tl::Float64,
+                 tu::Float64)
+
+  xl .+ (t - tl) .* (xu .- xl) ./ (tu-tl)
+end
+
+function interpw_general(wl::Float64,
+                 wu::Float64,
+                 t::Float64,
+                 tl::Float64,
+                 tu::Float64)
+
+  wl + (t - tl) * (wu - wl) / (tu-tl)
 end
 
 function mk_new_noise_interp(A::Array{Float64, 2},
@@ -136,7 +156,7 @@ function mk_other_noise_interp(A::Array{Float64, 2},
                                XW::Array{Float64, 2},
                                m::Int,
                                isds::Array{InterSampleData, 1},
-                               ϵ::Float64=10e-9,
+                               ϵ::Float64=10e-7,
                                rng::MersenneTwister=Random.default_rng())
     let
         nx = size(A, 1)
@@ -148,39 +168,29 @@ function mk_other_noise_interp(A::Array{Float64, 2},
             # i=0,...,Nw
             # n = Int(t÷δ) + 1
             k = n * nx + 1
-            xl = XW[k:(k + nx - 1), m]
-            xu = XW[(k + nx):(k + 2nx - 1), m]
-
-            if Q == 0 && isd.use_interpolation
-                # @warn "Used linear interpolation"
-                return first(C * interpx(xl, xu, t, δ, n))
-            end
-
-            δt = t - n*δ
-            N = size(isd.states)[1]
-            use_interpolation = isd.use_interpolation
-
-            # ---------------------------
-            # This case is usually handled by the check further down for δ smaller
-            # than ϵ, but if n == N, isd.states[n+1] will give BoundsError, so we
-            # need to put this if-statement here to avoid that. We only check for n==N,
-            # and not n >= N so that there will be a crash if times after the last
-            # sample are requested
-            # if n == N
-            #     # return x[N+1]
-            #     return xu
-            # else
-            #     num_stored_samples = size(isd.states[n+1])[1]
-            # end
-            # TODO: This line below should be replaced by code above
-            num_stored_samples = size(isd.states[n+1])[1]
+            # xl = XW[k:(k + nx - 1), m]
+            # xu = XW[(k + nx):(k + 2nx - 1), m]
+            xl = view(XW, k:(k + nx - 1), m)
+            xu = view(XW, (k + nx):(k + 2nx - 1), m)
             tl = n*δ
             tu = (n+1)*δ
             il = 0      # for il>0,   tl = isd.sample_times[n][il]
             iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
 
+            if Q == 0 && isd.use_interpolation
+                # @warn "Used linear interpolation"
+                # return first(C * interpx_general(xl, xu, t, tl, tu))
+                return interpw_general(first(C*xl), first(C*xu), t, tl, tu)
+            end
+
+            # N = size(isd.states)[1]
+            num_stored_samples = size(isd.states[n+1])[1]
             # setting il, tl, iu, tu
             if num_stored_samples > 0
+                # #DEBUG if statement
+                # if num_stored_samples > 10
+                #     println(num_stored_samples)
+                # end
                 for q = 1:num_stored_samples
                     # interval index = n+1
                     t_inter = isd.sample_times[n+1][q]
@@ -199,15 +209,17 @@ function mk_other_noise_interp(A::Array{Float64, 2},
 
             # Setting xl and xu
             if il > 0
-                xl = isd.states[n+1][il,:]
+                # xl = isd.states[n+1][il,:]
+                xl = view(isd.states[n+1], il,:)
             end
             if iu < Q+1
-                xu = isd.states[n+1][iu,:]
+                # xu = isd.states[n+1][iu,:]
+                xu = view(isd.states[n+1], iu,:)
             end
-            # TODO: THIS WON'T BE CORRECT FOR Q LARGER THAN 0!!!!!!!!!!!!
-            if num_stored_samples >= Q && use_interpolation
+            if num_stored_samples >= Q && isd.use_interpolation
                 # @warn "Used linear interpolation"   # DEBUG
-                return first(C * interpx(xl, xu, t, δ, n))
+                # return first(C * interpx_general(xl, xu, t, tl, tu))
+                return interpw_general(first(C*xl), first(C*xu), t, tl, tu)
             end
 
             # Values of δ smaller than ϵ are treated as 0
@@ -239,18 +251,23 @@ function mk_other_noise_interp(A::Array{Float64, 2},
             # Hermitian()-call might not be necessary, but it probably depends on the
             # model, so I leave it in to ensure that cholesky decomposition will work
             Σ = Hermitian(σ_l - (σ_Δ_l')*(σ_Δ\(σ_Δ_l)))
+            CΣ = Σ
             CΣ = cholesky(Σ)
+            # try
+            #     CΣ = cholesky(Σ)
+            # catch err
+            #     println(CΣ)
+            #     println("δl: $δl, δu: $δu, n: $n, N: $N")
+            #     throw(err)
+            # end
             Σr = CΣ.L
 
             white_noise = randn(rng, Float64, (nx, 1))
-
             x_new = μ + Σr*white_noise
-
             if num_stored_samples < Q
                 isd.states[n+1] = [isd.states[n+1]; x_new']
                 isd.sample_times[n+1] = [isd.sample_times[n+1]; t]
             end
-
             return first(C * x_new)
         end
       end
