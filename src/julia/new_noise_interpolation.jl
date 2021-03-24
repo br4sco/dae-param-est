@@ -1,26 +1,26 @@
 using Random, LinearAlgebra, Future
 
-# mutable struct InterSampleData
-#     # states[i][p,j] is the j:th element of the p:th state in the i:th interval
-#     # The number of rows of states[i] should be dynamically updated as new
-#     # samples are generated
-#     # sample_times[i][p] is the time associated with the p:th state in the
-#     # i:th interval. Also here the number of rows should be dynamically updated
-#     states::Array{Array{Float64,2},1}
-#     sample_times::Array{Array{Float64,1},1}
-#     Q::Int64    # Max number of stored samples per interval
-#     #num_sampled_samples[i] is the number of times a state has been sampled
-#     # in interval i
-#     num_sampled_samples::Array{Int64, 1}
-#     use_interpolation::Bool # true if linear interpolation of states is used
-#     # instead of conditional sampling when Q stored samples has been surpassed.
-#     # It improves smoothness of realization in such a scenario.
-# end
-
-struct InterSampleData
+mutable struct InterSampleData
+    # states[i][p,j] is the j:th element of the p:th state in the i:th interval
+    # The number of rows of states[i] should be dynamically updated as new
+    # samples are generated
+    # sample_times[i][p] is the time associated with the p:th state in the
+    # i:th interval. Also here the number of rows should be dynamically updated
+    states::Array{Array{Float64,2},1}
+    sample_times::Array{Array{Float64,1},1}
     Q::Int64    # Max number of stored samples per interval
+    #num_sampled_samples[i] is the number of times a state has been sampled
+    # in interval i
+    num_sampled_samples::Array{Int64, 1}
     use_interpolation::Bool # true if linear interpolation of states is used
+    # instead of conditional sampling when Q stored samples has been surpassed.
+    # It improves smoothness of realization in such a scenario.
 end
+
+# struct InterSampleData
+#     Q::Int64    # Max number of stored samples per interval
+#     use_interpolation::Bool # true if linear interpolation of states is used
+# end
 
 function initialize_isd(Q::Int64, N::Int64, nx::Int64, use_interpolation::Bool)::InterSampleData
     isd_states = [zeros(0,nx) for j=1:N]
