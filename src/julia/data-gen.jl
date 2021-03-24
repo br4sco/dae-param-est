@@ -130,14 +130,15 @@ function mk_other_noise_interp(A::Array{Float64, 2},
                                C::Array{Float64, 2},
                                XW::Array{Float64, 2},
                                m::Int,
-                               isd::InterSampleData,
-                               ϵ::Float64=10e-12,
+                               isds::Array{InterSampleData, 1},
+                               ϵ::Float64=10e-9,
                                rng::MersenneTwister=Random.default_rng())
     let
         nx = size(A, 1)
         function w(t::Float64)
             n = Int(floor(t / δ))
             δt = t - n*δ
+            isd = isds[m]
             Q = isd.Q
             N = size(isd.states)[1]
             use_interpolation = isd.use_interpolation
@@ -164,8 +165,8 @@ function mk_other_noise_interp(A::Array{Float64, 2},
             # end
             # TODO: This line below should be replaced by code above
             num_stored_samples = size(isd.states[n+1])[1]
-            tl = n*δt
-            tu = (n+1)*δt
+            tl = n*δ
+            tu = (n+1)*δ
             il = 0      # for il>0,   tl = isd.sample_times[n][il]
             iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
 
@@ -194,7 +195,6 @@ function mk_other_noise_interp(A::Array{Float64, 2},
             if iu < Q+1
                 xu = isd.states[n+1][iu,:]
             end
-
             # TODO: THIS WON'T BE CORRECT FOR Q LARGER THAN 0!!!!!!!!!!!!
             if num_stored_samples >= Q && use_interpolation
                 # @warn "Used linear interpolation"   # DEBUG
@@ -249,10 +249,11 @@ end
 
 # === CHOOSE NOISE INTERPOLATION METHOD ===
 
-isd = initialize_isd(0, Nw+1, nx, true)
+# isd = initialize_isd(100, Nw+1, nx, true)
+isds = [initialize_isd(0, Nw+1, nx, true) for e=1:E]
 # new interpolation optimization attempt
 # wmd(e::Int) = mk_new_noise_interp(A, B, C, XWd, e)
-wmd(e::Int) = mk_other_noise_interp(A, B, C, XWd, e, isd)
+wmd(e::Int) = mk_other_noise_interp(A, B, C, XWd, e, isds)
 wmm(m::Int) = mk_new_noise_interp(A, B, C, XWm, m)
 u(t::Float64) = mk_new_noise_interp(A, B, C, XWu, 1)(t)
 

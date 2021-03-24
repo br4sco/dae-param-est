@@ -11,7 +11,7 @@ mutable struct InterSampleData
     Q::Int64    # Max number of stored samples per interval
     #num_sampled_samples[i] is the number of times a state has been sampled
     # in interval i
-    num_sampled_samples::Array{Int64, 1}
+    num_sampled_samples::Array{Int64, 1}    # TODO: REmove, not needed when we don't have P
     use_interpolation::Bool # true if linear interpolation of states is used
     # instead of conditional sampling when Q stored samples has been surpassed.
     # It improves smoothness of realization in such a scenario.
