@@ -23,7 +23,7 @@ const Ts = 0.1                  # stepsize
 const Q = 100
 const M = 500
 const E = 500
-const Nw = 100000
+const Nw = 10000
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
 # === PR-GENERATED ===
@@ -324,8 +324,8 @@ realize_model(w::Function, θ::Float64, N::Int) =
   problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
 
 # === SOLVER PARAMETERS ===
-const abstol = 1e-7
-const reltol = 1e-4
+const abstol = 1e-8
+const reltol = 1e-5
 const maxiters = Int64(1e8)
 
 solvew(w::Function, θ::Float64, N::Int; kwargs...) =
@@ -340,9 +340,9 @@ solvew(w::Function, θ::Float64, N::Int; kwargs...) =
 h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === EXPERIMENT PARAMETERS ===
-const lnθ = 30                  # number of steps in the left interval
-const rnθ = 50                  # number of steps in the right interval
-const δθ = 0.08
+const lnθ = 3                  # number of steps in the left interval
+const rnθ = 3                  # number of steps in the right interval
+const δθ = 0.2
 const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
 const nθ = length(θs)
 
