@@ -13,6 +13,7 @@ const M = 1#50                   # number of noise realizations
 const ms = collect(1:M)         # enumerate the realizations
 const σ = 0.002                 # measurement noise standard deviation
 Nw = 200#Int(1e3)          # Number of noise samples, excluding the initial one, x_e(0)
+Nw_extra = 10
 δ = N*Ts/Nw                  # Sampling frequency of noise model
 P = 0#10           # Number of inter-sample samples stored
 Q = 0#100#Int(1e8)         # Number of inter-sample states stored
@@ -66,16 +67,16 @@ nx = size(A)[1]
 # ----------------- DATA GENERATION ----------------
 noise_model = discretize_ct_noise_model(A, B, C, δ, zeros(nx,))
 # M+1 to generate one realization for true system as well
-noise_uniform_dat, noise_inter_dat = generate_noise_new(Nw, M+1, P, nx)
+noise_uniform_dat, noise_inter_dat = generate_noise_new(Nw+Nw_extra, M+1, P, nx)
 # Computes all M realizations of filtered white noise
 xw_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
 WS = [ (C*xw_mat[i,m])[1] for i=1:Nw+1, m=1:M]
 
 # z_all_uniform[m][i,j] is the j:th element of the i:th sample of
 # realization m
-uniform_data_true, inter_data_true = generate_noise_new(N, 1, P, nx)
-noise_model_true = discretize_ct_noise_model(A, B, C, Ts, zeros(nx,))
-xw_true = simulate_noise_process_new(noise_model_true, uniform_data_true)
+uniform_data_true, inter_data_true = generate_noise_new(Nw+Nw_extra, 1, P, nx)
+# noise_model_true = discretize_ct_noise_model(A, B, C, Ts, zeros(nx,))
+xw_true = simulate_noise_process_new(noise_model, uniform_data_true)
 xw_true = xw_true[:]
 WS_true = [(C*xw_true[i])[1] for i=1:N+1]
 times_true = 0:Ts:N*Ts
@@ -112,7 +113,7 @@ T = N*Ts
 # mk_problem(w_func, θ, N)
 # w_func: t -> w(t)
 
-# solve_m(wm_func, N, ms)
+# solve_in_parallel(wm_func, ms)
 # wm_func: m -> solution
 # where solution is the output of solve(), where the problem uses noise
 # realization m and parameters θ
@@ -120,9 +121,9 @@ T = N*Ts
 
 # ----------- USE THIS BLOCK OF CODE TO TEST NOISE FUNCITON SMOOTHNESS --------
 
-isd_good = initialize_isd(100, Nw, nx, true)
-isd_line = initialize_isd(0, Nw, nx, true)
-isd_bad = initialize_isd(0, Nw, nx, false)
+isd_good = initialize_isd(100, Nw+Nw_extra, nx, true)
+isd_line = initialize_isd(0, Nw+Nw_extra, nx, true)
+isd_bad = initialize_isd(0, Nw+Nw_extra, nx, false)
 
 function w_good(t::Float64)
     return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], noise_inter_dat[1], isd_good))[1]
@@ -150,20 +151,21 @@ plot!(pl, t_vec, w_vec_bad, label="Q=0, no interpolation", linecolor=:blue, line
 # savefig(pl, "./noise_smoothness.svg")
 
 # -------------- END OF NOISE FUNCTION SMOOTHNESS BLOCK --------------------
-
+#
 # solvewθ(w, θ) = solve(mk_problem(w, θ, N), saveat=0:Ts:T) |> h
-# isd = initialize_isd(Q, Nw, nx, use_interpolation)
-# isd_true = initialize_isd(Q, N, nx, use_interpolation)
+# isd = initialize_isd(Q, Nw+Nw_extra, nx, use_interpolation)
+# isd_true = initialize_isd(Q, N+Nw_extra, nx, use_interpolation)
 #
 # function w(t::Float64, m::Int64)
 #     return (C*noise_inter(t, δ, A, B, xw_mat[:, m], noise_inter_dat[m], isd))[1]
 # end
 # wm(m::Int64) = t -> w_scale*w(t, m)
 #
+#
 # function w_true(t::Float64)
 #     return (C*noise_inter(t, δ, A, B, xw_true, inter_data_true[1], isd_true))[1]
 # end
-
+#
 # @time y = solve(mk_problem(w_true, θ0, N), saveat=0:Ts:T) |> h
 # # @time y_alt = solve(mk_problem(w_true_alt, θ0, N), saveat=0:Ts:T) |> h
 # # @time y_simple = solve(mk_problem(w_true_simple, θ0, N), saveat=0:Ts:T) |> h
@@ -173,7 +175,7 @@ plot!(pl, t_vec, w_vec_bad, label="Q=0, no interpolation", linecolor=:blue, line
 # # Proposed method cost function
 # cs = zeros(nθ)
 # for (i, θ) in enumerate(θs)
-#   Y = solve_m(m -> solvewθ(wm(m), θ), N, ms)
+#   Y = solve_in_parallel(m -> solvewθ(wm(m), θ), ms)
 #   cs[i] = cost(reshape(mean(Y, dims = 2), :), y)
 # end
 #
@@ -192,7 +194,7 @@ plot!(pl, t_vec, w_vec_bad, label="Q=0, no interpolation", linecolor=:blue, line
 #     end
 #     wm_jagged(m::Int64) = t -> w_scale*w_jagged(t, m)
 #
-#     Y = solve_m(m -> solvewθ(wm_jagged(m), θ), N, ms)
+#     Y = solve_in_parallel(m -> solvewθ(wm_jagged(m), θ), ms)
 #     cs_jagged[i] = cost(reshape(mean(Y, dims = 2), :), y)
 # end
 #
@@ -212,4 +214,4 @@ plot!(pl, t_vec, w_vec_bad, label="Q=0, no interpolation", linecolor=:blue, line
 # # plot(cs)
 # # plot(cs_jagged)
 # plot_costs_R(θs, cs_jagged, cs, θ0)
-# savefig("./cost_smoothness.svg")
+# # savefig("./cost_smoothness.svg")

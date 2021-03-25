@@ -37,9 +37,9 @@ end
 
 function noise_inter(t::Float64,
                      Ts::Float64,       # Sampling time of noise process
-                     # A::Array{Float64, 2},
-                     # B::Array{Float64, 2},
-                     x::Array{Float64, 2},
+                     A::Array{Float64, 2},
+                     B::Array{Float64, 2},
+                     x::Array{Array{Float64, 1}},
                      # m::Int
                      #z_inter::Array{Array{Float64, 2}, 1},
                      z_inter::Any,
@@ -53,22 +53,35 @@ function noise_inter(t::Float64,
     Q = isd.Q
     # P = size(z_inter[1])[1]
     P = 0
-    N = size(isd.states)[1]
+    # N = size(isd.states)[1]
     use_interpolation = isd.use_interpolation
+
+    xl = x[n+1]     # x[1] == x0
+    xu = x[n+2]
+    tl = n*Ts
+    tu = (n+1)*Ts
+    il = 0      # for il>0,   tl = isd.sample_times[n][il]
+    iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
+    if Q == 0 && use_interpolation
+        # @warn "Used linear interpolation"   # DEBUG
+        return xl + (xu-xl)*(t-tl)/(tu-tl)
+    end
+
     # This case is usually handled by the check further down for δ smaller
     # than ϵ, but if n == N, isd.states[n+1] will give BoundsError, so we
     # need to put this if-statement here to avoid that. We only check for n==N,
     # and not n >= N so that there will be a crash if times after the last
     # sample are requested
-    if n == N
-        return x[N+1]
-    else
+    # if n == N
+    #     return x[N+1]
+    # else
+    #     num_stored_samples = size(isd.states[n+1])[1]
+    # end
+    if Q > 0
         num_stored_samples = size(isd.states[n+1])[1]
+    else
+        num_stored_samples = 0
     end
-    tl = n*Ts
-    tu = (n+1)*Ts
-    il = 0      # for il>0,   tl = isd.sample_times[n][il]
-    iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
 
     # setting il, tl, iu, tu
     if num_stored_samples > 0
@@ -89,8 +102,8 @@ function noise_inter(t::Float64,
     δu = tu-t
 
     # Setting xl and xu
-    xl = x[n+1]     # x[1] == x0
-    xu = x[n+2]
+    # xl = x[n+1]     # x[1] == x0
+    # xu = x[n+2]
     if il > 0
         xl = isd.states[n+1][il,:]
     end
@@ -137,13 +150,14 @@ function noise_inter(t::Float64,
     CΣ = cholesky(Σ)
     Σr = CΣ.L
 
-    if isd.num_sampled_samples[n+1] < P
-        white_noise = z_inter[n+1][num_stored_samples+1,:]
-        isd.num_sampled_samples[n+1] += 1
-    else
-        # @warn "Ran out of pre-generated white noise realizations for interval $(n+1)"
-        white_noise = randn(rng, Float64, (nx, 1))
-    end
+    # if isd.num_sampled_samples[n+1] < P
+    #     white_noise = z_inter[n+1][num_stored_samples+1,:]
+    #     isd.num_sampled_samples[n+1] += 1
+    # else
+    #     # @warn "Ran out of pre-generated white noise realizations for interval $(n+1)"
+    #     white_noise = randn(rng, Float64, (nx, 1))
+    # end
+    white_noise = randn(rng, Float64, (nx, 1))
 
     x_new = μ + Σr*white_noise
 
