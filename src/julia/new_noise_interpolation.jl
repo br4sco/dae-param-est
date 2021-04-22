@@ -9,30 +9,20 @@ mutable struct InterSampleData
     states::Array{Array{Float64,2},1}
     sample_times::Array{Array{Float64,1},1}
     Q::Int64    # Max number of stored samples per interval
-    #num_sampled_samples[i] is the number of times a state has been sampled
-    # in interval i
-    num_sampled_samples::Array{Int64, 1}    # TODO: REmove, not needed when we don't have P
     use_interpolation::Bool # true if linear interpolation of states is used
     # instead of conditional sampling when Q stored samples has been surpassed.
     # It improves smoothness of realization in such a scenario.
 end
 
-# struct InterSampleData
-#     Q::Int64    # Max number of stored samples per interval
-#     use_interpolation::Bool # true if linear interpolation of states is used
-# end
-
 function initialize_isd(Q::Int64, N::Int64, nx::Int64, use_interpolation::Bool)::InterSampleData
     if Q > 0
         isd_states = [zeros(0,nx) for j=1:N]
         isd_sample_times = [zeros(0) for j=1:N]
-        num_samples = zeros(Int64, N)
     else
         isd_states = [zeros(0,nx)]
         isd_sample_times = [zeros(0)]
-        num_samples = zeros(0)
     end
-    return InterSampleData(isd_states, isd_sample_times, Q, num_samples, use_interpolation)
+    return InterSampleData(isd_states, isd_sample_times, Q, use_interpolation)
 end
 
 function noise_inter(t::Float64,
@@ -40,9 +30,6 @@ function noise_inter(t::Float64,
                      A::Array{Float64, 2},
                      B::Array{Float64, 2},
                      x::Array{Array{Float64, 1}},
-                     # m::Int
-                     #z_inter::Array{Array{Float64, 2}, 1},
-                     z_inter::Any,
                      isd::InterSampleData,
                      ϵ::Float64=10e-12,
                      rng::MersenneTwister=Random.default_rng())
@@ -56,6 +43,7 @@ function noise_inter(t::Float64,
     # N = size(isd.states)[1]
     use_interpolation = isd.use_interpolation
 
+    # TODO: Update to more efficient use of matrices. Pass C for returning stuff?
     xl = x[n+1]     # x[1] == x0
     xu = x[n+2]
     tl = n*Ts
@@ -63,7 +51,7 @@ function noise_inter(t::Float64,
     il = 0      # for il>0,   tl = isd.sample_times[n][il]
     iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
     if Q == 0 && use_interpolation
-        # @warn "Used linear interpolation"   # DEBUG
+        # @warn "Used linear interpolation"
         return xl + (xu-xl)*(t-tl)/(tu-tl)
     end
 
@@ -77,6 +65,10 @@ function noise_inter(t::Float64,
     # else
     #     num_stored_samples = size(isd.states[n+1])[1]
     # end
+
+    # This check has to be done because, when Q=0 and linear interpolation is off,
+    # isd.states will only have one element (to minimize unnecessary pre-allocation)
+    # and the statement below will give out of bounds error
     if Q > 0
         num_stored_samples = size(isd.states[n+1])[1]
     else
@@ -105,10 +97,10 @@ function noise_inter(t::Float64,
     # xl = x[n+1]     # x[1] == x0
     # xu = x[n+2]
     if il > 0
-        xl = isd.states[n+1][il,:]
+        xl = view(isd.states[n+1], il,:)
     end
     if iu < Q+1
-        xu = isd.states[n+1][iu,:]
+        xu = view(isd.states[n+1], iu,:)
     end
 
     # If no more samples are stored in this interval, allow for the use of
@@ -158,9 +150,7 @@ function noise_inter(t::Float64,
     #     white_noise = randn(rng, Float64, (nx, 1))
     # end
     white_noise = randn(rng, Float64, (nx, 1))
-
     x_new = μ + Σr*white_noise
-
     if num_stored_samples < Q
         isd.states[n+1] = [isd.states[n+1]; x_new']
         isd.sample_times[n+1] = [isd.sample_times[n+1]; t]

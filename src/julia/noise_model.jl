@@ -5,7 +5,6 @@ using Distributions
 using DelimitedFiles
 using ProgressMeter
 
-include("noise_interpolation.jl")
 include("noise_generation.jl")
 
 # struct NoiseModelParams
@@ -142,23 +141,24 @@ gen_unconditioned_noise_1(ZS, δ) =
 gen_unconditioned_noise_1(M, δ, K) =
   gen_unconditioned_noise(linear_filter_1, M, δ, K)
 
-function mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
-  let
-    nx = size(A, 1)
-    P = 2
-    noise_model = discretize_ct_model(A, B, C, Ts, x0)
-
-    data_uniform, irrelevant_var = generate_noise(N, M, P, nx, false)
-    # Computes all M realizations of filtered white noise
-    x_mat = simulate_noise_process(noise_model, data_uniform)
-
-    function mk_w(m::Int)
-      function w(t::Float64)::Float64
-        scale * first(C*x_inter(t, Ts, A, B, x_mat[:, m], noise_model.x0))
-      end
-    end
-  end
-end
+# NOTE: This function was written for the outdated version of noise interpolation
+# function mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
+#   let
+#     nx = size(A, 1)
+#     P = 2
+#     noise_model = discretize_ct_model(A, B, C, Ts, x0)
+#
+#     data_uniform, irrelevant_var = generate_noise(N, M, P, nx, false)
+#     # Computes all M realizations of filtered white noise
+#     x_mat = simulate_noise_process(noise_model, data_uniform)
+#
+#     function mk_w(m::Int)
+#       function w(t::Float64)::Float64
+#         scale * first(C*x_inter(t, Ts, A, B, x_mat[:, m], noise_model.x0))
+#       end
+#     end
+#   end
+# end
 
 function linear_filter_1()
   ω = 4;           # natural freq. in rad/s (tunes freq. contents/fluctuations)
@@ -195,17 +195,18 @@ function mk_spectral_mc_noise_model_1(ωmax, dω, M, scale)
   mk_spectral_mc_noise_model(Gw, ωmax, dω, M, scale)
 end
 
-function exact_noise_interpolation_model_1(N, Ts, M, scale)
-  let
-    f = linear_filter_1()
-    sys = ss(tf(f.a, f.b))
-    A = sys.A
-    B = sys.B
-    C = sys.C
-    x0 = zeros(size(A, 1))
-    mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
-  end
-end
+# NOTE: This function was written for the outdated version of noise interpolation
+# function exact_noise_interpolation_model_1(N, Ts, M, scale)
+#   let
+#     f = linear_filter_1()
+#     sys = ss(tf(f.a, f.b))
+#     A = sys.A
+#     B = sys.B
+#     C = sys.C
+#     x0 = zeros(size(A, 1))
+#     mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
+#   end
+# end
 
 function discrete_time_noise_model_1(K, M, scale)
   f = linear_filter_1()

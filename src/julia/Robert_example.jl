@@ -5,6 +5,9 @@ include("noise_generation.jl")
 include("simulation.jl")
 Random.seed!(1234)
 
+# This script demonstrates difference in smoothness of generate disturbance
+# for different choices of Q as well as with and without linear interpolation
+
 # --------------- SIMULATION PARAMETERS --------------
 N = 100                         # number of steps of the simulation
 const Ts = 0.1                  # stepsize
@@ -17,7 +20,7 @@ Nw_extra = 10
 δ = N*Ts/Nw                  # Sampling frequency of noise model
 P = 0#10           # Number of inter-sample samples stored
 Q = 0#100#Int(1e8)         # Number of inter-sample states stored
-use_interpolation = false    # Use linear interpolation of noise instea dof
+use_interpolation = true    # Use linear interpolation of noise instea dof
 # conditional sampling when Q stored samples in an interval have been surpassed
 
 # --------------- PHYSICAL MODEL PARAMETERS -------------
@@ -126,13 +129,13 @@ isd_line = initialize_isd(0, Nw+Nw_extra, nx, true)
 isd_bad = initialize_isd(0, Nw+Nw_extra, nx, false)
 
 function w_good(t::Float64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], noise_inter_dat[1], isd_good))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isd_good))[1]
 end
 function w_line(t::Float64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], noise_inter_dat[1], isd_line))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isd_line))[1]
 end
 function w_bad(t::Float64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], noise_inter_dat[1], isd_bad))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isd_bad))[1]
 end
 
 t_vec = 0:0.001:0.1
@@ -149,69 +152,3 @@ plot!(pl, t_vec, w_vec_good, label="Q=100", linecolor=:red)
 plot!(pl, t_vec, w_vec_line, label="Q=0, interpolation", linecolor=:black)
 plot!(pl, t_vec, w_vec_bad, label="Q=0, no interpolation", linecolor=:blue, lines = :dot)
 # savefig(pl, "./noise_smoothness.svg")
-
-# -------------- END OF NOISE FUNCTION SMOOTHNESS BLOCK --------------------
-#
-# solvewθ(w, θ) = solve(mk_problem(w, θ, N), saveat=0:Ts:T) |> h
-# isd = initialize_isd(Q, Nw+Nw_extra, nx, use_interpolation)
-# isd_true = initialize_isd(Q, N+Nw_extra, nx, use_interpolation)
-#
-# function w(t::Float64, m::Int64)
-#     return (C*noise_inter(t, δ, A, B, xw_mat[:, m], noise_inter_dat[m], isd))[1]
-# end
-# wm(m::Int64) = t -> w_scale*w(t, m)
-#
-#
-# function w_true(t::Float64)
-#     return (C*noise_inter(t, δ, A, B, xw_true, inter_data_true[1], isd_true))[1]
-# end
-#
-# @time y = solve(mk_problem(w_true, θ0, N), saveat=0:Ts:T) |> h
-# # @time y_alt = solve(mk_problem(w_true_alt, θ0, N), saveat=0:Ts:T) |> h
-# # @time y_simple = solve(mk_problem(w_true_simple, θ0, N), saveat=0:Ts:T) |> h
-# # println("MSE, true-alt: $(mean( (y-y_alt).^2 ))")
-# # println("MSE, true-simple: $(mean( (y-y_simple).^2 ))")
-#
-# # Proposed method cost function
-# cs = zeros(nθ)
-# for (i, θ) in enumerate(θs)
-#   Y = solve_in_parallel(m -> solvewθ(wm(m), θ), ms)
-#   cs[i] = cost(reshape(mean(Y, dims = 2), :), y)
-# end
-#
-# # Naive method cost function
-# cs_jagged = zeros(nθ)
-# # #DEBUG
-# # θs_deb = fill(θ0, nθ)
-# # #END DEBUG
-# for (i, θ) in enumerate(θs) #DEBUG
-#     local noise_uniform_dat, noise_inter_dat = generate_noise_new(Nw, M, 0, nx)
-#     # Computes all M realizations of filtered white noise
-#     local xw_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
-#
-#     function w_jagged(t::Float64, m::Int64)
-#         return (C*noise_inter(t, δ, A, B, xw_mat[:, m], noise_inter_dat[m], isd))[1]
-#     end
-#     wm_jagged(m::Int64) = t -> w_scale*w_jagged(t, m)
-#
-#     Y = solve_in_parallel(m -> solvewθ(wm_jagged(m), θ), ms)
-#     cs_jagged[i] = cost(reshape(mean(Y, dims = 2), :), y)
-# end
-#
-# # # Baseline method cost function
-# # cs_base = zeros(nθ)
-# # isd_base = initialize_isd(0, Nw, nx, true)
-# # zero_noise = [zeros(nx) for i=1:Nw+1]
-# # function w_base(t::Float64)
-# #     return 0
-# # end
-# # for (i, θ) in enumerate(θs)
-# #     y_base = solve(mk_problem(w_base, θ, N), saveat=0:Ts:T) |> h
-# #     cs_base[i] = cost(y_base, y)
-# # end
-#
-#
-# # plot(cs)
-# # plot(cs_jagged)
-# plot_costs_R(θs, cs_jagged, cs, θ0)
-# # savefig("./cost_smoothness.svg")

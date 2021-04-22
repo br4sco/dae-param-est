@@ -186,10 +186,6 @@ function mk_other_noise_interp(A::Array{Float64, 2},
             num_stored_samples = size(isd.states[n+1])[1]
             # setting il, tl, iu, tu
             if num_stored_samples > 0
-                # #DEBUG if statement
-                # if num_stored_samples > 10
-                #     println(num_stored_samples)
-                # end
                 for q = 1:num_stored_samples
                     # interval index = n+1
                     t_inter = isd.sample_times[n+1][q]

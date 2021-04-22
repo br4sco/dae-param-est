@@ -101,14 +101,15 @@ solvewθ(w, θ) = solve(mk_problem(w, θ, N), saveat=0:Ts:T) |> h
 Q = 0
 @warn "Q=0 was used"
 isd = initialize_isd(Q, Nw+Nw_extra, nx, use_interpolation)
+isd_true = initialize_isd(Q, Nw+Nw_extra, nx, true)
 
 function w(t::Float64, m::Int64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, m], noise_inter_dat[m], isd))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, m], isd))[1]
 end
 wm(m::Int64) = t -> w_scale*w(t, m)
 
 function w_true(t::Float64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, M+1], noise_inter_dat[M+1], isd_true))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, M+1], isd_true))[1]
 end
 @time y = solve(mk_problem(w_true, θ0, N), saveat=0:Ts:T) |> h
 
@@ -127,7 +128,7 @@ for (i, θ) in enumerate(θs)
     local xw_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
 
     function w_jagged(t::Float64, m::Int64)
-        return (C*noise_inter(t, δ, A, B, xw_mat[:, m], noise_inter_dat[m], isd))[1]
+        return (C*noise_inter(t, δ, A, B, xw_mat[:, m], isd))[1]
     end
     wm_jagged(m::Int64) = t -> w_scale*w_jagged(t, m)
 

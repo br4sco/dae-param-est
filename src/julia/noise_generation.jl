@@ -48,46 +48,6 @@ function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
     return DT_SS_Model(AdTs, BdTs, C, x0, Ts)
 end
 
-function discretize_ct_model(A, B, C, Ts, x0)
-    @warn "The function discretize_ct_model() from noise_generation.jl has been deprecated, use discretize_ct_noise_model() instead"
-    discretize_ct_noise_model(A, B, C, Ts, x0)
-end
-
-function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64, save_data::Bool=true)
-    # N: Number of samples of uniformly sampled noise process after time 0
-    # To generate noise also at time 0, we need to generate N+1 noise samples
-    # M: Number of different realizations of the noise process
-    # P: Number of inter-sample noise samples stored
-    # nx: Dimension of each noise sample
-
-    @warn "The function generate_noise() from noise_generation.jl is deprecated, use generate_noise_new() instead"
-
-    # Let z[i,m,j] be the j:th element of the i:th sample of the m:th
-    # realization of the process z. Then z_uniform should be interpreted as
-    # on the form
-    # [z[1,1,1], ..., z[1,1,nx], z[1,2,1]..., z[1,M,nx]
-    #   ...
-    #  z[N+1,1,1], ...      ...      ...    ..., z[N+1,M,nx]]
-    z_uniform = randn(Float64, N+1, nx*M)
-    # TODO: Saving z_inter seems to often (but not always) break for
-    # 4th degree systems, worth figuring out why... EDIT: Seems simply that
-    # it happends if DataFrames become too large
-
-    # Let z[i,m,p,j] be the j:th element of the p:th sample in the i:th
-    # inter-sample interval of the m:th realization of the process z.
-    # Then z_inter should be interpreted as on the form
-    # [z[1,1,1,1], ..., z[1,1,1,nx], z[1,1,2,1]..., z[1,1,P,nx], z[1,2,1,1],... z[1,M,P,nx]
-    #   ...
-    # [z[N+1,1,1,1], ...     ...      ...      ...      ...      ...       ...    z[N+1,M,P,nx]]
-    z_inter   = randn(Float64, N+1, nx*M*P)
-    if save_data
-        CSV.write("z_uniform.csv", DataFrame(z_uniform))
-        # CSV.write("z_inter.csv", DataFrame(z_inter))
-        CSV.write("metadata.csv", DataFrame([N M P nx]))
-    end
-    return z_uniform, z_inter
-end
-
 function generate_noise_new(N::Int64, M::Int64, P::Int64, nx::Int64)
     # N: Number of samples of uniformly sampled noise process after time 0
     # M: Number of different realizations of the noise process
@@ -118,45 +78,6 @@ function generate_noise_new(N::Int64, M::Int64, P::Int64, nx::Int64)
     end
 
     return z_all_uniform, z_all_inter
-end
-
-function load_data(N::Int64, M::Int64, P::Int64, nx::Int64)
-    z_uni_mat = CSV.read("z_uniform.csv", DataFrame)
-    # z_inter_mat = CSV.read("z_inter.csv", DataFrame)
-    z_uniform = [ z_uni_mat[i,j] for i=1:size(z_uni_mat)[1], j=1:size(z_uni_mat)[2]]
-    # z_intersample = [ z_inter_mat[i,j] for i=1:size(z_inter_mat)[1], j=1:size(z_inter_mat)[2]]
-    return z_uniform#, z_intersample
-end
-
-function load_metadata()
-    try
-        metadata_frame = CSV.read("metadata.csv", DataFrame)
-        return [metadata_frame[1,i] for i = 1:size(metadata_frame)[2]]
-    catch
-        # This happens if e.g. no metadata file exists yet
-        return nothing
-    end
-end
-
-function simulate_noise_process(mdl::DT_SS_Model, data::Array{Float64,2})::Array{Array{Float64, 1}, 2}
-    @warn "The function simulate_noise_process() from noise_generation.jl is deprecated, use simulate_noise_process_new() instead"
-    (Np1, Mnx) = size(data)
-    Ts = mdl.Ts
-    N = Np1 - 1     # We have noise for times 0 to N, so a total of N+1 samples
-    nx = size(mdl.Ad)[1]
-    M = Int(Mnx÷nx)
-    sys = ss(mdl.Ad, mdl.Bd, mdl.Cd, 0.0, mdl.Ts)
-    t = 0:Ts:N*Ts
-    # Allocating space for noise process
-    x_process = [ fill(NaN, (nx,)) for i=1:N, m=1:M]
-    for m=1:M
-        y, t, x = lsim(sys, data[:, (1+(m-1)*nx):m*nx], t, x0=mdl.x0)
-        for i=1:N
-            x_process[i,m][:] = x[i+1,:]    # i+1, since first elemt of x is at time 0
-        end
-    end
-
-    return x_process
 end
 
 function simulate_noise_process_new(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1})
