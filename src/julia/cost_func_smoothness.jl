@@ -1,6 +1,6 @@
 using Random, LaTeXStrings, DataFrames, CSV
 
-include("new_noise_interpolation.jl")
+include("noise_interpolation.jl")
 include("noise_generation.jl")
 include("simulation.jl")
 Random.seed!(1234)
@@ -55,16 +55,16 @@ nx = size(A)[1]
 # ----------------- DATA GENERATION ----------------
 noise_model = discretize_ct_noise_model(A, B, C, δ, zeros(nx,))
 # M+1 to generate one realization for true system as well
-noise_uniform_dat, noise_inter_dat = generate_noise_new(Nw+Nw_extra, M+1, 0, nx)
+noise_uniform_dat, noise_inter_dat = generate_noise(Nw+Nw_extra, M+1, 0, nx)
 # Computes all M realizations of filtered white noise
-xw_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
+xw_mat = simulate_noise_process(noise_model, noise_uniform_dat)
 
 # I THINK THIS CAN BE DELETED!!!!!!!!!!
 # # z_all_uniform[m][i,j] is the j:th element of the i:th sample of
 # # realization m
-# uniform_data_true, inter_data_true = generate_noise_new(Nw+Nw_extra, 1, P, nx)
+# uniform_data_true, inter_data_true = generate_noise(Nw+Nw_extra, 1, P, nx)
 # # noise_model_true = discretize_ct_noise_model(A, B, C, Ts, zeros(nx,))
-# xw_true = simulate_noise_process_new(noise_model, uniform_data_true)
+# xw_true = simulate_noise_process(noise_model, uniform_data_true)
 # xw_true = xw_true[:]
 # WS_true = [(C*xw_true[i])[1] for i=1:N+1]
 # times_true = 0:Ts:N*Ts
@@ -123,9 +123,9 @@ end
 # Naive method cost function
 cs_jagged = zeros(nθ)
 for (i, θ) in enumerate(θs)
-    local noise_uniform_dat, noise_inter_dat = generate_noise_new(Nw, M, 0, nx)
+    local noise_uniform_dat, noise_inter_dat = generate_noise(Nw, M, 0, nx)
     # Computes all M realizations of filtered white noise
-    local xw_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
+    local xw_mat = simulate_noise_process(noise_model, noise_uniform_dat)
 
     function w_jagged(t::Float64, m::Int64)
         return (C*noise_inter(t, δ, A, B, xw_mat[:, m], isd))[1]

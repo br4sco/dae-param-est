@@ -48,7 +48,7 @@ function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
     return DT_SS_Model(AdTs, BdTs, C, x0, Ts)
 end
 
-function generate_noise_new(N::Int64, M::Int64, P::Int64, nx::Int64)
+function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64)
     # N: Number of samples of uniformly sampled noise process after time 0
     # M: Number of different realizations of the noise process
     # P: Number of inter-sample noise samples stored
@@ -80,7 +80,7 @@ function generate_noise_new(N::Int64, M::Int64, P::Int64, nx::Int64)
     return z_all_uniform, z_all_inter
 end
 
-function simulate_noise_process_new(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1})
+function simulate_noise_process(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1})
     # data[m][i, j] should be the j:th component of the noise at time i of
     # realization m
     M = size(data)[1]

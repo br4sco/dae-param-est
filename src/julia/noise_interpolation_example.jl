@@ -1,6 +1,6 @@
 using Plots, CSV, DataFrames
 import Random
-include("new_noise_interpolation.jl")
+include("noise_interpolation.jl")
 include("noise_generation.jl")
 include("simulation.jl")
 Random.seed!(1234)
@@ -36,9 +36,9 @@ P = 4       # Number of inter-sample samples stored
 Q = 1000       # Number of inter-sample states stored. Should have Q >= P
 nx = size(A)[1]
 noise_model = discretize_ct_noise_model(A, B, C, Ts, zeros(nx,))
-noise_uniform_dat, noise_inter_dat = generate_noise_new(N, M, P, nx)
+noise_uniform_dat, noise_inter_dat = generate_noise(N, M, P, nx)
 # Computes all M realizations of filtered white noise
-x_mat = simulate_noise_process_new(noise_model, noise_uniform_dat)
+x_mat = simulate_noise_process(noise_model, noise_uniform_dat)
 
 # isd is short for "inter-sample data"
 isd = initialize_isd(Q, N, nx, true)

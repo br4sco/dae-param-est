@@ -5,7 +5,7 @@ using Distributions
 # include("noise_model.jl")
 include("simulation.jl")
 include("noise_generation.jl")
-include("new_noise_interpolation.jl")
+include("noise_interpolation.jl")
 
 seed = 1234
 Random.seed!(seed)
@@ -92,9 +92,9 @@ const Zu = [randn(Nw + Nw_extra, nx)]
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
 
-const XWd = simulate_noise_process_new(dmdl, Zd) |> mangle_XW
-const XWm = simulate_noise_process_new(dmdl, Zm) |> mangle_XW
-const XWu = simulate_noise_process_new(dmdl, Zu) |> mangle_XW
+const XWd = simulate_noise_process(dmdl, Zd) |> mangle_XW
+const XWm = simulate_noise_process(dmdl, Zm) |> mangle_XW
+const XWu = simulate_noise_process(dmdl, Zu) |> mangle_XW
 
 
 # new noise interpolation optimization attempt
@@ -125,7 +125,7 @@ function interpw_general(wl::Float64,
   wl + (t - tl) * (wu - wl) / (tu-tl)
 end
 
-function mk_new_noise_interp(A::Array{Float64, 2},
+function mk_noise_interp(A::Array{Float64, 2},
                              B::Array{Float64, 2},
                              C::Array{Float64, 2},
                              XW::Array{Float64, 2},
@@ -258,12 +258,12 @@ function mk_other_noise_interp(A::Array{Float64, 2},
             Σr = CΣ.L
 
             white_noise = randn(rng, Float64, (nx, 1))
-            x_new = μ + Σr*white_noise
+            x = μ + Σr*white_noise
             if num_stored_samples < Q
-                isd.states[n+1] = [isd.states[n+1]; x_new']
+                isd.states[n+1] = [isd.states[n+1]; x']
                 isd.sample_times[n+1] = [isd.sample_times[n+1]; t]
             end
-            return first(C * x_new)
+            return first(C * x)
         end
       end
 end
@@ -273,10 +273,10 @@ end
 # isd = initialize_isd(100, Nw+1, nx, true)
 isds = [initialize_isd(Q, Nw+1, nx, true) for e=1:E]
 # new interpolation optimization attempt
-# wmd(e::Int) = mk_new_noise_interp(A, B, C, XWd, e)
+# wmd(e::Int) = mk_noise_interp(A, B, C, XWd, e)
 wmd(e::Int) = mk_other_noise_interp(A, B, C, XWd, e, isds)
-wmm(m::Int) = mk_new_noise_interp(A, B, C, XWm, m)
-u(t::Float64) = mk_new_noise_interp(A, B, C, XWu, 1)(t)
+wmm(m::Int) = mk_noise_interp(A, B, C, XWm, m)
+u(t::Float64) = mk_noise_interp(A, B, C, XWu, 1)(t)
 
 # interpolation over w(tk)
 # wmd(e::Int) = interpw(WSd, e)
