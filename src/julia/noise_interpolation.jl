@@ -33,8 +33,9 @@ function initialize_isw(Q::Int64, W::Int64, nx::Int64,
          containers = [zeros(0,nx)  for j=1:W]
          sample_times = [zeros(0) for j=1:W]
      else
-         isd_states = [zeros(0,nx)]
-         isd_sample_times = [zeros(0)]
+         containers = [zeros(0,nx)]
+         sample_times = [zeros(0)]
+         W = 0  # W > 0 while Q=0 doesn't make sense, since we don't store anything
      end
      return InterSampleWindow(containers, sample_times, Q, W, use_interpolation, 0, 1)
 end
@@ -43,18 +44,27 @@ function map_to_container(num::Int64, isw::InterSampleWindow)
     return ((num-1)%isw.W) + 1
 end
 
-function add_sample(x_new::Array{Float64, 1}, sample_time::Float64, n::Int64,
+# Since x is originally a 1D array but can be become a 2D array when created
+# using matrix-operations, I have specified the input here as an AbstractArray
+# instead of requiring a specific dimension of the input array. Hopefully this
+# should work well, and I think probably most of our functions should use
+# AbstractArrays, since it would make the code support datatypes such as
+# transposes and similar. In case this doesn't work, it is simple to convert
+# a 2D array into a 1D array using the [:]-operator. According to
+# https://stackoverflow.com/questions/63340812/how-to-convert-from-arrayfloat64-2-to-arrayarrayfloat64-1-1-in-julia
+# this doesn't use any additional memory, so it shouldn't impact performance negatively.
+function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
     isw::InterSampleWindow)
 
-    if isw.start <= n && isw.start >= isw.start + isw.W - 1
-        container_id = map_to_container(isw.ptr + n - start, isw)
+    if isw.start <= n && n <= isw.start + isw.W - 1
+        container_id = map_to_container(isw.ptr + n - isw.start, isw)
     elseif n > isw.start + isw.W - 1
         num_steps = n - isw.start - isw.W + 1
         for step in 1:num_steps
             isw.containers[map_to_container(isw.ptr+isw.W-1+step, isw)] = zeros(0, size(x_new)[1])
             isw.sample_times[map_to_container(isw.ptr+isw.W-1+step, isw)] = zeros(0)
         end
-        container_id = map_to_container(isw.ptr+isw.W-1+num_steps)
+        container_id = map_to_container(isw.ptr+isw.W-1+num_steps, isw)
         isw.ptr = map_to_container(isw.ptr+num_steps, isw)
         isw.start += num_steps
     else # n < isw.start
@@ -63,17 +73,29 @@ function add_sample(x_new::Array{Float64, 1}, sample_time::Float64, n::Int64,
     end
     # Only stores samples if less than Q samples are already stored
     if size(isw.containers[container_id])[1] < isw.Q
-        push!(isw.containers[container_id], x_new')
+        # TODO: Could adding new columns be more efficient, since Julia has
+        # column-major arrays? I think it should in theory, but I'm not certain
+        # it actually works in practice
+        isw.containers[container_id] = vcat(isw.containers[container_id], x_new')
         push!(isw.sample_times[container_id], sample_time)
     end
+    # println(isw.containers)
+    # println("ptr: $(isw.ptr), start: $(isw.start)")
 end
 
 function get_neighbors(n::Int64, t::Float64, x::Array{Array{Float64, 1}, 1},
     Ts::Float64, isw::InterSampleWindow)
+
     tl = n*Ts
     tu = (n+1)*Ts
     il = 0
     iu = 0
+
+    if isw.W == 0
+        return x[n+2], x[n+1], tu-t, t-tl, isw.use_interpolation
+    end
+
+    should_interpolate = false
     if n >= isw.start && n <= isw.start + isw.W - 1
         idx = map_to_container(isw.ptr + n - isw.start, isw)
         num_stored_samples = size(isw.containers[idx])[1]
@@ -90,23 +112,31 @@ function get_neighbors(n::Int64, t::Float64, x::Array{Array{Float64, 1}, 1},
                     iu = q
                 end
             end
+            if num_stored_samples >= isw.Q && isw.should_interpolate
+                should_interpolate = true
+            end
         end
     end
 
     if il > 0
         xl = view(isw.containers[idx], il, :)
     else
-        xl = view(x, n+1)
+        # TODO: For some reason, when using view() here, we get a different
+        # data-type on xl which messes up future code.
+        # xl = view(x, n+1)
+        xl = x[n+1]
     end
     if iu > 0
         xu = view(isw.containers[idx], iu, :)
     else
-        xu = view(x, n+2)
+        # TODO: For some reason, when using view() here, we get a different
+        # data-type on xu which messes up future code.
+        # xu = view(x, n+2)
+        xu = x[n+2]
     end
     δl = t-tl
     δu = tu-t
-    return xu, xl, δu, δl
-
+    return xu, xl, δu, δl, should_interpolate
 end
 
 function initialize_isd(Q::Int64, N::Int64, nx::Int64, use_interpolation::Bool)::InterSampleData
@@ -125,18 +155,18 @@ function noise_inter(t::Float64,
                      A::Array{Float64, 2},
                      B::Array{Float64, 2},
                      x::Array{Array{Float64, 1}, 1},
-                     isd::InterSampleData,
+                     isw::InterSampleWindow,
                      ϵ::Float64=10e-12,
                      rng::MersenneTwister=Random.default_rng())
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
     δ = t - n*Ts
     nx = size(A)[1]
-    Q = isd.Q
+    Q = isw.Q
     # P = size(z_inter[1])[1]
     P = 0
     # N = size(isd.states)[1]
-    use_interpolation = isd.use_interpolation
+    use_interpolation = isw.use_interpolation
 
     # TODO: Update to more efficient use of matrices. Pass C for returning stuff?
     xl = x[n+1]     # x[1] == x0
@@ -150,57 +180,12 @@ function noise_inter(t::Float64,
         return xl + (xu-xl)*(t-tl)/(tu-tl)
     end
 
-    # This case is usually handled by the check further down for δ smaller
-    # than ϵ, but if n == N, isd.states[n+1] will give BoundsError, so we
-    # need to put this if-statement here to avoid that. We only check for n==N,
-    # and not n >= N so that there will be a crash if times after the last
-    # sample are requested
-    # if n == N
-    #     return x[N+1]
-    # else
-    #     num_stored_samples = size(isd.states[n+1])[1]
-    # end
+    #TODO: Q = 0, WE DON'T RLY PRE-ALLOCATE, SO get_neighbors FAILS!!!!!!!!
 
-    # This check has to be done because, when Q=0 and linear interpolation is off,
-    # isd.states will only have one element (to minimize unnecessary pre-allocation)
-    # and the statement below will give out of bounds error
-    if Q > 0
-        num_stored_samples = size(isd.states[n+1])[1]
-    else
-        num_stored_samples = 0
-    end
-
-    # setting il, tl, iu, tu
-    if num_stored_samples > 0
-        for q = 1:num_stored_samples
-            # interval index = n+1
-            t_inter = isd.sample_times[n+1][q]
-            if t_inter > tl && t_inter <= t
-                tl = t_inter
-                il = q
-            end
-            if t_inter < tu && t_inter >= t
-                tu = t_inter
-                iu = q
-            end
-        end
-    end
-    δl = t-tl
-    δu = tu-t
-
-    # Setting xl and xu
-    # xl = x[n+1]     # x[1] == x0
-    # xu = x[n+2]
-    if il > 0
-        xl = view(isd.states[n+1], il,:)
-    end
-    if iu < Q+1
-        xu = view(isd.states[n+1], iu,:)
-    end
-
+    xu, xl, δu, δl, should_interpolate = get_neighbors(n, t, x, Ts, isw)
     # If no more samples are stored in this interval, allow for the use of
     # linear interpolation instead, to ensure smoothness of realization
-    if num_stored_samples >= Q && use_interpolation
+    if should_interpolate
         # @warn "Used linear interpolation"   # DEBUG
         return xl + (xu-xl)*δl/δu
     end
@@ -246,9 +231,8 @@ function noise_inter(t::Float64,
     # end
     white_noise = randn(rng, Float64, (nx, 1))
     x_new = μ + Σr*white_noise
-    if num_stored_samples < Q
-        isd.states[n+1] = [isd.states[n+1]; x_new']
-        isd.sample_times[n+1] = [isd.sample_times[n+1]; t]
+    if isw.W > 0
+        add_sample!(x_new, t, n, isw)
     end
 
     return x_new

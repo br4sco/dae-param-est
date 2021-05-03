@@ -13,6 +13,7 @@ const M = 20                   # number of noise realizations
 const ms = collect(1:M)         # enumerate the realizations
 const σ = 0.002                 # measurement noise standard deviation
 Nw = 1000#Int(1e3)          # Number of noise samples, excluding the initial one, x_e(0)
+W = 100
 Nw_extra = 100
 δ = N*Ts/Nw                  # Sampling frequency of noise model
 P = 0#10           # Number of inter-sample samples stored
@@ -100,16 +101,16 @@ solvewθ(w, θ) = solve(mk_problem(w, θ, N), saveat=0:Ts:T) |> h
 # TODO: THIS ISN'T RIGHT PLACE TO DEFINE, BUT DOESN'T MATTER WHEN Q IS 0!!!
 Q = 0
 @warn "Q=0 was used"
-isd = initialize_isd(Q, Nw+Nw_extra, nx, use_interpolation)
-isd_true = initialize_isd(Q, Nw+Nw_extra, nx, true)
+isw = initialize_isw(Q, W, nx, use_interpolation)
+isw_true = initialize_isw(Q, W, nx, true)
 
 function w(t::Float64, m::Int64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, m], isd))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, m], isw))[1]
 end
 wm(m::Int64) = t -> w_scale*w(t, m)
 
 function w_true(t::Float64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, M+1], isd_true))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, M+1], isw_true))[1]
 end
 @time y = solve(mk_problem(w_true, θ0, N), saveat=0:Ts:T) |> h
 
@@ -128,7 +129,7 @@ for (i, θ) in enumerate(θs)
     local xw_mat = simulate_noise_process(noise_model, noise_uniform_dat)
 
     function w_jagged(t::Float64, m::Int64)
-        return (C*noise_inter(t, δ, A, B, xw_mat[:, m], isd))[1]
+        return (C*noise_inter(t, δ, A, B, xw_mat[:, m], isw))[1]
     end
     wm_jagged(m::Int64) = t -> w_scale*w_jagged(t, m)
 

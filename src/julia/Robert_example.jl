@@ -17,6 +17,7 @@ const ms = collect(1:M)         # enumerate the realizations
 const σ = 0.002                 # measurement noise standard deviation
 Nw = 200#Int(1e3)          # Number of noise samples, excluding the initial one, x_e(0)
 Nw_extra = 10
+W = 100
 δ = N*Ts/Nw                  # Sampling frequency of noise model
 P = 0#10           # Number of inter-sample samples stored
 Q = 0#100#Int(1e8)         # Number of inter-sample states stored

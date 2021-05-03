@@ -41,7 +41,7 @@ noise_uniform_dat, noise_inter_dat = generate_noise(N, M, P, nx)
 x_mat = simulate_noise_process(noise_model, noise_uniform_dat)
 
 # isd is short for "inter-sample data"
-isd = initialize_isd(Q, N, nx, true)
+isw = initialize_isw(Q, 20, nx, true)
 
 m = 1
 
@@ -49,7 +49,7 @@ m = 1
 # one realization, and each row to one time instant. Each element is itself
 # a state-vector (Array{Float64, 1}), not a scalar
 function w(t::Float64)
-    return (C*noise_inter(t, Ts, A, B, x_mat[:, m], isd))[1]
+    return (C*noise_inter(t, Ts, A, B, x_mat[:, m], isw))[1]
 end
 
 # pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})
