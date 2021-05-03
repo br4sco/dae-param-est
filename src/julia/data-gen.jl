@@ -24,6 +24,7 @@ const Q = 100
 const M = 500
 const E = 500
 const Nw = 10000
+const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
 # === PR-GENERATED ===
@@ -92,9 +93,15 @@ const Zu = [randn(Nw + Nw_extra, nx)]
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
 
-const XWd = simulate_noise_process(dmdl, Zd) |> mangle_XW
-const XWm = simulate_noise_process(dmdl, Zm) |> mangle_XW
-const XWu = simulate_noise_process(dmdl, Zu) |> mangle_XW
+const XWdp = simulate_noise_process(dmdl, Zd)
+const XWmp = simulate_noise_process(dmdl, Zm)
+const XWup = simulate_noise_process(dmdl, Zu)
+const XWd = mangle_XW(XWdp)
+const XWm = mangle_XW(XWmp)
+const XWu = mangle_XW(XWup)
+# const XWd = simulate_noise_process(dmdl, Zd) |> mangle_XW
+# const XWm = simulate_noise_process(dmdl, Zm) |> mangle_XW
+# const XWu = simulate_noise_process(dmdl, Zu) |> mangle_XW
 
 
 # new noise interpolation optimization attempt
@@ -268,13 +275,31 @@ function mk_other_noise_interp(A::Array{Float64, 2},
       end
 end
 
+function mk_newer_noise_interp(A::Array{Float64, 2},
+                               B::Array{Float64, 2},
+                               C::Array{Float64, 2},
+                               XWp::Array{Array{Float64, 1}, 2},
+                               m::Int,
+                               isws::Array{InterSampleWindow, 1})
+
+   let
+       function w(t::Float64)
+           xw_temp = noise_inter(t, Ts, A, B, view(XWp, :, m), isws[m])
+           return first(C*xw_temp)
+       end
+   end
+
+end
+
 # === CHOOSE NOISE INTERPOLATION METHOD ===
 
 # isd = initialize_isd(100, Nw+1, nx, true)
 isds = [initialize_isd(Q, Nw+1, nx, true) for e=1:E]
+isws = [initialize_isw(Q, W, nx, true) for e=1:E]
 # new interpolation optimization attempt
 # wmd(e::Int) = mk_noise_interp(A, B, C, XWd, e)
 wmd(e::Int) = mk_other_noise_interp(A, B, C, XWd, e, isds)
+wmn(e::Int) = mk_newer_noise_interp(A, B, C, XWdp, e, isws)
 wmm(m::Int) = mk_noise_interp(A, B, C, XWm, m)
 u(t::Float64) = mk_noise_interp(A, B, C, XWu, 1)(t)
 

@@ -83,7 +83,8 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
     # println("ptr: $(isw.ptr), start: $(isw.start)")
 end
 
-function get_neighbors(n::Int64, t::Float64, x::Array{Array{Float64, 1}, 1},
+# TODO: SHOULD RLY BE 1D ARRAY OF 1D ARRAYS, instead of just an AbstractArray
+function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
     Ts::Float64, isw::InterSampleWindow)
 
     tl = n*Ts
@@ -112,7 +113,7 @@ function get_neighbors(n::Int64, t::Float64, x::Array{Array{Float64, 1}, 1},
                     iu = q
                 end
             end
-            if num_stored_samples >= isw.Q && isw.should_interpolate
+            if num_stored_samples >= isw.Q && isw.use_interpolation
                 should_interpolate = true
             end
         end
@@ -154,7 +155,7 @@ function noise_inter(t::Float64,
                      Ts::Float64,       # Sampling time of noise process
                      A::Array{Float64, 2},
                      B::Array{Float64, 2},
-                     x::Array{Array{Float64, 1}, 1},
+                     x::AbstractArray,  # TODO: SHOULD RLY BE 1D ARRAY OF 1D ARRAYS!
                      isw::InterSampleWindow,
                      ϵ::Float64=10e-12,
                      rng::MersenneTwister=Random.default_rng())
