@@ -3,6 +3,7 @@ using Random, LinearAlgebra, Future
 mutable struct InterSampleWindow
     containers::Array{Array{Float64,2},1}
     sample_times::Array{Array{Float64,1},1}
+    num_stored::Array{Int64,1}
     Q::Int64    # Max number of stored samples per interval
     W::Int64    # Number of containers in the array containers
     # TODO: Not sure if this struct is the best place to store use_interpolation
@@ -30,14 +31,16 @@ end
 function initialize_isw(Q::Int64, W::Int64, nx::Int64,
      use_interpolation::Bool=true)::InterSampleWindow
      if Q > 0
-         containers = [zeros(0,nx)  for j=1:W]
-         sample_times = [zeros(0) for j=1:W]
+         containers = [zeros(Q, nx)  for j=1:W]
+         sample_times = [zeros(Q) for j=1:W]
+         num_stored   = zeros(W)
      else
-         containers = [zeros(0,nx)]
-         sample_times = [zeros(0)]
+         containers = []
+         sample_times = []
+         num_stored = []
          W = 0  # W > 0 while Q=0 doesn't make sense, since we don't store anything
      end
-     return InterSampleWindow(containers, sample_times, Q, W, use_interpolation, 0, 1)
+     return InterSampleWindow(containers, sample_times, num_stored, Q, W, use_interpolation, 0, 1)
 end
 
 function map_to_container(num::Int64, isw::InterSampleWindow)
@@ -61,8 +64,9 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
     elseif n > isw.start + isw.W - 1
         num_steps = n - isw.start - isw.W + 1
         for step in 1:num_steps
-            isw.containers[map_to_container(isw.ptr+isw.W-1+step, isw)] = zeros(0, size(x_new)[1])
-            isw.sample_times[map_to_container(isw.ptr+isw.W-1+step, isw)] = zeros(0)
+            # isw.containers[map_to_container(isw.ptr+isw.W-1+step, isw)] = zeros(0, size(x_new)[1])
+            # isw.sample_times[map_to_container(isw.ptr+isw.W-1+step, isw)] = zeros(0)
+            isw.num_stored[map_to_container(isw.ptr+isw.W-1+step, isw)] = 0
         end
         container_id = map_to_container(isw.ptr+isw.W-1+num_steps, isw)
         isw.ptr = map_to_container(isw.ptr+num_steps, isw)
@@ -71,13 +75,12 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
         @warn "Tried to add sample outside of inter-sample window"
         return
     end
+    num_stored = isw.num_stored[container_id]
     # Only stores samples if less than Q samples are already stored
-    if size(isw.containers[container_id])[1] < isw.Q
-        # TODO: Could adding new columns be more efficient, since Julia has
-        # column-major arrays? I think it should in theory, but I'm not certain
-        # it actually works in practice
-        isw.containers[container_id] = vcat(isw.containers[container_id], x_new')
-        push!(isw.sample_times[container_id], sample_time)
+    if num_stored < isw.Q
+        isw.containers[container_id][num_stored+1, :] = x_new
+        isw.sample_times[container_id][num_stored+1]   = sample_time
+        isw.num_stored[container_id] += 1
     end
     # println(isw.containers)
     # println("ptr: $(isw.ptr), start: $(isw.start)")
@@ -99,7 +102,7 @@ function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
     should_interpolate = false
     if n >= isw.start && n <= isw.start + isw.W - 1
         idx = map_to_container(isw.ptr + n - isw.start, isw)
-        num_stored_samples = size(isw.containers[idx])[1]
+        num_stored_samples = isw.num_stored[idx]
         if num_stored_samples > 0
             # TODO: There must be a more efficient search method
             for q=1:num_stored_samples

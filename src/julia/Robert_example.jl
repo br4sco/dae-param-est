@@ -125,18 +125,18 @@ T = N*Ts
 
 # ----------- USE THIS BLOCK OF CODE TO TEST NOISE FUNCITON SMOOTHNESS --------
 
-isd_good = initialize_isd(100, Nw+Nw_extra, nx, true)
-isd_line = initialize_isd(0, Nw+Nw_extra, nx, true)
-isd_bad = initialize_isd(0, Nw+Nw_extra, nx, false)
+isw_good = initialize_isw(100, W, nx, true)
+isw_line = initialize_isw(0, W, nx, true)
+isw_bad = initialize_isw(0, W, nx, false)
 
 function w_good(t::Float64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isd_good))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isw_good))[1]
 end
 function w_line(t::Float64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isd_line))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isw_line))[1]
 end
 function w_bad(t::Float64)
-    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isd_bad))[1]
+    return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isw_bad))[1]
 end
 
 t_vec = 0:0.001:0.1
