@@ -48,6 +48,8 @@ function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
     return DT_SS_Model(AdTs, BdTs, C, x0, Ts)
 end
 
+# NOTE: z_all_inter is not used by any code anymore, this function can equally
+# well be replaced by [ randn(N+1, nx) for m=1:M]
 function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64)
     # N: Number of samples of uniformly sampled noise process after time 0
     # M: Number of different realizations of the noise process

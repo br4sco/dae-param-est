@@ -55,8 +55,8 @@ B = reshape([0.5; 0.0], (2,1))
 C = [0 1]
 # # 3-dimensional, pole excess 3, twice differentiable
 # A = [0 0 -(4^2);
-#            1 0 -(4^2+2*4*0.1);
-#            0 1 -(2*4*0.1+1)]
+#      1 0 -(4^2+2*4*0.1);
+#      0 1 -(2*4*0.1+1)]
 # B = reshape([0.5; 0.0; 0.0], (3,1))
 # C = [0 0 1]
 # # 4-dimensional, pole excess 4, three times differentiable
@@ -76,10 +76,7 @@ noise_uniform_dat, noise_inter_dat = generate_noise(Nw+Nw_extra, M+1, P, nx)
 xw_mat = simulate_noise_process(noise_model, noise_uniform_dat)
 WS = [ (C*xw_mat[i,m])[1] for i=1:Nw+1, m=1:M]
 
-# z_all_uniform[m][i,j] is the j:th element of the i:th sample of
-# realization m
 uniform_data_true, inter_data_true = generate_noise(Nw+Nw_extra, 1, P, nx)
-# noise_model_true = discretize_ct_noise_model(A, B, C, Ts, zeros(nx,))
 xw_true = simulate_noise_process(noise_model, uniform_data_true)
 xw_true = xw_true[:]
 WS_true = [(C*xw_true[i])[1] for i=1:N+1]

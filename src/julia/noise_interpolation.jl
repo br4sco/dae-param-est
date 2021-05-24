@@ -206,6 +206,10 @@ function noise_inter(t::Float64,
     Mu      = exp(Mexp*δu)
     Adl     = Ml[nx+1:end, nx+1:end]'
     Adu     = Mu[nx+1:end, nx+1:end]'
+    # Using view here seems to remove 2 allocations per call, but I'm not sure
+    # it provides any performance improvements
+    # Adl     = view(Ml, nx+1:2*nx, nx+1:2*nx)'
+    # Adu     = view(Mu, nx+1:2*nx, nx+1:2*nx)'
     AdΔ     = Adu*Adl
     B2dl    = Hermitian(Adl*Ml[1:nx, nx+1:end])
     B2du    = Hermitian(Adu*Mu[1:nx, nx+1:end])
