@@ -21,6 +21,8 @@ const Ts = 0.1                  # stepsize
 
 # === NOISE ===
 const Q = 100
+# NOTE: Currently the array of isw:s is of length E. If E < M, then one needs to
+# create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
 const Nw = 10000
@@ -445,8 +447,7 @@ function calc_mean_Y()
 
   for (i, θ) in enumerate(θs)
     @info "solving for point ($(i)/$(nθ)) of θ"
-    # TODO: Does this re-allocate memory? In that case, there should be a better implementation
-    global isws = [initialize_isw(Q, W, nx, true) for m=1:M]
+    reset:isws!(isws)
     Y = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
     y = reshape(mean(Y, dims = 2), :)
     writedlm(joinpath(data_dir, "tmp", "y_mean_$(i).csv"), y, ',')

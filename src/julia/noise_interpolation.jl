@@ -43,6 +43,18 @@ function initialize_isw(Q::Int64, W::Int64, nx::Int64,
      return InterSampleWindow(containers, sample_times, num_stored, Q, W, use_interpolation, 0, 1)
 end
 
+function reset_isw!(isw::InterSampleWindow)
+    fill!(isw.num_stored, 0)
+    isw.start = 0
+    isw.ptr = 1
+end
+
+function reset_isws!(isws::AbstractArray{InterSampleWindow})
+    for i in eachindex(isws)
+        reset_isw!(isws[i])
+    end
+end
+
 function map_to_container(num::Int64, isw::InterSampleWindow)
     return ((num-1)%isw.W) + 1
 end
