@@ -25,7 +25,7 @@ const Q = 100
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nw = 10000
+const Nw = 1000
 const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
@@ -67,15 +67,21 @@ end
 #           ',')
 
 # === NOISE INTERPOLATION ===
+function get_dt_noise_matrices(η)
+    A = [0.0 1.0; -4^2 η]
+    B = reshape([0.0 1.0], (2,1))
+    C = [1.0 0.0]
+    x0 = zeros(nx)
+    return A, B, C, x0
+end
+
 const nx = 2
-const A = [0.0 1.0; -4^2 -0.8]
-const B = reshape([0.0 1.0], (2,1))
-const C = [1.0 0.0]
-# const A = [0 -4^2; 1 -0.8]
-# const B = reshape([1.0 0.0], (2,1))
-# const C = [0 1]
-const x0 = zeros(nx)
-const dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
+const η0 = -0.8                 # true value of η
+const A_true = [0.0 1.0; -4^2 η0]
+const B_true = reshape([0.0 1.0], (2,1))
+const C_true = [1.0 0.0]
+const x0_true = zeros(nx)
+const true_mdl = discretize_ct_noise_model(A_true, B_true, C_true, δ, x0_true)
 
 to_data(Z::Array{Float64, 2}) =
   [Z[:, m:(m + nx - 1)] for m = 1:nx:(size(Z, 2) / nx)]
@@ -95,15 +101,13 @@ const Zu = [randn(Nw + Nw_extra, nx)]
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
 
-const XWdp = simulate_noise_process(dmdl, Zd)
-const XWmp = simulate_noise_process(dmdl, Zm)
-const XWup = simulate_noise_process(dmdl, Zu)
+# const XWdp = simulate_noise_process(dmdl, Zd)
+# const XWmp = simulate_noise_process(dmdl, Zm)
+const XWup = simulate_noise_process(true_mdl, Zu)
+const XWdp = simulate_noise_process(true_mdl, Zd)
 const XWd = mangle_XW(XWdp)
-const XWm = mangle_XW(XWmp)
 const XWu = mangle_XW(XWup)
-# const XWd = simulate_noise_process(dmdl, Zd) |> mangle_XW
-# const XWm = simulate_noise_process(dmdl, Zm) |> mangle_XW
-# const XWu = simulate_noise_process(dmdl, Zu) |> mangle_XW
+# const XWm = mangle_XW(XWmp)
 
 
 # new noise interpolation optimization attempt
@@ -312,13 +316,11 @@ end
 # isd = initialize_isd(100, Nw+1, nx, true)
 isds = [initialize_isd(Q, Nw+1, nx, true) for e=1:E]
 isws = [initialize_isw(Q, W, nx, true) for e=1:E]
-# new interpolation optimization attempt
-# wmd(e::Int) = mk_noise_interp(A, B, C, XWd, e)
-wmd(e::Int) = mk_other_noise_interp(A, B, C, XWd, e, isds)
-wmn(e::Int) = mk_newer_noise_interp(A, B, C, XWdp, e, isws)
-wmnm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
-wmm(m::Int) = mk_noise_interp(A, B, C, XWm, m)
-u(t::Float64) = mk_noise_interp(A, B, C, XWu, 1)(t)
+wmd(e::Int) = mk_newer_noise_interp(A_true, B_true, C_true, XWdp, e, isws)
+# wmn(e::Int) = mk_newer_noise_interp(A, B, C, XWdp, e, isws)
+# wmnm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
+# wmm(m::Int) = mk_noise_interp(A, B, C, XWm, m)
+u(t::Float64) = mk_noise_interp(A_true, B_true, C_true, XWu, 1)(t)
 
 # interpolation over w(tk)
 # wmd(e::Int) = interpw(WSd, e)
@@ -357,6 +359,7 @@ h_baseline(sol) = apply_outputfun(f, sol) # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
 const θ0 = L                    # true value of θ
+# const η0 = -0.8   # true value of η, NOTE: Defined higher up instead
 mk_θs(θ::Float64) = [m, L, g, θ]
 realize_model(w::Function, θ::Float64, N::Int) =
   problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
@@ -383,6 +386,15 @@ const rnθ = 3                  # number of steps in the right interval
 const δθ = 0.2
 const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
 const nθ = length(θs)
+# const θs = [θ0]
+# const nθ = length(θs)
+# const lnη = 3                  # number of steps in the left interval
+# const rnη = 3                  # number of steps in the right interval
+# const δη = 0.2
+# const ηs = (η0 - lnη * δη):δη:(η0 + rnη * δη) |> collect
+# const nη = length(ηs)
+const ηs = [η0]
+const nη = length(ηs)
 
 # =======================
 # === DATA GENERATION ===
@@ -393,7 +405,7 @@ const data_dir = joinpath("data", "experiments")
 exp_path(id) = joinpath(data_dir, id)
 mk_exp_dir(id) =  id |> exp_path |> mkdir
 
-calc_y(e::Int) = solvew(t -> w_scale * wmn(e)(t), θ0, N) |> h_data
+calc_y(e::Int) = solvew(t -> w_scale * wmd(e)(t), θ0, N) |> h_data
 
 function calc_Y()
   es = collect(1:E)
@@ -436,22 +448,42 @@ function read_baseline_Y(expid)
   readdlm(p, ',')
 end
 
-calc_mean_y_N(N::Int, θ::Float64, m::Int) =
-  solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
+# SHOULDN'T DEFINE HERE!!!!
+# function calc_mean_y_N(N::Int, θ::Float64, η::Float64, m::Int)
+#     dmld = get_dt_noise_model(η)
+#     XWmp = simulate_noise_process(dmdl, Zm)
+#     wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
+#     return solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
+# end
 
-calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
+# calc_mean_y_N(N::Int, θ::Float64, m::Int) =
+#   solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
+#
+# calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
 
 function calc_mean_Y()
   ms = collect(1:M)
-  Ym = zeros(N + 1, nθ)
+  Ym = zeros(N + 1, nθ*nη)
 
-  for (i, θ) in enumerate(θs)
-    @info "solving for point ($(i)/$(nθ)) of θ"
-    reset_isws!(isws)
-    Y = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
-    y = reshape(mean(Y, dims = 2), :)
-    writedlm(joinpath(data_dir, "tmp", "y_mean_$(i).csv"), y, ',')
-    Ym[:, i] .+= y
+  for (j, η) in enumerate(ηs)
+    @info "solving for point ($(j)/$(nη)) of η"
+
+    A, B, C, x0 = get_dt_noise_matrices(η)
+    dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
+    XWmp = simulate_noise_process(dmdl, Zm)
+    wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
+    calc_mean_y_N(N::Int, θ::Float64, m::Int) =
+        solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
+    calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
+
+    for (i, θ) in enumerate(θs)
+        @info "solving for point ($(i)/$(nθ)) of θ"
+        reset_isws!(isws)
+        Y = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
+        y = reshape(mean(Y, dims = 2), :)
+        writedlm(joinpath(data_dir, "tmp", "y_mean_$(i)_$(j).csv"), y, ',')
+        Ym[:, (j-1)*nθ+i] .+= y
+    end
   end
   Ym
 end
@@ -466,17 +498,34 @@ function read_mean_Y(expid)
   readdlm(p, ',')
 end
 
-# NOTE: This finds optimal θs for E experiments for one fixed value of N
-function write_opt_θs(expid, Y, Ym)
-    costs = zeros(E, nθ)
+# NOTE: This finds optimal (θ, η):s for E experiments for one fixed value of N
+function get_opt_parameters(Y, Ym)
+    costs = zeros(E, nθ*nη)
     for e = 1:E
-        for (i, θ) in enumerate(θs)
-            costs[e,i] = mean(sum( (Y[:,e] - Ym[:,i]).^2 ))
+        for (j, η) in enumerate(ηs)
+            for (i, θ) in enumerate(θs)
+                costs[e,(j-1)*nθ+i] = mean(sum( (Y[:,e] - Ym[:,(j-1)*nθ+i]).^2 ))
+            end
         end
     end
-    θ_opt = θs[[argmin(costs[i,:]) for i=1:size(costs,1)] ]
-    p = joinpath(exp_path(expid), "opt_thetas.csv")
-    writedlm(p, θ_opt, ",")
+    opt_params = get_opt_parameters_from_cost(costs)
+end
+
+function get_opt_parameters_from_cost(costs)
+    opt_args = [argmin(costs[i,:]) for i=1:size(costs,1)]
+    opt_params = zeros(size(costs,1), 2)
+    for row = 1:size(costs,1)
+        arg = opt_args[row]
+        i = (arg-1)%nθ+1
+        j = Int((arg-1)÷nθ) + 1
+        opt_params[row,:] = [θs[i] ηs[j]]
+    end
+    return opt_params
+end
+
+function write_opt_parameters(expid, opt_params)
+    p = joinpath(exp_path(expid), "opt_params.csv")
+    writedlm(p, opt_params, ",")
 end
 
 function write_meta_data(expid)
