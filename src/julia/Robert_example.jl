@@ -136,7 +136,12 @@ function w_bad(t::Float64)
     return (C*noise_inter(t, δ, A, B, xw_mat[:, 1], isw_bad))[1]
 end
 
-t_vec = 0:0.001:0.1
+# t_vec = 0:0.001:0.1
+step_size = 1e-3
+num_steps = 100
+# step_size = 1e-9
+# num_steps = 10000
+t_vec = 0:step_size:num_steps*step_size
 w_vec_good = [w_good(t) for t=t_vec]
 w_vec_line = [w_line(t) for t=t_vec]
 w_vec_bad  = [w_bad(t) for t=t_vec]

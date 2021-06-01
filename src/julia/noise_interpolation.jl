@@ -160,7 +160,7 @@ function noise_inter(t::Float64,
                      B::Array{Float64, 2},
                      x::AbstractArray,  # TODO: SHOULD RLY BE 1D ARRAY OF 1D ARRAYS!
                      isw::InterSampleWindow,
-                     ϵ::Float64=10e-12,
+                     ϵ::Float64=10e-8,
                      rng::MersenneTwister=Random.default_rng())
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
@@ -211,15 +211,17 @@ function noise_inter(t::Float64,
     # Adl     = view(Ml, nx+1:2*nx, nx+1:2*nx)'
     # Adu     = view(Mu, nx+1:2*nx, nx+1:2*nx)'
     AdΔ     = Adu*Adl
-    B2dl    = Hermitian(Adl*Ml[1:nx, nx+1:end])
-    B2du    = Hermitian(Adu*Mu[1:nx, nx+1:end])
-    Cl      = cholesky(B2dl)
-    Cu      = cholesky(B2du)
-    Bdl     = Cl.L
-    Bdu     = Cu.L
+    # B2dl    = Hermitian(Adl*Ml[1:nx, nx+1:end])
+    # B2du    = Hermitian(Adu*Mu[1:nx, nx+1:end])
+    σ_l     = Hermitian(Adl*Ml[1:nx, nx+1:end])     # = B2dl
+    σ_u     = Hermitian(Adu*Mu[1:nx, nx+1:end])     # = B2du
+    # Cl      = cholesky(B2dl)
+    # Cu      = cholesky(B2du)
+    # Bdl     = Cl.L
+    # Bdu     = Cu.L
 
-    σ_l = (Bdl*(Bdl'))
-    σ_u = (Bdu*(Bdu'))
+    # σ_l = B2dl#(Bdl*(Bdl'))
+    # σ_u = B2du#(Bdu*(Bdu'))
     σ_Δ = Adu*σ_l*(Adu') + σ_u
     σ_Δ_l = Adu*σ_l
     v_Δ = xu - AdΔ*xl

@@ -284,11 +284,25 @@ function mk_newer_noise_interp(A::Array{Float64, 2},
 
    let
        function w(t::Float64)
-           xw_temp = noise_inter(t, Ts, A, B, view(XWp, :, m), isws[m])
+           xw_temp = noise_inter(t, δ, A, B, view(XWp, :, m), isws[m])
            return first(C*xw_temp)
        end
    end
+end
 
+function mk_newer_noise_interp_m(A::Array{Float64, 2},
+                                 B::Array{Float64, 2},
+                                 C::Array{Float64, 2},
+                                 XWm::Array{Array{Float64, 1}, 2},
+                                 m::Int,
+                                 isws::Array{InterSampleWindow, 1})
+
+   let
+       function w(t::Float64)
+           xw_temp = noise_inter(t, δ, A, B, view(XWm, :, m), isws[m])
+           return first(C*xw_temp)
+       end
+   end
 end
 
 # === CHOOSE NOISE INTERPOLATION METHOD ===
@@ -300,6 +314,7 @@ isws = [initialize_isw(Q, W, nx, true) for e=1:E]
 # wmd(e::Int) = mk_noise_interp(A, B, C, XWd, e)
 wmd(e::Int) = mk_other_noise_interp(A, B, C, XWd, e, isds)
 wmn(e::Int) = mk_newer_noise_interp(A, B, C, XWdp, e, isws)
+wmnm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
 wmm(m::Int) = mk_noise_interp(A, B, C, XWm, m)
 u(t::Float64) = mk_noise_interp(A, B, C, XWu, 1)(t)
 
@@ -376,7 +391,7 @@ const data_dir = joinpath("data", "experiments")
 exp_path(id) = joinpath(data_dir, id)
 mk_exp_dir(id) =  id |> exp_path |> mkdir
 
-calc_y(e::Int) = solvew(t -> w_scale * wmd(e)(t), θ0, N) |> h_data
+calc_y(e::Int) = solvew(t -> w_scale * wmn(e)(t), θ0, N) |> h_data
 
 function calc_Y()
   es = collect(1:E)
@@ -390,7 +405,7 @@ end
 
 function read_Y(expid)
   p = joinpath(exp_path(expid), "Yd1.csv")
-  readdlm(p, ",")
+  readdlm(p, ',')
 end
 
 calc_baseline_y_N(N::Int, θ::Float64) = solvew(t -> 0., θ, N) |> h_baseline
@@ -406,7 +421,7 @@ end
 
 function read_theta(expid)
   p = joinpath(exp_path(expid), "theta.csv")
-  readdlm(p, ",")
+  readdlm(p, ',')
 end
 
 function write_baseline_Y(expid, Yb)
@@ -416,7 +431,7 @@ end
 
 function read_baseline_Y(expid)
   p = joinpath(exp_path(expid), "Yb.csv")
-  readdlm(p, ",")
+  readdlm(p, ',')
 end
 
 calc_mean_y_N(N::Int, θ::Float64, m::Int) =
@@ -430,6 +445,8 @@ function calc_mean_Y()
 
   for (i, θ) in enumerate(θs)
     @info "solving for point ($(i)/$(nθ)) of θ"
+    # TODO: Does this re-allocate memory? In that case, there should be a better implementation
+    global isws = [initialize_isw(Q, W, nx, true) for m=1:M]
     Y = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
     y = reshape(mean(Y, dims = 2), :)
     writedlm(joinpath(data_dir, "tmp", "y_mean_$(i).csv"), y, ',')
@@ -445,7 +462,20 @@ end
 
 function read_mean_Y(expid)
   p = joinpath(exp_path(expid), "Ym.csv")
-  readdlm(p, ",")
+  readdlm(p, ',')
+end
+
+# NOTE: This finds optimal θs for E experiments for one fixed value of N
+function write_opt_θs(expid, Y, Ym)
+    costs = zeros(E, size(θs, 1))
+    for e = 1:E
+        for (i, θ) in enumerate(θs)
+            costs[e,i] = mean(sum( (Y[:,e] - Ym[:,i]).^2 ))
+        end
+    end
+    θ_opt = θs[[argmin(costs[i,:]) for i=1:size(costs,1)] ]
+    p = joinpath(exp_path(expid), "opt_thetas.csv")
+    writedlm(p, θ_opt, ",")
 end
 
 function write_meta_data(expid)
