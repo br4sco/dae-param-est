@@ -447,7 +447,7 @@ function calc_mean_Y()
 
   for (i, θ) in enumerate(θs)
     @info "solving for point ($(i)/$(nθ)) of θ"
-    reset:isws!(isws)
+    reset_isws!(isws)
     Y = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
     y = reshape(mean(Y, dims = 2), :)
     writedlm(joinpath(data_dir, "tmp", "y_mean_$(i).csv"), y, ',')
