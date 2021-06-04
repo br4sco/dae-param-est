@@ -241,7 +241,21 @@ function noise_inter(t::Float64,
     # Hermitian()-call might not be necessary, but it probably depends on the
     # model, so I leave it in to ensure that cholesky decomposition will work
     Σ = Hermitian(σ_l - (σ_Δ_l')*(σ_Δ\(σ_Δ_l)))
-    CΣ = cholesky(Σ)
+    CΣ = zeros(size(Σ))
+    try
+        CΣ = cholesky(Σ)
+    catch e
+        @warn "Cholesky decomposition failed with δ=$(min(δu, δl))"
+        println("$e")
+        if should_interpolate
+            # @warn "Used linear interpolation"   # DEBUG
+            return xl + (xu-xl)*δl/δu
+        elseif δl < δu
+            return xl
+        else
+            return xu
+        end
+    end
     Σr = CΣ.L
 
     # if isd.num_sampled_samples[n+1] < P
