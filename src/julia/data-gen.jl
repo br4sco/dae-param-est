@@ -437,7 +437,7 @@ function read_baseline_Y(expid)
 end
 
 calc_mean_y_N(N::Int, θ::Float64, m::Int) =
-  solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
+  solvew(t -> w_scale * wmnm(m)(t), θ, N) |> h
 
 calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
 
