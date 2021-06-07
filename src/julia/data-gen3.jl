@@ -25,11 +25,11 @@ const Q = 100
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nw = 1000
+const Nw = 100000
 const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
-# === PR-GENERATED ===
+# === PRE-GENERATED ===
 # const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
 const noise_method_name = "Pre-generated conditioned noise (δ = $(δ), Q = $(Q))"
 
@@ -68,18 +68,19 @@ end
 
 # === NOISE INTERPOLATION ===
 function get_dt_noise_matrices(η)
-    A = [0.0 1.0; -4^2 η]
+    A = [0.0 1.0; -4^2 -0.8]
     B = reshape([0.0 1.0], (2,1))
-    C = [1.0 0.0]
+    C = η*[1.0 0.0]
     x0 = zeros(nx)
     return A, B, C, x0
 end
 
+const w_scale = 0.6
 const nx = 2
-const η0 = -0.8                 # true value of η
-const A_true = [0.0 1.0; -4^2 η0]
+const η0 = w_scale                 # true value of η
+const A_true = [0.0 1.0; -4^2 -0.8]
 const B_true = reshape([0.0 1.0], (2,1))
-const C_true = [1.0 0.0]
+const C_true = w_scale*[1.0 0.0]
 const x0_true = zeros(nx)
 const true_mdl = discretize_ct_noise_model(A_true, B_true, C_true, δ, x0_true)
 
@@ -341,7 +342,8 @@ const σ = 0.002                 # observation noise variance
 const u_scale = 0.2             # input scale
 # const u_scale = 10.0            # input scale larger
 const u_bias = 0.0              # input bias
-const w_scale = 0.6             # noise scale
+# NOTE: Noise scale is now set as a model parameter further up
+# const w_scale = 0.6             # noise scale
 # const w_scale = 5.0             # noise scale larger
 
 const m = 0.3                   # [kg]
@@ -358,7 +360,7 @@ h(sol) = apply_outputfun(f, sol)          # for our model
 h_baseline(sol) = apply_outputfun(f, sol) # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
-const θ0 = k                    # true value of θ
+const θ0 = L                    # true value of θ
 # const η0 = -0.8   # true value of η, NOTE: Defined higher up instead
 mk_θs(θ::Float64) = [m, L, g, θ]
 realize_model(w::Function, θ::Float64, N::Int) =
@@ -381,16 +383,28 @@ solvew(w::Function, θ::Float64, N::Int; kwargs...) =
 h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === EXPERIMENT PARAMETERS ===
-# const lnθ = 1                  # number of steps in the left interval
-# const rnθ = 5                  # number of steps in the right interval
-# const δθ = 0.02
-# const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
-# const nθ = length(θs)
-const θs = [θ0]
+# Values used for paper
+# const lnθ = 30
+# const rnθ = 50
+# const δθ = 0.08
+# Values used for quick computation
+# const lnθ = 3                  # number of steps in the left interval
+# const rnθ = 3                  # number of steps in the right interval
+# const δθ = 0.2
+const lnθ = 15
+const rnθ = 25
+const δθ = 0.16
+
+const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
 const nθ = length(θs)
-const lnη = 3                  # number of steps in the left interval
-const rnη = 3                  # number of steps in the right interval
-const δη = 0.2
+# const θs = [θ0]
+# const nθ = length(θs)
+# const lnη = 3                  # number of steps in the left interval
+# const rnη = 3                  # number of steps in the right interval
+# const δη = 0.2
+const lnη = 6
+const rnη = 6
+const δη = 0.1
 const ηs = (η0 - lnη * δη):δη:(η0 + rnη * δη) |> collect
 const nη = length(ηs)
 # const ηs = [η0]
@@ -405,7 +419,7 @@ const data_dir = joinpath("data", "experiments")
 exp_path(id) = joinpath(data_dir, id)
 mk_exp_dir(id) =  id |> exp_path |> mkdir
 
-calc_y(e::Int) = solvew(t -> w_scale * wmd(e)(t), θ0, N) |> h_data
+calc_y(e::Int) = solvew(t -> wmd(e)(t), θ0, N) |> h_data
 
 function calc_Y()
   es = collect(1:E)
@@ -458,19 +472,6 @@ function read_baseline_Y(expid)
   readdlm(p, ',')
 end
 
-# SHOULDN'T DEFINE HERE!!!!
-# function calc_mean_y_N(N::Int, θ::Float64, η::Float64, m::Int)
-#     dmld = get_dt_noise_model(η)
-#     XWmp = simulate_noise_process(dmdl, Zm)
-#     wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
-#     return solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
-# end
-
-# calc_mean_y_N(N::Int, θ::Float64, m::Int) =
-#   solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
-#
-# calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
-
 function calc_mean_Y()
   ms = collect(1:M)
   Ym = zeros(N + 1, nθ*nη)
@@ -480,10 +481,12 @@ function calc_mean_Y()
 
     A, B, C, x0 = get_dt_noise_matrices(η)
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
-    XWmp = simulate_noise_process(dmdl, Zm)
-    wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
+    # XWmp = simulate_noise_process(dmdl, Zm)
+    XWm = simulate_noise_process(dmdl, Zm) |> mangle_XW
+    # wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
+    wmm(m::Int) = mk_noise_interp(A, B, C, XWm, m)
     calc_mean_y_N(N::Int, θ::Float64, m::Int) =
-        solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
+        solvew(t -> wmm(m)(t), θ, N) |> h
     calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
 
     for (i, θ) in enumerate(θs)

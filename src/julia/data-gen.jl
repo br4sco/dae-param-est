@@ -25,7 +25,7 @@ const Q = 100
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nw = 1000
+const Nw = 20000
 const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
@@ -356,7 +356,7 @@ h(sol) = apply_outputfun(f, sol)          # for our model
 h_baseline(sol) = apply_outputfun(f, sol) # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
-const θ0 = k                    # true value of θ
+const θ0 = L                    # true value of θ
 mk_θs(θ::Float64) = [m, L, g, θ]
 realize_model(w::Function, θ::Float64, N::Int) =
   problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
@@ -378,9 +378,14 @@ solvew(w::Function, θ::Float64, N::Int; kwargs...) =
 h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === EXPERIMENT PARAMETERS ===
-const lnθ = 1                  # number of steps in the left interval
-const rnθ = 5                  # number of steps in the right interval
-const δθ = 0.02
+# Values used for paper
+# const lnθ = 30
+# const rnθ = 50
+# const δθ = 0.08
+# Value used for quick computation
+const lnθ = 3                  # number of steps in the left interval
+const rnθ = 3                  # number of steps in the right interval
+const δθ = 0.2
 const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
 const nθ = length(θs)
 
