@@ -25,7 +25,7 @@ const Q = 100
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nw = 100000
+const Nw = 1000
 const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
@@ -356,8 +356,8 @@ h(sol) = apply_outputfun(f, sol)          # for our model
 h_baseline(sol) = apply_outputfun(f, sol) # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
-const θ0 = L                    # true value of θ
-mk_θs(θ::Float64) = [m, θ, g, k]
+const θ0 = k                    # true value of θ
+mk_θs(θ::Float64) = [m, L, g, θ]
 realize_model(w::Function, θ::Float64, N::Int) =
   problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
 
@@ -378,9 +378,9 @@ solvew(w::Function, θ::Float64, N::Int; kwargs...) =
 h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === EXPERIMENT PARAMETERS ===
-const lnθ = 3                  # number of steps in the left interval
-const rnθ = 3                  # number of steps in the right interval
-const δθ = 0.2
+const lnθ = 1                  # number of steps in the left interval
+const rnθ = 5                  # number of steps in the right interval
+const δθ = 0.02
 const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
 const nθ = length(θs)
 
@@ -398,6 +398,16 @@ calc_y(e::Int) = solvew(t -> w_scale * wmn(e)(t), θ0, N) |> h_data
 function calc_Y()
   es = collect(1:E)
   solve_in_parallel(calc_y, es)
+end
+
+function write_custom(expid, file_name, data)
+    p = joinpath(exp_path(expid), "$file_name.csv")
+    writedlm(p, data, ",")
+end
+
+function read_custom(expid, file_name)
+    p = joinpath(exp_path(expid), "$file_name.csv")
+    readdlm(p, ',')
 end
 
 function write_Y(expid, Y)
