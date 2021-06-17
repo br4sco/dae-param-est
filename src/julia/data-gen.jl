@@ -16,7 +16,7 @@ Random.seed!(seed)
 
 # === TIME ===
 # const δ = 0.01                  # noise sampling time
-const δ = 0.1
+const δ = 0.01
 const Ts = 0.1                  # stepsize
 # const Ts = 0.5                  # stepsize larger
 

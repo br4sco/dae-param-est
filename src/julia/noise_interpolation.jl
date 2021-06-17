@@ -217,7 +217,7 @@ function noise_inter(t::Float64,
     if should_interpolate
         # @warn "Used linear interpolation"   # DEBUG
         # NOTE: δu might be 0, so that case has to be handled separately
-        return xl + (xu-xl)*δl/δu
+        return xl + (xu-xl)*δl/(δu+δl)
     end
 
     Mexp    = [-A B*(B'); zeros(size(A)) A']
@@ -256,7 +256,7 @@ function noise_inter(t::Float64,
         println("$e")
         if should_interpolate
             # @warn "Used linear interpolation"   # DEBUG
-            return xl + (xu-xl)*δl/δu
+            return xl + (xu-xl)*δl/(δu+δl)
         elseif δl < δu
             return xl
         else
