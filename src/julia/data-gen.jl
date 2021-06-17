@@ -15,7 +15,8 @@ Random.seed!(seed)
 # ==================
 
 # === TIME ===
-const δ = 0.01                  # noise sampling time
+# const δ = 0.01                  # noise sampling time
+const δ = 0.1
 const Ts = 0.1                  # stepsize
 # const Ts = 0.5                  # stepsize larger
 
@@ -25,7 +26,7 @@ const Q = 100
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nw = 20000
+const Nw = 1000
 const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
@@ -383,9 +384,9 @@ h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 # const rnθ = 50
 # const δθ = 0.08
 # Value used for quick computation
-const lnθ = 3                  # number of steps in the left interval
-const rnθ = 3                  # number of steps in the right interval
-const δθ = 0.2
+const lnθ = 6                  # number of steps in the left interval
+const rnθ = 6                  # number of steps in the right interval
+const δθ = 0.05
 const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
 const nθ = length(θs)
 
@@ -452,7 +453,7 @@ function read_baseline_Y(expid)
 end
 
 calc_mean_y_N(N::Int, θ::Float64, m::Int) =
-  solvew(t -> w_scale * wmnm(m)(t), θ, N) |> h
+  solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
 
 calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
 

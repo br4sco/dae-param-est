@@ -176,6 +176,7 @@ function noise_inter(t::Float64,
                      rng::MersenneTwister=Random.default_rng())
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
+
     δ = t - n*Ts
     nx = size(A)[1]
     Q = isw.Q
@@ -191,6 +192,12 @@ function noise_inter(t::Float64,
     tu = (n+1)*Ts
     il = 0      # for il>0,   tl = isd.sample_times[n][il]
     iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
+    # Time difference smaller than ϵ are treated as 0
+    if t-tl < ϵ
+        return xl
+    elseif tu-t < ϵ
+        return xu
+    end
     if Q == 0 && use_interpolation
         # @warn "Used linear interpolation"
         return xl + (xu-xl)*(t-tl)/(tu-tl)
@@ -199,18 +206,18 @@ function noise_inter(t::Float64,
     #TODO: Q = 0, WE DON'T RLY PRE-ALLOCATE, SO get_neighbors FAILS!!!!!!!!
 
     xu, xl, δu, δl, should_interpolate = get_neighbors(n, t, x, Ts, isw)
-    # If no more samples are stored in this interval, allow for the use of
-    # linear interpolation instead, to ensure smoothness of realization
-    if should_interpolate
-        # @warn "Used linear interpolation"   # DEBUG
-        return xl + (xu-xl)*δl/δu
-    end
-
     # Values of δ smaller than ϵ are treated as 0
     if δl < ϵ
         return xl
     elseif δu < ϵ
         return xu
+    end
+    # If no more samples are stored in this interval, allow for the use of
+    # linear interpolation instead, to ensure smoothness of realization
+    if should_interpolate
+        # @warn "Used linear interpolation"   # DEBUG
+        # NOTE: δu might be 0, so that case has to be handled separately
+        return xl + (xu-xl)*δl/δu
     end
 
     Mexp    = [-A B*(B'); zeros(size(A)) A']
@@ -270,7 +277,6 @@ function noise_inter(t::Float64,
     if isw.W > 0
         add_sample!(x_new, t, n, isw)
     end
-
     return x_new
 
 end

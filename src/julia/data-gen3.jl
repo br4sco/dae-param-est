@@ -25,7 +25,7 @@ const Q = 100
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nw = 100000
+const Nw = 100
 const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
@@ -481,12 +481,13 @@ function calc_mean_Y()
 
     A, B, C, x0 = get_dt_noise_matrices(η)
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
-    # XWmp = simulate_noise_process(dmdl, Zm)
-    XWm = simulate_noise_process(dmdl, Zm) |> mangle_XW
+    XWmp = simulate_noise_process(dmdl, Zm)
+    # XWm = simulate_noise_process(dmdl, Zm) |> mangle_XW
     # wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
-    wmm(m::Int) = mk_noise_interp(A, B, C, XWm, m)
+    # wmm(m::Int) = mk_noise_interp(A, B, C, XWm, m)
+    wmnm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
     calc_mean_y_N(N::Int, θ::Float64, m::Int) =
-        solvew(t -> wmm(m)(t), θ, N) |> h
+        solvew(t -> wmnm(m)(t), θ, N) |> h
     calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
 
     for (i, θ) in enumerate(θs)

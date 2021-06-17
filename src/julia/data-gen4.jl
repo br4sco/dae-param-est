@@ -26,7 +26,7 @@ const Q = 100
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nw = 10000
+const Nw = 100
 const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
@@ -68,8 +68,11 @@ end
 #           ',')
 
 # === NOISE INTERPOLATION ===
-function get_dt_noise_matrices(η::Array{Float64, 1})
-    A = [0.0 1.0; η[2] η[1]]
+get_A(η::Array{Float64,1}) = [0.0 1.0; η[2] η[1]]
+# get_A(η::Array{Float64,1}) = [0.0 1.0; -4^2 η[1]]
+
+function get_dt_noise_matrices(η)
+    A = get_A(η)
     B = reshape([0.0 1.0], (2,1))
     C = [1.0 0.0]
     x0 = zeros(nx)
@@ -77,8 +80,8 @@ function get_dt_noise_matrices(η::Array{Float64, 1})
 end
 
 const nx = 2
-const η0 = [-0.8 -4^2]                 # true value of η
-const A_true = [0.0 1.0; η0[2] η0[1]]
+const η0 = [-0.8, -4.0^2]                 # true value of η, should be a 1D-array
+const A_true = get_A(η0)
 const B_true = reshape([0.0 1.0], (2,1))
 const C_true = [1.0 0.0]
 const x0_true = zeros(nx)
@@ -359,9 +362,10 @@ h(sol) = apply_outputfun(f, sol)          # for our model
 h_baseline(sol) = apply_outputfun(f, sol) # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
-const θ0 = [L k]                    # true value of θ
-# const η0 = -0.8   # true value of η, NOTE: Defined higher up instead
+const θ0 = [L, L]                    # true value of θ
+# const θ0 = [L]
 mk_θs(θ::Array{Float64, 1}) = [m, θ[1], g, θ[2]]
+# mk_θs(θ::Tuple{Vararg{Float64}}) = [m, θ[1], g, k]
 realize_model(w::Function, θ::Array{Float64, 1}, N::Int) =
   problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
 
@@ -382,23 +386,24 @@ solvew(w::Function, θ::Array{Float64, 1}, N::Int; kwargs...) =
 h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === EXPERIMENT PARAMETERS ===
-# const lnθ = 3                  # number of steps in the left interval
-# const rnθ = 3                  # number of steps in the right interval
-# const δθ = 0.2
-# # θs_1 = (θ0[1] - lnθ*δθ):δθ:(θ0[1] + rnθ*δθ)
-# # const θs = []
-# const θs = (θ0 - lnθ * δθ):δθ:(θ0 + rnθ * δθ) |> collect
-# const θs = [θ0]
-# const nθ = length(θs)
+const lnθ = [0, 0]                  # number of steps in the left interval
+const rnθ = [1, 1]                  # number of steps in the right interval
+const δθ = [0.2, 0.01]
 const dθ = length(θ0)
-# const lnη = 3                  # number of steps in the left interval
-# const rnη = 3                  # number of steps in the right interval
-# const δη = 0.2
-# const ηs = (η0 - lnη * δη):δη:(η0 + rnη * δη) |> collect
-# const nη = length(ηs)
+# See https://stackoverflow.com/questions/22873478/how-to-pass-tuple-as-function-arguments
+# for explanation of ..., it basically turns elements of vector into sequence
+# of arguments
+const θs = Iterators.product(
+    [(θ0[i] - lnθ[i]*δθ[i]):δθ[i]:(θ0[i] + rnθ[i]*δθ[i]) for i=1:dθ]...)
+const nθ = length(θs)
+
+const lnη = [0, 0]                  # number of steps in the left interval
+const rnη = [1, 1]                  # number of steps in the right interval
+const δη = [0.2, 0.2]
 const dη = length(η0)
-# const ηs = [η0]
-# const nη = length(ηs)
+const ηs = Iterators.product(
+    [(η0[i] - lnη[i]*δη[i]):δη[i]:(η0[i] + rnη[i]*δη[i]) for i=1:dη]...)
+const nη = length(ηs)
 
 # =======================
 # === DATA GENERATION ===
@@ -409,11 +414,21 @@ const data_dir = joinpath("data", "experiments")
 exp_path(id) = joinpath(data_dir, id)
 mk_exp_dir(id) =  id |> exp_path |> mkdir
 
-calc_y(e::Int) = solvew(t -> w_scale * wmd(e)(t), vec(θ0), N) |> h_data
+calc_y(e::Int) = solvew(t -> w_scale * wmd(e)(t), θ0, N) |> h_data
 
 function calc_Y()
   es = collect(1:E)
   solve_in_parallel(calc_y, es)
+end
+
+function write_custom(expid, file_name, data)
+    p = joinpath(exp_path(expid), "$file_name.csv")
+    writedlm(p, data, ",")
+end
+
+function read_custom(expid, file_name)
+    p = joinpath(exp_path(expid), "$file_name.csv")
+    readdlm(p, ',')
 end
 
 function write_Y(expid, Y)
@@ -426,9 +441,9 @@ function read_Y(expid)
   readdlm(p, ',')
 end
 
-calc_baseline_y_N(N::Int, θ::Float64) = solvew(t -> 0., θ, N) |> h_baseline
+calc_baseline_y_N(N::Int, θ::Array{Float64, 1}) = solvew(t -> 0., θ, N) |> h_baseline
 
-calc_baseline_y(θ::Float64) = calc_baseline_y_N(N, θ)
+calc_baseline_y(θ::Array{Float64, 1}) = calc_baseline_y_N(N, θ)
 
 calc_baseline_Y() = solve_in_parallel(calc_baseline_y, θs)
 
@@ -489,8 +504,8 @@ end
 
 # TODO: This only gets optimal parameters for one out of E realizations, extend it
 function get_fit(Y, θi, ηi)
-    p = hcat(θi, ηi)
-    return curve_fit(model, 1:2, Y[:,1], vec(p), show_trace=true)
+    p = vcat(θi, ηi)
+    return curve_fit(model, 1:2, Y[:,1], p, show_trace=true)
 end
 
 function calc_mean_Y()
@@ -500,7 +515,7 @@ function calc_mean_Y()
   for (j, η) in enumerate(ηs)
     @info "solving for point ($(j)/$(nη)) of η"
 
-    A, B, C, x0 = get_dt_noise_matrices(η)
+    A, B, C, x0 = get_dt_noise_matrices(collect(η))
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
     XWmp = simulate_noise_process(dmdl, Zm)
     wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
@@ -510,8 +525,9 @@ function calc_mean_Y()
 
     for (i, θ) in enumerate(θs)
         @info "solving for point ($(i)/$(nθ)) of θ"
+        println("θ: $θ, η: $η")
         reset_isws!(isws)
-        Y = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
+        Y = solve_in_parallel(m -> calc_mean_y(collect(θ), m), ms)
         y = reshape(mean(Y, dims = 2), :)
         writedlm(joinpath(data_dir, "tmp", "y_mean_$(i)_$(j).csv"), y, ',')
         Ym[:, (j-1)*nθ+i] .+= y
@@ -519,6 +535,12 @@ function calc_mean_Y()
   end
   Ym
 end
+
+# Returns row index (in e.g. Ym) correspodning to θs[i] and ηs[j]
+params_to_row(i::Int64, j::Int64) = (j-1)*nθ + 1
+
+# Returns (i,j) so that θs[i] and ηs[j] correspond to row index row (in e.g. Ym)
+row_to_params(row::Int64) = ( (row-1)%nθ+1, (row-1)÷nθ+1 )
 
 function write_mean_Y(expid, Ym)
   p = joinpath(exp_path(expid), "Ym.csv")
@@ -530,29 +552,52 @@ function read_mean_Y(expid)
   readdlm(p, ',')
 end
 
-# NOTE: This finds optimal (θ, η):s for E experiments for one fixed value of N
+# NOTE: This finds optimal θs and ηs for E experiments for one fixed value of N
 function get_opt_parameters(Y, Ym)
     costs = zeros(E, nθ*nη)
     for e = 1:E
-        for (j, η) in enumerate(ηs)
-            for (i, θ) in enumerate(θs)
+        # for (j, η) in enumerate(ηs)
+        #     for (i, θ) in enumerate(θs)
+        for j in 1:length(ηs)
+            for i in 1:length(θs)
                 costs[e,(j-1)*nθ+i] = mean(sum( (Y[:,e] - Ym[:,(j-1)*nθ+i]).^2 ))
             end
         end
     end
-    opt_params = get_opt_parameters_from_cost(costs)
+    return get_opt_parameters_from_cost(costs)
 end
 
 function get_opt_parameters_from_cost(costs)
-    opt_args = [argmin(costs[i,:]) for i=1:size(costs,1)]
-    opt_params = zeros(size(costs,1), 2)
-    for row = 1:size(costs,1)
-        arg = opt_args[row]
-        i = (arg-1)%nθ+1
-        j = Int((arg-1)÷nθ) + 1
-        opt_params[row,:] = [θs[i] ηs[j]]
-    end
-    return opt_params
+    len = size(costs, 1)
+    opt_args = [argmin(costs[i,:]) for i=1:len]
+    # opt_θs = Array{Tuple{Float64, dθ}}(undef, len)
+    # opt_ηs = Array{Tuple{Float64, dη}}(undef, len)
+    θs_collected = θs |> collect |> vec
+    ηs_collected = ηs |> collect |> vec
+    opt_θs = [opt_theta_helper(opt_args, θs_collected, row) for row=1:len]
+    opt_ηs = [opt_eta_helper(opt_args, ηs_collected, row) for row=1:len]
+    # for row = 1:len
+    #     arg = opt_args[row]
+    #     (i, j) = row_to_params(arg)
+    #     # i = (arg-1)%nθ+1
+    #     # j = (arg-1)÷nθ + 1
+    #     # opt_params[row,:] = [θs_collected[i] ηs_collected[j]]
+    #     opt_θs[row] = θs_collected[i]
+    #     opt_ηs[row] = ηs_collected[j]
+    # end
+    return opt_θs, opt_ηs
+end
+
+function opt_theta_helper(opt_args, θs_collected, row::Int)
+    arg = opt_args[row]
+    (i, j) = row_to_params(arg)
+    return θs_collected[i]
+end
+
+function opt_eta_helper(opt_args, ηs_collected, row::Int)
+    arg = opt_args[row]
+    (i, j) = row_to_params(arg)
+    return ηs_collected[j]
 end
 
 function write_opt_parameters(expid, opt_params)
