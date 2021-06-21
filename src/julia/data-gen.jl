@@ -21,14 +21,16 @@ const Ts = 0.1                  # stepsize
 # const Ts = 0.5                  # stepsize larger
 
 # === NOISE ===
-const Q = 100
+const Q = 500
 # NOTE: Currently the array of isw:s is of length E. If E < M, then one needs to
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nw = 1000
+const Nw = 100
 const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
+
+# num_sampled_per_interval = zeros(M, Nw+Nw_extra)
 
 # === PR-GENERATED ===
 # const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
@@ -287,6 +289,7 @@ function mk_newer_noise_interp(A::Array{Float64, 2},
 
    let
        function w(t::Float64)
+           # xw_temp = noise_inter(t, δ, A, B, view(XWp, :, m), isws[m], view(num_sampled_per_interval, m, :))
            xw_temp = noise_inter(t, δ, A, B, view(XWp, :, m), isws[m])
            return first(C*xw_temp)
        end
@@ -302,6 +305,7 @@ function mk_newer_noise_interp_m(A::Array{Float64, 2},
 
    let
        function w(t::Float64)
+           # xw_temp = noise_inter(t, δ, A, B, view(XWm, :, m), isws[m], view(num_sampled_per_interval, m, :))
            xw_temp = noise_inter(t, δ, A, B, view(XWm, :, m), isws[m])
            return first(C*xw_temp)
        end

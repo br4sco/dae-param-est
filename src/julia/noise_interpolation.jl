@@ -172,10 +172,12 @@ function noise_inter(t::Float64,
                      B::Array{Float64, 2},
                      x::AbstractArray,  # TODO: SHOULD RLY BE 1D ARRAY OF 1D ARRAYS!
                      isw::InterSampleWindow,
+                     # num_sampled_per_interval::AbstractArray,
                      ϵ::Float64=10e-8,
                      rng::MersenneTwister=Random.default_rng())
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
+    # num_sampled_per_interval[n+1] += 1
 
     δ = t - n*Ts
     nx = size(A)[1]
@@ -194,12 +196,15 @@ function noise_inter(t::Float64,
     iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
     # Time difference smaller than ϵ are treated as 0
     if t-tl < ϵ
+        # println("base1")
         return xl
     elseif tu-t < ϵ
+        # println("base2")
         return xu
     end
     if Q == 0 && use_interpolation
         # @warn "Used linear interpolation"
+        # println("base3")
         return xl + (xu-xl)*(t-tl)/(tu-tl)
     end
 
@@ -208,8 +213,10 @@ function noise_inter(t::Float64,
     xu, xl, δu, δl, should_interpolate = get_neighbors(n, t, x, Ts, isw)
     # Values of δ smaller than ϵ are treated as 0
     if δl < ϵ
+        # println("base4")
         return xl
     elseif δu < ϵ
+        # println("base5")
         return xu
     end
     # If no more samples are stored in this interval, allow for the use of
@@ -217,6 +224,7 @@ function noise_inter(t::Float64,
     if should_interpolate
         # @warn "Used linear interpolation"   # DEBUG
         # NOTE: δu might be 0, so that case has to be handled separately
+        # println("base6")
         return xl + (xu-xl)*δl/(δu+δl)
     end
 
@@ -277,6 +285,7 @@ function noise_inter(t::Float64,
     if isw.W > 0
         add_sample!(x_new, t, n, isw)
     end
+    # println("base7")
     return x_new
 
 end
