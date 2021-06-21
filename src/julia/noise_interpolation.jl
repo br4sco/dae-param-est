@@ -31,7 +31,7 @@ end
 function initialize_isw(Q::Int64, W::Int64, nx::Int64,
      use_interpolation::Bool=true)::InterSampleWindow
      if Q > 0
-         containers = [zeros(Q, nx)  for j=1:W]
+         containers = [zeros(nx, Q)  for j=1:W]
          sample_times = [zeros(Q) for j=1:W]
          num_stored   = zeros(W)
      else
@@ -90,7 +90,7 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
     num_stored = isw.num_stored[container_id]
     # Only stores samples if less than Q samples are already stored
     if num_stored < isw.Q
-        isw.containers[container_id][num_stored+1, :] = x_new
+        isw.containers[container_id][:, num_stored+1] = x_new
         isw.sample_times[container_id][num_stored+1]   = sample_time
         isw.num_stored[container_id] += 1
     end
@@ -135,7 +135,7 @@ function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
     end
 
     if il > 0
-        xl = view(isw.containers[idx], il, :)
+        xl = view(isw.containers[idx], :, il)
     else
         # TODO: For some reason, when using view() here, we get a different
         # data-type on xl which messes up future code.
@@ -143,7 +143,7 @@ function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
         xl = x[n+1]
     end
     if iu > 0
-        xu = view(isw.containers[idx], iu, :)
+        xu = view(isw.containers[idx], :, iu)
     else
         # TODO: For some reason, when using view() here, we get a different
         # data-type on xu which messes up future code.
