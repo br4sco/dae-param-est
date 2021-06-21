@@ -89,6 +89,9 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
     end
     num_stored = isw.num_stored[container_id]
     # Only stores samples if less than Q samples are already stored
+    # NOTE: At the time of writing this comment, this statement will usually
+    # evaluate to true, as when num_stored == isw.Q, noise_inter() returns
+    # before add_sample!() is called due to how get_neighbors() is constructed
     if num_stored < isw.Q
         isw.containers[container_id][:, num_stored+1] = x_new
         isw.sample_times[container_id][num_stored+1]   = sample_time
@@ -129,6 +132,7 @@ function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
                 end
             end
             if num_stored_samples >= isw.Q && isw.use_interpolation
+                @warn "Ran out space to store sample"
                 should_interpolate = true
             end
         end
@@ -215,9 +219,17 @@ function noise_inter(t::Float64,
     if δl < ϵ
         # println("base4")
         return xl
+        # TODO: It is weird that we return xl here instead of linear interpolation
+        # but I cannot get the linear interpolation to perform well here. Would
+        # be really useful to figure that out!
+        # return xl + (xu-xl)*δl/(δu+δl)
     elseif δu < ϵ
         # println("base5")
         return xu
+        # TODO: It is weird that we return xu here instead of linear interpolation
+        # but I cannot get the linear interpolation to perform well here. Would
+        # be really useful to figure that out!
+        # return xl + (xu-xl)*δl/(δu+δl)
     end
     # If no more samples are stored in this interval, allow for the use of
     # linear interpolation instead, to ensure smoothness of realization
