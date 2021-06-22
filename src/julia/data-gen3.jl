@@ -20,12 +20,12 @@ const Ts = 0.1                  # stepsize
 # const Ts = 0.5                  # stepsize larger
 
 # === NOISE ===
-const Q = 100
+const Q = 500
 # NOTE: Currently the array of isw:s is of length E. If E < M, then one needs to
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nw = 100
+const Nw = 10000
 const W  = 100
 const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
 
@@ -402,9 +402,9 @@ const nθ = length(θs)
 # const lnη = 3                  # number of steps in the left interval
 # const rnη = 3                  # number of steps in the right interval
 # const δη = 0.2
-const lnη = 6
-const rnη = 6
-const δη = 0.1
+const lnη = 30
+const rnη = 30
+const δη = 0.01
 const ηs = (η0 - lnη * δη):δη:(η0 + rnη * δη) |> collect
 const nη = length(ηs)
 # const ηs = [η0]
