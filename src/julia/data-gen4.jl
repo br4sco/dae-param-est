@@ -505,7 +505,12 @@ end
 # TODO: This only gets optimal parameters for one out of E realizations, extend it
 function get_fit(Y, θi, ηi)
     p = vcat(θi, ηi)
+    # Use this line if you are using the original LsqFit-package
     return curve_fit(model, 1:2, Y[:,1], p, show_trace=true)
+    # # Use this line if you are using the modified LsqFit-package that also
+    # # returns trace
+    # fit_result, trace = curve_fit(model, 1:2, Y[:,1], p, show_trace=true)
+    # return fit_result, trace
 end
 
 function calc_mean_Y()
