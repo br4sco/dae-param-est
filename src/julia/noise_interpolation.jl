@@ -89,9 +89,6 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
     end
     num_stored = isw.num_stored[container_id]
     # Only stores samples if less than Q samples are already stored
-    # NOTE: At the time of writing this comment, this statement will usually
-    # evaluate to true, as when num_stored == isw.Q, noise_inter() returns
-    # before add_sample!() is called due to how get_neighbors() is constructed
     if num_stored < isw.Q
         isw.containers[container_id][:, num_stored+1] = x_new
         isw.sample_times[container_id][num_stored+1]   = sample_time
@@ -114,6 +111,7 @@ function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
         return x[n+2], x[n+1], tu-t, t-tl, isw.use_interpolation
     end
 
+    # Finds il, iu, tl, tu, i.e. indices and times of neighboring samples
     should_interpolate = false
     if n >= isw.start && n <= isw.start + isw.W - 1
         idx = map_to_container(isw.ptr + n - isw.start, isw)
@@ -132,7 +130,11 @@ function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
                 end
             end
             if num_stored_samples >= isw.Q && isw.use_interpolation
-                @warn "Ran out space to store sample"
+                @warn "Ran out of space to store samples"
+                # If no more samples can be stored in this interval,
+                # conditional sampling should no longer be used, as it will
+                # likely produce a non-smooth realization, because none of
+                # the new samples will be stored
                 should_interpolate = true
             end
         end
@@ -177,6 +179,7 @@ function noise_inter(t::Float64,
                      x::AbstractArray,  # TODO: SHOULD RLY BE 1D ARRAY OF 1D ARRAYS!
                      isw::InterSampleWindow,
                      # num_sampled_per_interval::AbstractArray,
+                     # num_times_visited::AbstractArray,
                      ϵ::Float64=10e-8,
                      rng::MersenneTwister=Random.default_rng())
 
@@ -198,46 +201,43 @@ function noise_inter(t::Float64,
     tu = (n+1)*Ts
     il = 0      # for il>0,   tl = isd.sample_times[n][il]
     iu = Q+1    # for iu<Q+1, tu = isd.sample_times[n][iu]
-    # Time difference smaller than ϵ are treated as 0
-    if t-tl < ϵ
-        # println("base1")
-        return xl
-    elseif tu-t < ϵ
-        # println("base2")
-        return xu
-    end
     if Q == 0 && use_interpolation
         # @warn "Used linear interpolation"
-        # println("base3")
+        # println("base1")
+        # num_times_visited[1] += 1
         return xl + (xu-xl)*(t-tl)/(tu-tl)
     end
 
     #TODO: Q = 0, WE DON'T RLY PRE-ALLOCATE, SO get_neighbors FAILS!!!!!!!!
 
     xu, xl, δu, δl, should_interpolate = get_neighbors(n, t, x, Ts, isw)
-    # Values of δ smaller than ϵ are treated as 0
-    if δl < ϵ
-        # println("base4")
-        return xl
-        # TODO: It is weird that we return xl here instead of linear interpolation
-        # but I cannot get the linear interpolation to perform well here. Would
-        # be really useful to figure that out!
-        # return xl + (xu-xl)*δl/(δu+δl)
-    elseif δu < ϵ
-        # println("base5")
-        return xu
-        # TODO: It is weird that we return xu here instead of linear interpolation
-        # but I cannot get the linear interpolation to perform well here. Would
-        # be really useful to figure that out!
-        # return xl + (xu-xl)*δl/(δu+δl)
-    end
-    # If no more samples are stored in this interval, allow for the use of
-    # linear interpolation instead, to ensure smoothness of realization
-    if should_interpolate
+
+    # If it's not possible to store any more samples for this interval, and
+    # use_interpolation == True, the get_neighbors()-functions tells us to use
+    # use linear interpolation for this call to ensure a smooth realization.'
+    # Also use interpolation if the requested sample is too close to an existing
+    # sample, and use_interpolation == true.
+    if should_interpolate || ((δl < ϵ || δu < ϵ) && use_interpolation)
         # @warn "Used linear interpolation"   # DEBUG
-        # NOTE: δu might be 0, so that case has to be handled separately
-        # println("base6")
-        return xl + (xu-xl)*δl/(δu+δl)
+        # if should_interpolate
+        #     println("base2.1")
+        # else
+        #     println("base2.2")
+        # end
+        # num_times_visited[2] += 1
+        if δl > 0
+            return xl + (xu-xl)*δl/(δu+δl)
+        else
+            return xl
+        end
+    elseif δl < ϵ
+        # println("base3")
+        # num_times_visited[3] += 1
+        return xl
+    elseif δu < ϵ
+        # println("base4")
+        # num_times_visited[4] += 1
+        return xu
     end
 
     Mexp    = [-A B*(B'); zeros(size(A)) A']
@@ -297,7 +297,8 @@ function noise_inter(t::Float64,
     if isw.W > 0
         add_sample!(x_new, t, n, isw)
     end
-    # println("base7")
+    # println("base5")
+    # num_times_visited[5] += 1
     return x_new
 
 end
