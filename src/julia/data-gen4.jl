@@ -80,6 +80,8 @@ function get_dt_noise_matrices(η)
 end
 
 const nx = 2
+# System on controllable canonical form. Note that this is different from
+# companion form/observable canonical form
 const η0 = [-0.8, -4.0^2]                 # true value of η, should be a 1D-array
 const A_true = get_A(η0)
 const B_true = reshape([0.0 1.0], (2,1))
@@ -502,15 +504,16 @@ function model(dummy_input, p)
     return reshape(mean(Y, dims = 2), :)
 end
 
+# NOTE:use coef(fit_result) to get optimal parameter values!!!!!!!!!!!!!
 # TODO: This only gets optimal parameters for one out of E realizations, extend it
 function get_fit(Y, θi, ηi)
     p = vcat(θi, ηi)
-    # Use this line if you are using the original LsqFit-package
-    return curve_fit(model, 1:2, Y[:,1], p, show_trace=true)
-    # # Use this line if you are using the modified LsqFit-package that also
-    # # returns trace
-    # fit_result, trace = curve_fit(model, 1:2, Y[:,1], p, show_trace=true)
-    # return fit_result, trace
+    # # Use this line if you are using the original LsqFit-package
+    # return curve_fit(model, 1:2, Y[:,1], p, show_trace=true)
+    # Use this line if you are using the modified LsqFit-package that also
+    # returns trace
+    fit_result, trace = curve_fit(model, 1:2, Y[:,1], p, show_trace=true)
+    return fit_result, trace
 end
 
 function calc_mean_Y()

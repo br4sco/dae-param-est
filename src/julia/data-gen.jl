@@ -71,6 +71,8 @@ end
 #           ',')
 
 # === NOISE INTERPOLATION ===
+# System on controllable canonical form. Note that this is different from
+# companion form/observable canonical form
 const nx = 2
 const A = [0.0 1.0; -4^2 -0.8]
 const B = reshape([0.0 1.0], (2,1))

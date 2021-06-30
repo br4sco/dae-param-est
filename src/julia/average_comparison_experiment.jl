@@ -5,18 +5,21 @@ include("noise_interpolation.jl")
 seed = 1234
 Random.seed!(seed)
 
+const data_dir = joinpath("data", "experiments")
+exp_path(id) = joinpath(data_dir, id)
+const experiment_id = "comparisons"
 const Ts = 0.1
 const δ1 = 0.05
-const δ2 = 0.5
+const δ2 = 1.0
 const factor = Int(δ2/δ1)
 const T = 100
 const Nw1 = Int(T/δ1)
 const Nw2 = Int(T/δ2)
-const Nw_extra = 100
+const Nw_extra = 200
 const N = Int(T/Ts)
-const Q = 500
+const Q = 1000
 const W = 100
-const M = 500
+const M = 1000#500
 
 const nx = 2
 const A = [0.0 1.0; -4^2 -0.8]
@@ -203,7 +206,74 @@ solvew(w::Function, N::Int; kwargs...) =
 calc_y_2e(m::Int) = solvew(t -> wmn2(m)(t), N) |> h
 calc_y_2l(m::Int) = solvew(t -> wmd2(m)(t), N) |> h
 
-function get_ys_2le()
+function get_times_rng_2(num::Int)
+    # num = number of samples per interval
+    times_rng = zeros(num*Nw2, M)
+    dts = [[δ2*rand() for i=1:num] for i=1:Nw2, j=1:M]
+    times_temp = 0.0:δ2:Nw2*δ2
+    for i=1:Nw2
+        for j=1:M
+            times_rng[(i-1)*num+1:i*num, j] = dts[i,j] .+ times_temp[i]
+            # for k=1:samples_per_interval
+            #     times_rng[k+(i-1)*samples_per_interval, j] = times_temp[i]+dts[i,j][k]
+            # end
+        end
+    end
+    return times_rng
+end
+
+samples_per_interval = 10
+times_uni_2 = 0.0:δ2/samples_per_interval:Nw2*δ2
+times_rng_2 = get_times_rng_2(samples_per_interval)
+get_w_2e_uni(m::Int) = [wmn2(m)(t) for t=times_uni_2]
+get_w_2l_uni(m::Int) = [wmd2(m)(t) for t=times_uni_2]
+get_w_2e_rng(m::Int) = [wmn2(m)(t) for t=times_rng_2[:,m]]
+get_w_2l_rng(m::Int) = [wmd2(m)(t) for t=times_rng_2[:,m]]
+
+function get_ws_2le(M::Int=M, use_rng::Bool=false, use_parallel::Bool=true)
+    reset_isws!(isws)
+    ms = collect(1:M)
+    if use_parallel
+        if use_rng
+            Wme = solve_in_parallel(get_w_2e_rng, ms)
+            Wml = solve_in_parallel(get_w_2l_rng, ms)
+        else
+            Wme = solve_in_parallel(get_w_2e_uni, ms)
+            Wml = solve_in_parallel(get_w_2l_uni, ms)
+        end
+    else
+        Wme = zeros(length(times_uni_2), M)
+        Wml = zeros(length(times_uni_2), M)
+        for m=ms
+            if use_rng
+                Wme[:,m] = get_w_2e_rng(m)
+                Wml[:,m] = get_w_2l_rng(m)
+            else
+                Wme[:,m] = get_w_2e_uni(m)
+                Wml[:,m] = get_w_2l_uni(m)
+            end
+        end
+    end
+    return Wme, Wml
+end
+
+function plot_w_means_2le(use_rng::Bool = false)
+    Wme, Wml = get_ws_2le(M, use_rng)
+    mean_e = mean(Wme, dims=2)
+    mean_l = mean(Wml, dims=2)
+    pl = plot()
+    if use_rng
+        plot!(mean_e, label="Exact Sampling")
+        plot!(mean_l, label="Linear Sampling")
+    else
+        plot!(times_uni_2, mean_e, label="Exact Sampling")
+        plot!(times_uni_2, mean_l, label="Linear Sampling")
+    end
+    display(pl)
+    return Wme, Wml
+end
+
+function get_ys_2le(M::Int=M)
     reset_isws!(isws)
     ms = collect(1:M)
     Yme = solve_in_parallel(calc_y_2e, ms)
@@ -211,12 +281,18 @@ function get_ys_2le()
     return Yme, Yml
 end
 
-function plot_means_2le(to_show::Int = M)
-    Yme, Yml = get_ys_2le()
+function plot_y_means_2le(to_show::Int = M, save_to_file::Bool=false)
+    Yme, Yml = get_ys_2le(to_show)
     Ye = mean(Yme[:, 1:to_show], dims=2)
     Yl = mean(Yml[:, 1:to_show], dims=2)
     times = 0:Ts:(N*Ts)
+    if save_to_file
+        p = joinpath(exp_path(experiment_id), "means_2el.csv")
+        writedlm(p, hcat(times, Ye, Yl), ",")
+    end
     pl = plot()
     plot!(times, Ye, label="Exact sampling")
     plot!(times, Yl, label="Linear sampling")
+    display(pl)
+    return Yme, Yml
 end

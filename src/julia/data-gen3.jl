@@ -78,6 +78,8 @@ end
 const w_scale = 0.6
 const nx = 2
 const η0 = w_scale                 # true value of η
+# System on controllable canonical form. Note that this is different from
+# companion form/observable canonical form
 const A_true = [0.0 1.0; -4^2 -0.8]
 const B_true = reshape([0.0 1.0], (2,1))
 const C_true = w_scale*[1.0 0.0]

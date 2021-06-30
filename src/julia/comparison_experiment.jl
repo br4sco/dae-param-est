@@ -5,9 +5,12 @@ include("noise_interpolation.jl")
 seed = 1234
 Random.seed!(seed)
 
+const data_dir = joinpath("data", "experiments")
+exp_path(id) = joinpath(data_dir, id)
+const experiment_id = "comparisons"
 const Ts = 0.1
 const δ1 = 0.05
-const δ2 = 0.5
+const δ2 = 1.0
 const factor = Int(δ2/δ1)
 const T = 100
 const Nw1 = Int(T/δ1)
@@ -204,10 +207,14 @@ function get_ys_12()
 end
 
 # Gets y when using both linear and exact interpolation for δ2
-function get_ys_2le()
+function get_ys_2le(save_to_file::Bool=false)
     reset_isw!(isw)
     ye = solvew(wmn2, N) |> h
     yl = solvew(wmd2, N) |> h
+    if save_to_file
+        p = joinpath(exp_path(experiment_id), "ys_2le.csv")
+        writedlm(p, hcat(ye, yl), ",")
+    end
     return ye, yl
 end
 
@@ -288,8 +295,9 @@ function plot_ys_12(percent_start::Float64 = 0.0, percent_end::Float64=1.0)
 end
 
 # Plots y when using both linear and exact interpolation for δ2
-function plot_ys_2le(percent_start::Float64 = 0.0, percent_end::Float64=1.0)
-    ye, yl = get_ys_2le()
+function plot_ys_2le(percent_start::Float64 = 0.0, percent_end::Float64=1.0,
+                     save_to_file::Bool=false)
+    ye, yl = get_ys_2le(save_to_file)
     times = 0:Ts:(N*Ts)
     len = length(times)
     start_ind = max(round(Int, percent_start*len), 1)

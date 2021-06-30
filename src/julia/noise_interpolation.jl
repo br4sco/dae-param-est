@@ -84,7 +84,7 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
         isw.ptr = map_to_container(isw.ptr+num_steps, isw)
         isw.start += num_steps
     else # n < isw.start
-        @warn "Tried to add sample outside of inter-sample window"
+        @warn "Tried to add sample outside of inter-sample window (adding $n to window $(isw.start) -- $(isw.start+isw.W-1))"
         return
     end
     num_stored = isw.num_stored[container_id]
@@ -130,7 +130,7 @@ function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
                 end
             end
             if num_stored_samples >= isw.Q && isw.use_interpolation
-                @warn "Ran out of space to store samples"
+                @warn "Ran out of space to store samples, storing $num_stored_samples"
                 # If no more samples can be stored in this interval,
                 # conditional sampling should no longer be used, as it will
                 # likely produce a non-smooth realization, because none of
