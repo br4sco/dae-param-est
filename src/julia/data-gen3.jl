@@ -67,7 +67,7 @@ end
 #           ',')
 
 # === NOISE INTERPOLATION ===
-function get_dt_noise_matrices(η)
+function get_ct_noise_matrices(η)
     A = [0.0 1.0; -4^2 -0.8]
     B = reshape([0.0 1.0], (2,1))
     C = η*[1.0 0.0]
@@ -481,7 +481,7 @@ function calc_mean_Y()
   for (j, η) in enumerate(ηs)
     @info "solving for point ($(j)/$(nη)) of η"
 
-    A, B, C, x0 = get_dt_noise_matrices(η)
+    A, B, C, x0 = get_ct_noise_matrices(η)
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
     XWmp = simulate_noise_process(dmdl, Zm)
     # XWm = simulate_noise_process(dmdl, Zm) |> mangle_XW

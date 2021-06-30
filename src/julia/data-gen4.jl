@@ -71,7 +71,7 @@ end
 get_A(η::Array{Float64,1}) = [0.0 1.0; η[2] η[1]]
 # get_A(η::Array{Float64,1}) = [0.0 1.0; -4^2 η[1]]
 
-function get_dt_noise_matrices(η)
+function get_ct_noise_matrices(η)
     A = get_A(η)
     B = reshape([0.0 1.0], (2,1))
     C = [1.0 0.0]
@@ -469,19 +469,6 @@ function read_baseline_Y(expid)
   readdlm(p, ',')
 end
 
-# SHOULDN'T DEFINE HERE!!!!
-# function calc_mean_y_N(N::Int, θ::Float64, η::Float64, m::Int)
-#     dmld = get_dt_noise_model(η)
-#     XWmp = simulate_noise_process(dmdl, Zm)
-#     wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
-#     return solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
-# end
-
-# calc_mean_y_N(N::Int, θ::Float64, m::Int) =
-#   solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
-#
-# calc_mean_y(θ::Float64, m::Int) = calc_mean_y_N(N, θ, m)
-
 # model-function used by get_fit()
 function model(dummy_input, p)
     # NOTE: The true input is encoded in the solvew()-function, but this function
@@ -493,7 +480,7 @@ function model(dummy_input, p)
     # TODO: Surely we don't need to collect these, a range should work just as well?
     ms = collect(1:M)
     reset_isws!(isws)
-    A, B, C, x0 = get_dt_noise_matrices(η)
+    A, B, C, x0 = get_ct_noise_matrices(η)
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
     XWmp = simulate_noise_process(dmdl, Zm)
     wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
@@ -523,7 +510,7 @@ function calc_mean_Y()
   for (j, η) in enumerate(ηs)
     @info "solving for point ($(j)/$(nη)) of η"
 
-    A, B, C, x0 = get_dt_noise_matrices(collect(η))
+    A, B, C, x0 = get_ct_noise_matrices(collect(η))
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
     XWmp = simulate_noise_process(dmdl, Zm)
     wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
