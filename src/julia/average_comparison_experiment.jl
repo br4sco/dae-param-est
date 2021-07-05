@@ -10,14 +10,14 @@ exp_path(id) = joinpath(data_dir, id)
 const experiment_id = "comparisons"
 const Ts = 0.1
 const δ1 = 0.05
-const δ2 = 1.0
+const δ2 = 5.0
 const factor = Int(δ2/δ1)
 const T = 100
-const Nw1 = Int(T/δ1)
-const Nw2 = Int(T/δ2)
+const Nw1 = ceil(Int, T/δ1)
+const Nw2 = ceil(Int, T/δ2)
 const Nw_extra = 200
-const N = Int(T/Ts)
-const Q = 1000
+const N = ceil(Int, T/Ts)
+const Q = 2000
 const W = 100
 const M = 1000#500
 
@@ -257,7 +257,7 @@ function get_ws_2le(M::Int=M, use_rng::Bool=false, use_parallel::Bool=true)
     return Wme, Wml
 end
 
-function plot_w_means_2le(use_rng::Bool = false)
+function plot_w_means_2le(use_rng::Bool = false, save_to_file::Bool=false)
     Wme, Wml = get_ws_2le(M, use_rng)
     mean_e = mean(Wme, dims=2)
     mean_l = mean(Wml, dims=2)
@@ -269,6 +269,14 @@ function plot_w_means_2le(use_rng::Bool = false)
         plot!(times_uni_2, mean_e, label="Exact Sampling")
         plot!(times_uni_2, mean_l, label="Linear Sampling")
     end
+    if save_to_file
+        p = joinpath(exp_path(experiment_id), "means_w_el.csv")
+        writedlm(p, data, ",")
+        mse = mean((mean_e-mean_l).^2)
+        p = joinpath(exp_path(experiment_id), "mse_w_el.csv")
+        writedlm(p, mse, ",")
+    end
+
     display(pl)
     return Wme, Wml
 end
@@ -295,4 +303,22 @@ function plot_y_means_2le(to_show::Int = M, save_to_file::Bool=false)
     plot!(times, Yl, label="Linear sampling")
     display(pl)
     return Yme, Yml
+end
+
+function get_mse_from_file(file_name)
+    p = joinpath(exp_path(experiment_id), file_name)
+    data = readdlm(p, ',')
+    mean((data[:,2] - data[:,3]).^2)
+    # mse = mean((data[:,2] - data[:,3]).^2)
+    # p = joinpath(exp_path(experiment_id), "mse.csv")
+    # writedlm(p, mse, ",")
+end
+
+function write_mse_from_files(file_names, labels)
+    mses = zeros(size(file_names))
+    for (i, file_name) in enumerate(file_names)
+        mses[i] = get_mse_from_file(file_name)
+    end
+    p = joinpath(exp_path(experiment_id), "mses.csv")
+    writedlm(p, hcat(labels, mses), ",")
 end

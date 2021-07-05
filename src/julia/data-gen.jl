@@ -416,12 +416,12 @@ function calc_Y()
 end
 
 function write_custom(expid, file_name, data)
-    p = joinpath(exp_path(expid), "$file_name.csv")
+    p = joinpath(exp_path(expid), file_name)
     writedlm(p, data, ",")
 end
 
 function read_custom(expid, file_name)
-    p = joinpath(exp_path(expid), "$file_name.csv")
+    p = joinpath(exp_path(expid), file_name)
     readdlm(p, ',')
 end
 
