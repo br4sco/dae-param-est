@@ -39,6 +39,7 @@ struct NoiseModel
 end
 
 function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
+    nx      = size(A,1)
     Mexp    = [-A B*(B'); zeros(size(A)) A']
     MTs     = exp(Mexp*Ts)
     AdTs    = MTs[nx+1:end, nx+1:end]'
@@ -96,6 +97,34 @@ function simulate_noise_process(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 
         y, t, x = lsim(sys, data[m], t, x0=mdl.x0)
         for i=1:N+1
             x_process[i,m][:] = x[i,:]
+        end
+    end
+
+    # x_process[i,m][j] is the j:th element of the noise model state at sample
+    # i of realization m. Sample 1 corresponds to time 0
+    return x_process
+end
+
+function simulate_multivar_noise_process(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1}, n_in::Int)
+    # data[m][i, k*nx + j] should be the j:th component of the noise
+    # corresponding to input k at time i of realization m
+    M = length(data)
+    N = size(data[1])[1]-1
+    nx = size(mdl.Ad)[1]
+    # We only care about the state, not the output, so we ignore the C-matrix
+    C_placeholder = zeros(1, nx)
+
+    sys = ss(mdl.Ad, mdl.Bd, C_placeholder, 0.0, mdl.Ts)
+    t = 0:mdl.Ts:N*mdl.Ts
+    # Allocating space for noise process
+    x_process = [ fill(NaN, (nx*n_in,)) for i=1:N+1, m=1:M]
+    for ind = 1:n_in
+        for m=1:M
+
+            y, t, x = lsim(sys, data[m][:, (ind-1)*nx+1:ind*nx], t, x0=mdl.x0)
+            for i=1:N+1
+                x_process[i,m][(ind-1)*nx+1:ind*nx] = x[i,:]
+            end
         end
     end
 

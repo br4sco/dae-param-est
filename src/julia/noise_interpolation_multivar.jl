@@ -174,8 +174,7 @@ end
 
 function noise_inter(t::Float64,
                      Ts::Float64,       # Sampling time of noise process
-                     A::Array{Float64, 2},
-                     B::Array{Float64, 2},
+                     a_vec::AbstractArray{Float64, 1},
                      x::AbstractArray,  # TODO: SHOULD RLY BE 1D ARRAY OF 1D ARRAYS!
                      isw::InterSampleWindow,
                      # num_sampled_per_interval::AbstractArray,
@@ -186,7 +185,8 @@ function noise_inter(t::Float64,
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
     # num_sampled_per_interval[n+1] += 1
     δ = t - n*Ts
-    nx = size(A)[1]
+    nx = length(a_vec)
+    n_out = Int(length(x[1])÷nx)
     Q = isw.Q
     # P = size(z_inter[1])[1]
     P = 0
@@ -239,7 +239,12 @@ function noise_inter(t::Float64,
         return xu
     end
 
-    Mexp    = [-A B*(B'); zeros(size(A)) A']
+    As = diagm(-1 => ones(nx-1,))
+    As[1,:] = -a_vec
+    BBsT = zeros(nx, nx)            # Bs*(Bs'), independent of parameters
+    BBsT[1] = 1
+
+    Mexp    = [-As BBsT; zeros(size(As)) As']
     Ml      = exp(Mexp*δl)
     Mu      = exp(Mexp*δu)
     Adl     = Ml[nx+1:end, nx+1:end]'
@@ -249,14 +254,8 @@ function noise_inter(t::Float64,
     # Adl     = view(Ml, nx+1:2*nx, nx+1:2*nx)'
     # Adu     = view(Mu, nx+1:2*nx, nx+1:2*nx)'
     AdΔ     = Adu*Adl
-    # B2dl    = Hermitian(Adl*Ml[1:nx, nx+1:end])
-    # B2du    = Hermitian(Adu*Mu[1:nx, nx+1:end])
     σ_l     = Hermitian(Adl*Ml[1:nx, nx+1:end])     # = B2dl
     σ_u     = Hermitian(Adu*Mu[1:nx, nx+1:end])     # = B2du
-    # Cl      = cholesky(B2dl)
-    # Cu      = cholesky(B2du)
-    # Bdl     = Cl.L
-    # Bdu     = Cu.L
 
     # σ_l = B2dl#(Bdl*(Bdl'))
     # σ_u = B2du#(Bdu*(Bdu'))
@@ -280,9 +279,14 @@ function noise_inter(t::Float64,
             return xu
         end
     end
-    Σr = CΣ.L
-    v_Δ = xu - AdΔ*xl
-    μ = Adl*xl + (σ_Δ_l')*(σ_Δ\v_Δ) # TODO: Might want to double-check that this also covers n=0, but it seems to be the case
+    Σr = kron(Diagonal(ones(n_in)), CΣ.L)
+    v_Δ = xu - kron(Diagonal(ones(n_in)), AdΔ)*xl
+    μ = zeros(n_out*nx,1)
+    for ind = 1:n_out
+        rows = (ind-1)*nx+1:ind*nx
+        μ[rows] = Adl*xl[rows] + (σ_Δ_l')*(σ_Δ\(xu[rows] - AdΔ*xl[rows]))
+    end
+    # μ = Adl*xl + (σ_Δ_l')*(σ_Δ\v_Δ) # TODO: Might want to double-check that this also covers n=0, but it seems to be the case
 
     # if isd.num_sampled_samples[n+1] < P
     #     white_noise = z_inter[n+1][num_stored_samples+1,:]
@@ -291,7 +295,7 @@ function noise_inter(t::Float64,
     #     # @warn "Ran out of pre-generated white noise realizations for interval $(n+1)"
     #     white_noise = randn(rng, Float64, (nx, 1))
     # end
-    white_noise = randn(rng, Float64, (nx, 1))
+    white_noise = randn(rng, Float64, (nx*n_in, 1))
     x_new = μ + Σr*white_noise
     if isw.W > 0
         add_sample!(x_new, t, n, isw)

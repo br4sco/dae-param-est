@@ -68,7 +68,7 @@ end
 #           ',')
 
 # === NOISE INTERPOLATION ===
-get_A(η::Array{Float64,1}) = [0.0 1.0; η[2] η[1]]
+get_A(η::Array{Float64,1}) = [η[1] η[2]; 1.0 0.0]
 # get_A(η::Array{Float64,1}) = [0.0 1.0; -4^2 η[1]]
 
 function get_ct_noise_matrices(η)
@@ -84,8 +84,8 @@ const nx = 2
 # observable canonical form
 const η0 = [-0.8, -4.0^2]                 # true value of η, should be a 1D-array
 const A_true = get_A(η0)
-const B_true = reshape([0.0 1.0], (2,1))
-const C_true = [1.0 0.0]
+const B_true = reshape([1.0 0.0], (2,1))
+const C_true = [0.0 1.0]
 const x0_true = zeros(nx)
 const true_mdl = discretize_ct_noise_model(A_true, B_true, C_true, δ, x0_true)
 

@@ -35,13 +35,22 @@ catch e
 end
 
 dx_trace = zeros(length(θ0)+length(η0), length(trace)-1)
+g_norm_trace = zeros(length(trace)-1)   # Infinity norm of gradient
 for i=1:length(trace)-1
-    dx_trace[:,i] = trace[i+1].metadata["dx"]
+    dx_trace[:,i]   = trace[i+1].metadata["dx"]
+    g_norm_trace[i] = trace[i+1].metadata["g(x)"] # Infinity norm of gradient
 end
 
 try
     write_custom(exp_id, "dx_trace", dx_trace)
 catch e
     @warn "Error while storing dx trace, make sure to do it manually"
+    println(e)
+end
+
+try
+    write_custom(exp_id, "gnorm_trace", g_norm_trace)
+catch e
+    @warn "Error while storing g_norm trace, make sure to do it manually"
     println(e)
 end

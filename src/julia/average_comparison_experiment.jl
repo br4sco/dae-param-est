@@ -28,7 +28,6 @@ const C = [1.0 0.0]
 
 const x0 = zeros(nx)
 const dmdl1 = discretize_ct_noise_model(A, B, C, δ1, x0)
-const dmdl2 = discretize_ct_noise_model(A, B, C, δ2, x0)
 
 const Zu = [randn(Nw1+Nw_extra, nx)]
 const Zm = [randn(Nw1+Nw_extra, nx) for m=1:M]
@@ -40,7 +39,6 @@ mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
 
 const XWup  = simulate_noise_process(dmdl1, Zu)
 const XWd1p = simulate_noise_process(dmdl1, Zm)
-# const XWd2p = simulate_noise_process(dmdl2, Z2)
 const XWd2p = XWd1p[1:factor:end, :]
 const XWu = mangle_XW(XWup)
 const XWd1 = mangle_XW(XWd1p)
@@ -117,29 +115,6 @@ function mk_newer_noise_interp1(A::Array{Float64, 2},
    end
 end
 
-function mk_noise_interp2(A::Array{Float64, 2},
-                             B::Array{Float64, 2},
-                             C::Array{Float64, 2},
-                             XW::Array{Float64, 2},
-                             m::Int)
-
-  let
-    nx = size(A, 1)
-    function w(t::Float64)
-      n = Int(floor(t / δ2)) + 1
-
-      k = (n - 1) * nx + 1
-
-      # xl = view(XW, k:(k + nx - 1), m)
-      # xu = view(XW, (k + nx):(k + 2nx - 1), m)
-
-      xl = XW[k:(k + nx - 1), m]
-      xu = XW[(k + nx):(k + 2nx - 1), m]
-      first(C * interpx(xl, xu, t, δ2, n))
-    end
-  end
-end
-
 function mk_newer_noise_interp2(A::Array{Float64, 2},
                                B::Array{Float64, 2},
                                C::Array{Float64, 2},
@@ -160,11 +135,11 @@ wmd1(m::Int) = mk_noise_interp1(A, B, w_scale.*C, XWd1, m)
 wmd2(m::Int) = mk_noise_interp2(A, B, w_scale.*C, XWd2, m)
 wmn1(m::Int) = mk_newer_noise_interp1(A, B, w_scale.*C, isws[m], m)
 wmn2(m::Int) = mk_newer_noise_interp2(A, B, w_scale.*C, isws[m], m)
-u(t::Float64) = mk_noise_interp1(A, B, C, XWu, 1)(t)
+u(t::Float64) = mk_noise_interp1(A, B, C, u_scale.*XWu, 1)(t)
 
 # === MODEL (AND DATA) PARAMETERS ===
 const σ = 0.002                 # observation noise variance
-const u_scale = 0.2             # input scale
+const u_scale = 1.0 #0.2             # input scale
 # const u_scale = 10.0            # input scale larger
 const u_bias = 0.0              # input bias
 const w_scale = 0.6             # noise scale
@@ -188,12 +163,12 @@ h(sol) = apply_outputfun(f, sol)          # for our model
 const θ0 = L                    # true value of θ
 # mk_θs(θ::Float64) = [m, L, g, θ]
 realize_model(w::Function, N::Int) =
-  problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, [m, L, g, k]), N, Ts)
+  problem(pendulum(φ0, t -> u(t) + u_bias, w, [m, L, g, k]), N, Ts)
 
-  # === SOLVER PARAMETERS ===
-  const abstol = 1e-8
-  const reltol = 1e-5
-  const maxiters = Int64(1e8)
+# === SOLVER PARAMETERS ===
+const abstol = 1e-8
+const reltol = 1e-5
+const maxiters = Int64(1e8)
 
 solvew(w::Function, N::Int; kwargs...) =
     solve(realize_model(w, N),
