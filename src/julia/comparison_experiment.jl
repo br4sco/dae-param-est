@@ -178,7 +178,6 @@ h(sol) = apply_outputfun(f, sol)          # for our model
 h_baseline(sol) = apply_outputfun(f, sol) # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
-h(sol) = apply_outputfun(f, sol)          # for our model
 const θ0 = L                    # true value of θ
 # mk_θs(θ::Float64) = [m, L, g, θ]
 realize_model(w::Function, N::Int) =
