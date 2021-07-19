@@ -7,10 +7,11 @@ Random.seed!(seed)
 
 const data_dir = joinpath("data", "experiments")
 exp_path(id) = joinpath(data_dir, id)
-const experiment_id = "new_comparisons"
+const experiment_id = "small_input_experiments_x10"
 const Ts = 0.1
-# const δs = [0.05, 0.5, 1.0, 2.0, 5.0]
-const δs = [0.05, 0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
+const δs = [0.05, 0.5, 1.0, 2.0, 5.0]
+# const δs = [5.0]
+# const δs = [0.05, 0.1, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]
 const δ_min = minimum(δs)
 const factors = [Int(δ/δ_min) for δ = δs]
 const T = 100
@@ -101,7 +102,7 @@ u(t::Float64) = mk_noise_interp(A, B, C, u_scale.*XWu, 1, δ_min)(t)
 
 # === MODEL (AND DATA) PARAMETERS ===
 const σ = 0.002                 # observation noise variance
-const u_scale = 1.0 #0.2             # input scale
+const u_scale = 0.2             # input scale
 # const u_scale = 10.0            # input scale larger
 const u_bias = 0.0              # input bias
 const w_scale = 0.6             # noise scale
@@ -174,7 +175,7 @@ function compare_Y_means(sims_per_δ::Int=1)
 
     p = joinpath(exp_path(experiment_id), "mses_M$(M)_el.csv")
     try
-        writedlm(p, mses, ",")
+        writedlm(p, hcat(δs, mses), ",")
     catch e
         @warn "Failed storing mses, make sure to do it manually"
     end

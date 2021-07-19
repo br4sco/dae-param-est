@@ -180,7 +180,7 @@ function noise_inter(t::Float64,
                      isw::InterSampleWindow,
                      # num_sampled_per_interval::AbstractArray,
                      # num_times_visited::AbstractArray,
-                     ϵ::Float64=10e-8,
+                     ϵ::Float64=10e-7,
                      rng::MersenneTwister=Random.default_rng())
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
