@@ -270,6 +270,9 @@ realize_model(w::Function, θ::Array{Float64, 1}, N::Int) =
 # Use this function to specify which parameters should be free and optimized over
 get_all_parameters(θ::Array{Float64,1}) = vcat(θ, η0) # Only θ is optimized over
 # get_all_parameters(p::Array{Float64,1}) = p           # All parameters are optimized over
+# Optimizes over one parameter in pendulum model and all w_scale parameters
+# p should have the form [pendulum_parameter, w_scale_parameters]
+get_all_parameters(p::Array{Float64,1}) = vcat(p[1], θ0[2:end], η0[1:nx], p[2:1+n_out], η0[nx+n_out+1:end])
 
 # === SOLVER PARAMETERS ===
 const abstol = 1e-8
