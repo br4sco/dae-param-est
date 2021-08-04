@@ -17,7 +17,10 @@ Random.seed!(seed)
 
 # === TIME ===
 # const δ = 0.01                  # noise sampling time
-const N = 100#10000
+# Used to easier recall from which experiment temp-files were generated
+const identifier = "040821"
+
+const N = 10000
 const Ts = 0.1                  # stepsize
 const T = N*Ts
 # const Ts = 0.5                  # stepsize larger
@@ -26,9 +29,9 @@ const T = N*Ts
 const Q = 1000
 # NOTE: Currently the array of isw:s is of length E. If E < M, then one needs to
 # create a separate array of isw:s when running M simulations
-const M = 10#500
-const E = 1#500
-# const Nws = [100, 1000, 10000, 100000]
+const M = 500
+const E = 500
+# const Nws = [50000, 100000, 300000, 500000]
 const Nws = [100, 200]
 const Nw_max  = maximum(Nws)
 const factors = [Int(Nw_max÷Nw) for Nw in Nws]
@@ -385,7 +388,7 @@ function perform_experiments(Y, pars0)
                 (dummy_input, p) -> model_parametrized(δs[k], Zm_k, dummy_input, p), e)
             # fit_result, trace = get_fit_debug()       # DEBUG
             opt_pars[k][:,e] = coef(fit_result)
-            writedlm(joinpath(data_dir, "tmp", "theta_opt_$(k)_$(e).csv"), coef(fit_result), ',')
+            writedlm(joinpath(data_dir, "tmp", "theta_opt_$(k)_$(e)_$(identifier).csv"), coef(fit_result), ',')
         end
     end
     write_opt_pars(opt_pars, "multipar")

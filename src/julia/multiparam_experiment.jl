@@ -2,6 +2,10 @@ include("data-gen4.jl")
 
 exp_id = "multiparam_experiment"
 
+# NOTE: THIS FILE IS DEPRACATED, WILL PROBABLY BE DELETED IN THE FUTURE.
+# THE MOST RECENT FILE FOR MULTIPARAMETER EXPERIMENTS, AT THE TIME OF WRITING
+# THIS COMMENTS, IS MIMO_experiment.jl
+
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # 8  THREADS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
