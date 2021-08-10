@@ -270,8 +270,8 @@ mk_θs(θ::Array{Float64, 1}) = [m, θ[1], g, k]
 realize_model(w::Function, θ::Array{Float64, 1}, N::Int) =
   problem(pendulum_multivar(φ0, t -> u_scale .* u(t) .+ u_bias, w, mk_θs(θ)), N, Ts)
 
-# Use this function to specify which parameters should be free and optimized over
-get_all_parameters(θ::Array{Float64,1}) = vcat(θ, η0) # Only θ is optimized over
+# # Use this function to specify which parameters should be free and optimized over
+# get_all_parameters(θ::Array{Float64,1}) = vcat(θ, η0) # Only θ is optimized over
 # get_all_parameters(p::Array{Float64,1}) = p           # All parameters are optimized over
 # Optimizes over one parameter in pendulum model and all w_scale parameters
 # p should have the form [pendulum_parameter, w_scale_parameters]
