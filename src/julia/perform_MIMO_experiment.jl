@@ -24,7 +24,11 @@ end
 
 try
     Y = calc_Y()
-    write_Y_and_metadata(Y)
+    try
+        write_Y_and_metadata(Y)
+    catch
+        print("Failed storing Y and metadata")
+    end
     perform_experiments(Y, vcat(θ0, w_scale))
 catch e
     print(e)
