@@ -10,7 +10,8 @@ n_out: $n_out
 n_in: $n_in
 n_u: $n_u
 T: $T
-δ: $(δ_min)
+δ: $δ_min
+Nw: $Nw_max
 Ts: $Ts
 W: $W
 Q: $Q"
@@ -26,10 +27,12 @@ try
     Y = calc_Y()
     try
         write_Y_and_metadata(Y)
+        print("Stored Y and metadata")
     catch
         print("Failed storing Y and metadata")
     end
     perform_experiments(Y, vcat(θ0, w_scale))
+    print("Finished performing experiments")
 catch e
     print(e)
     p = joinpath(data_dir, "error_msg.txt")
