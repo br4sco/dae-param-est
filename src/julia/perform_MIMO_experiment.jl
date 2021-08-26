@@ -23,13 +23,21 @@ Q: $Q"
     close(file_meta)
 end
 
+load_Y = true
+Y_filename = "Y2021-08-26T10_18_49.372.csv"
+
 try
-    Y = calc_Y()
-    try
-        write_Y_and_metadata(Y)
-        print("Stored Y and metadata")
-    catch
-        print("Failed storing Y and metadata")
+    if load_Y
+        p = joinpath(data_dir, Y_filename)
+        Y = readdlm(p, ',')
+    else
+        Y = calc_Y()
+        try
+            write_Y_and_metadata(Y)
+            print("Stored Y and metadata")
+        catch
+            print("Failed storing Y and metadata")
+        end
     end
     perform_experiments(Y, vcat(θ0, w_scale))
     print("Finished performing experiments")

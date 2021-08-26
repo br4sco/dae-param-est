@@ -18,7 +18,7 @@ Random.seed!(seed)
 # === TIME ===
 # const δ = 0.01                  # noise sampling time
 # Used to easier recall from which experiment temp-files were generated
-const identifier = "040821"
+const identifier = "260821"
 
 const N = 10000
 const Ts = 0.1                  # stepsize
@@ -32,7 +32,7 @@ const Q = 1000
 const M = 500
 const E = 500
 # const Nws = [50000, 100000, 300000, 500000]
-const Nws = [100, 200]
+const Nws = [1000, 2000]
 const Nw_max  = maximum(Nws)
 const factors = [Int(Nw_max÷Nw) for Nw in Nws]
 const δs = [T/Nw for Nw in Nws]
