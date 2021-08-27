@@ -24,26 +24,26 @@ Q: $Q"
 end
 
 load_Y = true
-Y_filename = "Y2021-08-26T10_18_49.372.csv"
+Y_filename = "Y2021-08-27T20_23_31.851.csv"
 
 try
     if load_Y
         p = joinpath(data_dir, Y_filename)
         Y = readdlm(p, ',')
-        if size(Y,1) != N
+        if size(Y,1) != N+1
             throw(DimensionMismatch("N is set to $N, but length of loaded data Y was $(size(Y,1)) (should be $(N+1))"))
         end
     else
         Y = calc_Y()
         try
             write_Y_and_metadata(Y)
-            print("Stored Y and metadata")
+            println("Stored Y and metadata")
         catch
-            print("Failed storing Y and metadata")
+            println("Failed storing Y and metadata")
         end
     end
     perform_experiments(Y, vcat(θ0, w_scale))
-    print("Finished performing experiments")
+    println("Finished performing experiments")
 catch e
     print(sprint(showerror, e, catch_backtrace()))
     p = joinpath(data_dir, "error_msg.txt")
