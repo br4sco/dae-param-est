@@ -20,7 +20,8 @@ Random.seed!(seed)
 # Used to easier recall from which experiment temp-files were generated
 const identifier = "260821"
 
-const N = 10000
+# const N = 10000
+const N = 10
 const Ts = 0.1                  # stepsize
 const T = N*Ts
 # const Ts = 0.5                  # stepsize larger
@@ -32,7 +33,7 @@ const Q = 1000
 const M = 500
 const E = 500
 # const Nws = [50000, 100000, 300000, 500000]
-const Nws = [1000, 2000]
+const Nws = [100, 200]
 const Nw_max  = maximum(Nws)
 const factors = [Int(Nw_max÷Nw) for Nw in Nws]
 const δs = [T/Nw for Nw in Nws]
@@ -389,6 +390,7 @@ function perform_experiments(Y, pars0)
             # fit_result, trace = get_fit_debug()       # DEBUG
             opt_pars[k][:,e] = coef(fit_result)
             writedlm(joinpath(data_dir, "tmp", "theta_opt_$(k)_$(e)_$(identifier).csv"), coef(fit_result), ',')
+            println("Stored temporary data for k=$k and e=$e at $(joinpath(data_dir, "tmp", "theta_opt_$(k)_$(e)_$(identifier).csv"))")
         end
     end
     write_opt_pars(opt_pars, "multipar")

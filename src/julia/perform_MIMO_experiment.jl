@@ -30,6 +30,9 @@ try
     if load_Y
         p = joinpath(data_dir, Y_filename)
         Y = readdlm(p, ',')
+        if size(Y,1) != N
+            throw(DimensionMismatch("N is set to $N, but length of loaded data Y was $(size(Y,1)) (should be $(N+1))"))
+        end
     else
         Y = calc_Y()
         try
@@ -42,7 +45,7 @@ try
     perform_experiments(Y, vcat(θ0, w_scale))
     print("Finished performing experiments")
 catch e
-    print(e)
+    print(sprint(showerror, e, catch_backtrace()))
     p = joinpath(data_dir, "error_msg.txt")
     file = open(p, "w")
     write(file, sprint(showerror, e, catch_backtrace()))
