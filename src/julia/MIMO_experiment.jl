@@ -79,6 +79,7 @@ end
 #           ',')
 
 # === NOISE INTERPOLATION ===
+# Noise scale is incorporated into returned C-matrix
 function get_ct_noise_matrices(η::Array{Float64,1}, nx::Int, n_out::Int)
     # First nx parameters of η are parameters for A-matrix. Next comes the noise
     # scale, and finally parameters for C-matrix
@@ -178,13 +179,12 @@ function interpw_general(wl::Float64,
   wl + (t - tl) * (wu - wl) / (tu-tl)
 end
 
-function mk_noise_interp(a_vec::AbstractArray{Float64, 1},
+function mk_noise_interp(nx::Int,
                          C::Array{Float64, 2},
                          XW::Array{Float64, 2},
                          m::Int)
 
   let
-    nx = length(a_vec)
     n_tot = size(C, 2)
     function w(t::Float64)
       n = Int(floor(t / δ_min)) + 1
@@ -235,8 +235,8 @@ end
 
 isws = [initialize_isw(Q, W, nx*n_in, true) for e=1:max(E,M)]
 # wmd(e::Int) = mk_newer_noise_interp(a_true, C_true, XWdp, e, isws)
-wmd(e::Int) = mk_noise_interp(a_true, C_true, XWd, e)
-u(t::Float64) = mk_noise_interp(a_true, C_true[1:n_u,:]./w_scale[1:n_u], XWu, 1)(t) # ./w_scale removes dependence on w_scale
+wmd(e::Int) = mk_noise_interp(length(a_true), C_true, XWd, e)
+u(t::Float64) = mk_noise_interp(length(a_true), C_true[1:n_u,:]./w_scale[1:n_u], XWu, 1)(t) # ./w_scale removes dependence on w_scale
 
 # interpolation over w(tk)
 # wmd(e::Int) = interpw(WSd, e)
@@ -253,7 +253,8 @@ const m = 0.3                   # [kg]
 const L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not
                                 # accounting for friction.
 const g = 9.81                  # [m/s^2]
-const k = 0.05                  # [1/s^2]
+# Set equal to L to match accidental parameter setting from earluer experiments
+const k = 6.25 #0.05                  # [1/s^2]
 
 const φ0 = 0. / 8              # Initial angle of pendulum from negative y-axis
 
@@ -264,10 +265,10 @@ h_baseline(sol) = apply_outputfun(f, sol) # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
 # const θ0 = [L, L]                    # true value of θ
-const θ0 = [L]
+const θ0 = [k]
 const dθ = length(θ0)
-# mk_θs(θ::Array{Float64, 1}) = [m, θ[1], g, θ[2]]
-mk_θs(θ::Array{Float64, 1}) = [m, θ[1], g, k]
+# mk_θs(θ::Array{Float64, 1}) = [m, θ[2], g, θ[1]]
+mk_θs(θ::Array{Float64, 1}) = [m, L, g, θ[1]]
 realize_model(w::Function, θ::Array{Float64, 1}, N::Int) =
   problem(pendulum_multivar(φ0, t -> u_scale .* u(t) .+ u_bias, w, mk_θs(θ)), N, Ts)
 
@@ -370,8 +371,13 @@ function model_parametrized(δ, Zm, dummy_input, pars)
     reset_isws!(isws)
     A, B, C, x0 = get_ct_noise_matrices(η, nx, n_out)
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
-    XWmp = simulate_multivar_noise_process(dmdl, Zm, n_in)
-    wmm(m::Int) = mk_newer_noise_interp_m(view(η, 1:nx), C, XWmp, m, δ, isws)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWmp = simulate_multivar_noise_process_mangled(dmdl, Zm, n_in)
+    wmm(m::Int) = mk_noise_interp(nx, C, XWm, m)
+    # # NOTE: OPTION 2: Use the rows below here for exact interpolation
+    # XWmp = simulate_multivar_noise_process(dmdl, Zm, n_in)
+    # wmm(m::Int) = mk_newer_noise_interp_m(view(η, 1:nx), C, XWmp, m, δ, isws)
+    
     calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
         solvew(t -> wmm(m)(t), θ, N) |> h
     calc_mean_y(θ::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, θ, m)

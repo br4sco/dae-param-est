@@ -133,6 +133,34 @@ function simulate_multivar_noise_process(mdl::DT_SS_Model, data::Array{Array{Flo
     return x_process
 end
 
+function simulate_multivar_noise_process_mangled(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1}, n_in::Int)
+    # data[m][i, k*nx + j] should be the j:th component of the noise
+    # corresponding to input k at time i of realization m
+    M = length(data)
+    N = size(data[1])[1]-1
+    nx = size(mdl.Ad)[1]
+    # We only care about the state, not the output, so we ignore the C-matrix
+    C_placeholder = zeros(1, nx)
+
+    sys = ss(mdl.Ad, mdl.Bd, C_placeholder, 0.0, mdl.Ts)
+    t = 0:mdl.Ts:N*mdl.Ts
+    # Allocating space for noise process
+    x_process = fill(NaN, ((N+1)*nx*n_in, M))
+    for ind = 1:n_in
+        for m=1:M
+            # x[i, j] is the j:th element of the state at sample i
+            y, t, x = lsim(sys, data[m][:, (ind-1)*nx+1:ind*nx], t, x0=mdl.x0)
+            for i=1:N+1
+                x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[i,:]
+            end
+        end
+    end
+
+    # x_process[i,m][j] is the j:th element of the noise model state at sample
+    # i of realization m. Sample 1 corresponds to time 0
+    return x_process
+end
+
 # function simulate_nonuniform_noise(mdl::CT_SS_Model, z::Array{Array{Float64,1},1}, times::Array{Float64,1})
 #     noise = [fill(NaN, size(mdl.x0))]
 #     x = mdl.x0

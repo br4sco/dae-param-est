@@ -102,7 +102,7 @@ h_baseline(sol) = apply_outputfun(f, sol) # for the baseline method
 
 # === MODEL REALIZATION AND SIMULATION ===
 const θ0 = L                    # true value of θ
-mk_θs(θ::Float64) = [m, θ, g, k]
+mk_θs(θ::Float64) = [m, L, g, θ]
 realize_model(w::Function, θ::Float64, N::Int) =
   problem(pendulum(φ0, t -> u_scale * u(t) + u_bias, w, mk_θs(θ)), N, Ts)
 
