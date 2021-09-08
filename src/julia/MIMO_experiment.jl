@@ -372,12 +372,12 @@ function model_parametrized(δ, Zm, dummy_input, pars)
     A, B, C, x0 = get_ct_noise_matrices(η, nx, n_out)
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
-    XWmp = simulate_multivar_noise_process_mangled(dmdl, Zm, n_in)
+    XWm = simulate_multivar_noise_process_mangled(dmdl, Zm, n_in)
     wmm(m::Int) = mk_noise_interp(nx, C, XWm, m)
     # # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # XWmp = simulate_multivar_noise_process(dmdl, Zm, n_in)
     # wmm(m::Int) = mk_newer_noise_interp_m(view(η, 1:nx), C, XWmp, m, δ, isws)
-    
+
     calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
         solvew(t -> wmm(m)(t), θ, N) |> h
     calc_mean_y(θ::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, θ, m)
