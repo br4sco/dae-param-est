@@ -12,17 +12,11 @@ using ProgressMeter
 
 struct Model
   f!::Function                  # residual function
-  jac!::Function               # jacobian function
+  jac!::Function                # jacobian function
   x0::Array{Float64, 1}         # initial values of x
   xp0::Array{Float64, 1}        # initial values of x'
   dvars::Array{Bool, 1}         # bool array indicating differential variables
   ic_check::Array{Float64, 1}   # residual at t0 (DEBUG)
-end
-
-function interpolation(T::Float64, xs::Array{Float64, 1})
-  let ts = range(0, T, length=length(xs))
-    LinearInterpolation(ts, xs)
-  end
 end
 
 # Simple model of a pendulum in Cartesian coordinates on stabilized index-1
@@ -118,7 +112,7 @@ function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}):
         0.,                     # y'
         0.,                     # int λ
         0.,                     # int μ
-        atan(x0 / -y0),
+        atan(x0 / -y0),         # phi -- angle between pendulum arm and negative y-axis
       ]
 
       zp0 = [
@@ -128,7 +122,7 @@ function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}):
         ypp0,                   # y''
         λ0,                     # λ
         0.,                     # μ
-        0.,                     # u'
+        0.,                     # phi'
       ]
 
       dvars = Bool[
@@ -148,12 +142,6 @@ function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}):
     end
 end
 
-# T = 200.0
-# m = pendulum2(pi/4, t -> 0., t -> 0.1sin(t), [0.3, 3.0, 9.81, 0.1])
-# prob = DAEProblem(m.f!, m.xp0, m.x0, (0, T), [])
-# sol = solve(prob, IDA(), abstol = 1e-7, reltol = 1e-7, maxiters = Int(1e10), saveat = 0:0.05:T)
-# plot(sol, vars=[1, 2])
-
 function simulation_plots(T, sols, vars; kwargs...)
   ps = [plot() for var in vars]
   np = length(ps)
@@ -169,8 +157,6 @@ end
 
 function problem(m::Model, N::Int, Ts::Float64)
   T = N * Ts
-  # ff = DAEFunction(m.f!, jac = m.jac!)
-  # ff = DAEFunction{true,true}(m.f!)
   DAEProblem(m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
 end
 
@@ -201,78 +187,3 @@ function solve_in_parallel(solve, is)
   Y
 end
 
-# Old API
-
-function simulate(m::Model, N::Int, Ts::Float64; kwargs...)
-  let
-    T = N * Ts
-    saveat = 0:Ts:T
-
-    prob = problem(m, N, Ts)
-
-    solve(prob, saveat = saveat; kwargs...)
-  end
-end
-
-# function simulate_xw(xw::XW, m::Model, N::Int, Ts::Float64)
-#   T = N * Ts
-#   saveat = 0:Ts:T
-
-#   prob = DAEProblem(
-#     m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
-
-#   integrator = init(
-#     prob,
-#     IDA(),
-#     abstol = abstol,
-#     reltol = reltol,
-#     maxiters = maxiters,
-#     saveat = saveat
-#   )
-
-#   for i in integrator
-#     xw.x = xw.next_x
-#     xw.t = integrator.t
-#     xw.k += 1
-#   end
-
-#   integrator.sol
-# end
-
-# mk_w = discrete_time_noise_model_1(10000000, 10, 10.0)
-# xw = XW(zeros(2), zeros(2), 0.0, 1)
-# m = pendulum(pi/4, t -> 0., mk_w(xw, 1), [0.3, 3.0, 9.81, 0.1])
-# sol = simulate_xw(xw, m, 100, 0.05)
-
-function simulate_h(m::Model, N::Int, Ts::Float64, h::Function)
-  sol = simulate(m, N, Ts)
-  apply_outputfun(h, sol)
-end
-
-function simulate_m(mk_model::Function, N::Int, Ts::Float64)
-  function f(m)
-    model = mk_model(m)
-    simulate(model, N, Ts)
-  end
-end
-
-function simulate_h_m(
-  mk_model::Function, N::Int, Ts::Float64, h::Function, ms::Array{Int, 1}
-)::Array{Float64, 2}
-
-  M = length(ms)
-  # Y = hcat([[Threads.Atomic{Float64}(0.0) for i=1:(N+1)] for j=1:M]...)
-  Y = zeros(N+1, M)
-  p = Progress(M, 1, "Running $(M) simulations...", 50)
-  Threads.@threads for m = 1:M
-    model = mk_model(ms[m])
-    y = simulate_h(model, N, Ts, h)
-    # for n = 1:(N+1)
-    # Threads.atomic_add!(Y[k, m], y[k])
-    Y[:, m] .+= y
-    # end
-    next!(p)
-  end
-  # map(y -> y[], Y)
-  Y
-end
