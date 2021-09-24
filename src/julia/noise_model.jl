@@ -6,12 +6,18 @@ using DelimitedFiles
 using ProgressMeter
 using LinearAlgebra
 
+"""
+Represents filter with rational transfer function where the numerator is given
+by a[1]*s^(n_a-1) + a[2]*s^(n_a-2) + ... + a[n_a-1]*s + a[n_a] and the
+denominator by b[1]*s^(n_b-1) + b[2]*s^(n_b-2) + ... + b[n_b-1]*s + b[n_b],
+where n_a and n_b are the lengths of the arrays a and b, respectively
+"""
 struct LinearFilter
   a::Array{Float64}
   b::Array{Float64}
 end
 
-function gen_unconditioned_noise(
+function gen_filtered_noise(
   A::Array{Float64,2},
   B::Array{Float64,2},
   C::Array{Float64,2},
@@ -49,60 +55,58 @@ function gen_noise_m(gen_noise, ZS)
     WS[:, m] .+= gen_noise(ZS[m])
     next!(p)
   end
-  WS
+  WS[1:K, :]
 end
 
 """
-    `gen_unconditioned_noise_ZS(ZS, δ)`
+    `gen_filtered_noise_zs(ZS, δ)`
 
-As `gen_unconditioned_noise` but where the white noise is given by `ZS`.
+As `gen_filtered_noise` but where the white noise is given by `ZS`.
 """
-function gen_unconditioned_noise_ZS(
+function gen_filtered_noise_zs(
   filter::LinearFilter,
   ZS::Array{Float64,2},
   δ::Float64,
 )::Array{Float64,2}
-  A, B, C = ss_of_linear_filter(filter())
+  A, B, C = ss_of_linear_filter(filter)
   nx = size(A, 1)
-  WS = gen_noise_m(zs -> gen_unconditioned_noise(A, B, C, δ, zs), ZS)
+  WS = gen_noise_m(zs -> gen_filtered_noise(A, B, C, δ, zs), ZS)
   WS
 end
 
 """
-    `gen_unconditioned_noise(M, δ, K)`
+    `gen_filtered_noise(M, δ, K)`
 
-Generates a noise matrix of `M` columns and `K+1` rows, where the noise is white
+Generates a noise matrix of `M` columns and `K` rows, where the noise is white
 noise filtered through the linear filter defined by `filter`, exactly
-discretized with sampling time `δ` and with inital states all set to zero.
+discretized with sampling time `δ`, and with inital states all set to zero.
 """
-function gen_unconditioned_noise(
+function gen_filtered_noise(
   filter::LinearFilter,
   M::Int,
   δ::Float64,
   K::Int,
 )::Array{Float64,2}
-  A, B, C = ss_of_linear_filter(filter())
+  A, B, C = ss_of_linear_filter(filter)
   nx = size(A, 1)
   ZS = [rand(Normal(), nx, K) for m = 1:M]
-  WS = gen_noise_m(zs -> gen_unconditioned_noise(A, B, C, δ, zs), ZS)
+  WS = gen_noise_m(zs -> gen_filtered_noise(A, B, C, δ, zs), ZS)
   WS
 end
 
 """
-    `gen_unconditioned_noise_1(ZS, δ)`
+    `gen_filtered_noise_1(ZS, δ)`
 
-As `gen_unconditioned_noise_ZS` with linear filter `linear_filter_1`.
+As `gen_filtered_noise_zs` with linear filter `linear_filter_1`.
 """
-gen_unconditioned_noise_1(ZS, δ) =
-  gen_unconditioned_noise_ZS(linear_filter_1, ZS, δ)
+gen_filtered_noise_1(ZS, δ) = gen_filtered_noise_zs(linear_filter_1(), ZS, δ)
 
 """
-    `gen_unconditioned_noise_1(M, δ, K)`
+    `gen_filtered_noise_1(M, δ, K)`
 
-As `gen_unconditioned_noise` with linear filter `linear_filter_1`
+As `gen_filtered_noise` with linear filter `linear_filter_1`
 """
-gen_unconditioned_noise_1(M, δ, K) =
-  gen_unconditioned_noise(linear_filter_1, M, δ, K)
+gen_filtered_noise_1(M, δ, K) = gen_filtered_noise(linear_filter_1(), M, δ, K)
 
 function linear_filter_1()
   ω = 4           # natural freq. in rad/s (tunes freq. contents/fluctuations)

@@ -41,6 +41,19 @@ margin. I.e. `K✕δ > N✕Ts`, where `δ` is the sampling time of the noise
 generation, `N` and `Ts` is the number of steps and sampling time of the
 simulation, respectively.
 
+To use the linear filter described in the paper, in a julia repl in [src/julia](src/julia) run:
+```
+include("noise_model.jl")
+```
+Then
+```
+WS = gen_filtered_noise_1(M, δ, K)
+```
+For each matrix discussed above with the appropriate arguments. In julia you can save a matrix to a coma separated file using `writedlm`, e.g.
+```{julia}
+writedlm("data/experiment/data.csv", WS, ',')
+```
+
 If you generate your own noise you need to update
 [src/julia/run_experiment.jl](src/julia/run_experiment.jl) to point to the
 correct files.
