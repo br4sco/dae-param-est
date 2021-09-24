@@ -25,8 +25,9 @@ physical model is defined in [src/julia/simulation.jl](src/julia/simulation.jl).
 ### Download or generate noise
 You can either download the noise used in our experiment from
 https://kth.box.com/v/dae-param-est-noise. Place these files in
-[src/julia/data/experiment](src/julia/data/experiment). Or you can generate
-noise yourself using the functions defined in
+[src/julia/data/experiment](src/julia/data/experiment) (be advice, this
+experiment consumes a lot of memory). You can also generate noise yourself using
+the functions defined in
 [src/julia/noise_model.jl](src/julia/noise_model.jl). You should generate and
 save four noise matrices in total.
 
