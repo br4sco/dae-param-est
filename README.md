@@ -38,8 +38,8 @@ save four noise matrices in total.
 The parameter `K` defines the length of the noise sequence and this should
 surpass the length you plan to run the simulation with some small
 margin. I.e. `K✕δ > N✕Ts`, where `δ` is the sampling time of the noise
-generation, `N` the number of steps, and `Ts` the sampling time of the
-simulation respectively.
+generation, `N` and `Ts` is the number of steps and sampling time of the
+simulation, respectively.
 
 If you generate your own noise you need to update
 [src/julia/run_experiment.jl](src/julia/run_experiment.jl) to point to the
@@ -77,5 +77,5 @@ This will take a while depending on the size of your noise matrices. Finally, yo
 ```
 thetahat_boxplots(outputs, Ns, N_trans)
 ```
-To construct a boxplot that summarizes the statistics of your experiment. The parameter `Ns` is an array of simulation steps `N` where you want to compare the baseline method and the proposed method, and `N_trans` is the length of the transient.
+To construct a boxplot that summarizes the statistics of your experiment. The parameter `Ns` is an array of simulation steps `N` where you wish to compare the baseline method and the proposed method, and `N_trans` is the number of steps of the transient.
 
