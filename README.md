@@ -35,8 +35,8 @@ save four noise matrices in total.
 3. A `M⨉K` noise matrix for the proposed method, where `M` is number of noise
    realizations the method should average over.
 
-The parameter `K` defines the length of the noise sequence and this should
-surpass the length you plan to run the simulation with some small
+The parameter `K` defines the number of steps of the noise sequence whose length
+should surpass the length you plan to run the simulation with some small
 margin. I.e. `K✕δ > N✕Ts`, where `δ` is the sampling time of the noise
 generation, `N` and `Ts` is the number of steps and sampling time of the
 simulation, respectively.
