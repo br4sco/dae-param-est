@@ -279,7 +279,7 @@ function get_outputs(expid)
     Ym = readdlm(mean_Y_path(expid), ',')
   else
     @info "Generating output of proposed model"
-    Ym = Ym = calc_mean_Y()
+    Ym = calc_mean_Y()
     writedlm(mean_Y_path(expid), Ym, ',')
   end
 
