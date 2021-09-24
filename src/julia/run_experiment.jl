@@ -17,7 +17,7 @@ Random.seed!(seed)
 
 # === TIME ===
 const δ = 0.01                  # noise sampling time
-const Ts = 0.1                  # stepsize
+const Ts = 0.1                  # step-size
 
 const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
 
@@ -83,7 +83,7 @@ solvew(u::Function, w::Function, θ::Float64, N::Int; kwargs...) = solve(
   kwargs...,
 )
 
-# dataset output function
+# data-set output function
 h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 
 # === EXPERIMENT PARAMETERS ===
@@ -178,8 +178,11 @@ function get_outputs(expid)
 
   mk_wm(WS::Array{Float64,2}) = (m::Int) -> interpw(WS, m)
 
-  # a realization of the noise serves as input
-  WS_input = readdlm(joinpath(data_dir, "unconditioned_noise_input_001_500000_1234_alsvin.csv"), ',')
+  # a single realization of the noise serves as input
+  WS_input = readdlm(
+    joinpath(data_dir, "unconditioned_noise_input_001_500000_1234_alsvin.csv"),
+    ',',
+  )
 
   u(t::Float64) = interpw(WS_input, 1)(t)
 
@@ -201,7 +204,13 @@ function get_outputs(expid)
     Y1 = readdlm(data_Y_path(expid, 1), ',')
   else
     @info "Generating output of true system batch 1"
-    WS = readdlm(joinpath(data_dir, "unconditioned_noise_data_500_001_500000_1234_alsvin.csv"), ',')
+    WS = readdlm(
+      joinpath(
+        data_dir,
+        "unconditioned_noise_data_500_001_500000_1234_alsvin.csv",
+      ),
+      ',',
+    )
     Y1 = calc_Y(WS)
     writedlm(data_Y_path(expid, 1), Y1, ',')
   end
@@ -211,7 +220,13 @@ function get_outputs(expid)
     Y2 = readdlm(data_Y_path(expid, 2), ',')
   else
     @info "Generating output of true system batch 2"
-    WS = readdlm(joinpath(data_dir, "unconditioned_noise_data_500_001_500000_1234_alsvin_b.csv"), ',')
+    WS = readdlm(
+      joinpath(
+        data_dir,
+        "unconditioned_noise_data_500_001_500000_1234_alsvin_b.csv",
+      ),
+      ',',
+    )
     Y2 = calc_Y(WS)
     writedlm(data_Y_path(expid, 2), Y2, ',')
   end
@@ -230,7 +245,13 @@ function get_outputs(expid)
 
   # === Finally we generate the output of the proposed model ==
   function calc_mean_Y()
-    WS = readdlm(joinpath(data_dir, "unconditioned_noise_model_500_001_500000_1234_alsvin.csv"), ',')
+    WS = readdlm(
+      joinpath(
+        data_dir,
+        "unconditioned_noise_model_500_001_500000_1234_alsvin.csv",
+      ),
+      ',',
+    )
     @assert (K < size(WS, 1)) "Noise data size mismatch"
     M = size(WS, 2)
     ms = collect(1:M)
@@ -264,7 +285,7 @@ function get_outputs(expid)
 
   write_meta_data(expid)
 
-  Outputs(hcat(Y1, Y2), Yb, Ym, θs, read_meta_data(expid))
+  Outputs(hcat(Y1, Y2), Ym, Yb, θs, read_meta_data(expid))
 end
 
 
@@ -299,7 +320,7 @@ calc_costs(Y::Array{Float64,2}, Yhat::Array{Float64,2}, N_trans::Int, N::Int) =
 
 Calculates the `θhats` that minimizes the costs (see `calc_costs`) given by the
 true outputs `Y`, the estimated outputs `Yhat`, the transient `N_tran`, the
-output legnth `N`, and the parameter grid `θs`. Each column `j` of `Yhat` is
+output length `N`, and the parameter grid `θs`. Each column `j` of `Yhat` is
 assumed to be the output given θs[j].
 """
 function calc_theta_hats(
@@ -314,6 +335,14 @@ function calc_theta_hats(
   θs[argmincost]
 end
 
+"""
+    `thetahat_boxplots(outputs, Ns, N_trans)`
+
+Produces two boxplots, comparing the baseline method to the proposed method from
+`outputs` at the different lengths in `Ns` and with transient `N_trans`. The
+first half of the boxlplots shows the baseline method, labeled bl, and the
+second part shows the proposed method, labeled m.
+"""
 function thetahat_boxplots(outputs::Outputs, Ns::Array{Int,1}, N_trans::Int)
   θhatbs =
     map(N -> calc_theta_hats(outputs.θs, outputs.Y, outputs.Yb, N_trans, N), Ns)

@@ -12,16 +12,17 @@ struct LinearFilter
 end
 
 function gen_unconditioned_noise(
-  A::Array{Float64, 2},
-  B::Array{Float64, 2},
-  C::Array{Float64, 2},
+  A::Array{Float64,2},
+  B::Array{Float64,2},
+  C::Array{Float64,2},
   Ts::Float64,
-  zs::Array{Float64, 2})
+  zs::Array{Float64,2},
+)
 
   let
     nx = size(A, 1)
     N = size(zs, 2)
-    G = [-A (B * B'); zeros(size(A)) A']
+    G = [-A (B*B'); zeros(size(A)) A']
     ws = zeros(N + 1)
     x_prev = zeros(nx, 1)
 
@@ -32,7 +33,7 @@ function gen_unconditioned_noise(
       Σ = Ad * expF[1:nx, nx+1:end]
       Bd = cholesky(Hermitian(Σ)).L
       x = Ad * x_prev + Bd * zs[:, n]
-      ws[n + 1] += first(C * x)
+      ws[n+1] += first(C * x)
       x_prev = x
     end
     ws
@@ -51,29 +52,60 @@ function gen_noise_m(gen_noise, ZS)
   WS
 end
 
-function gen_unconditioned_noise_ZS(filter, ZS, δ)
+"""
+    `gen_unconditioned_noise_ZS(ZS, δ)`
+
+As `gen_unconditioned_noise` but where the white noise is given by `ZS`.
+"""
+function gen_unconditioned_noise_ZS(
+  filter::LinearFilter,
+  ZS::Array{Float64,2},
+  δ::Float64,
+)::Array{Float64,2}
   A, B, C = ss_of_linear_filter(filter())
   nx = size(A, 1)
   WS = gen_noise_m(zs -> gen_unconditioned_noise(A, B, C, δ, zs), ZS)
   WS
 end
 
-function gen_unconditioned_noise(filter, M, δ, K)
+"""
+    `gen_unconditioned_noise(M, δ, K)`
+
+Generates a noise matrix of `M` columns and `K+1` rows, where the noise is white
+noise filtered through the linear filter defined by `filter`, exactly
+discretized with sampling time `δ` and with inital states all set to zero.
+"""
+function gen_unconditioned_noise(
+  filter::LinearFilter,
+  M::Int,
+  δ::Float64,
+  K::Int,
+)::Array{Float64,2}
   A, B, C = ss_of_linear_filter(filter())
   nx = size(A, 1)
-  ZS = [rand(Normal(), nx, K) for m in 1:M]
+  ZS = [rand(Normal(), nx, K) for m = 1:M]
   WS = gen_noise_m(zs -> gen_unconditioned_noise(A, B, C, δ, zs), ZS)
   WS
 end
 
+"""
+    `gen_unconditioned_noise_1(ZS, δ)`
+
+As `gen_unconditioned_noise_ZS` with linear filter `linear_filter_1`.
+"""
 gen_unconditioned_noise_1(ZS, δ) =
   gen_unconditioned_noise_ZS(linear_filter_1, ZS, δ)
 
+"""
+    `gen_unconditioned_noise_1(M, δ, K)`
+
+As `gen_unconditioned_noise` with linear filter `linear_filter_1`
+"""
 gen_unconditioned_noise_1(M, δ, K) =
   gen_unconditioned_noise(linear_filter_1, M, δ, K)
 
 function linear_filter_1()
-  ω = 4;           # natural freq. in rad/s (tunes freq. contents/fluctuations)
+  ω = 4           # natural freq. in rad/s (tunes freq. contents/fluctuations)
   ζ = 0.1          # damping coefficient (tunes damping)
   d1 = 1.0
   d2 = 2 * ω * ζ
@@ -88,32 +120,3 @@ function ss_of_linear_filter(f::LinearFilter)
     s.A, s.B, s.C
   end
 end
-
-# function mk_spectral_mc_noise_model_1(ωmax, dω, M, scale)
-#   f = linear_filter_1()
-#   Gw = tf(f.a, f.b)
-#   mk_spectral_mc_noise_model(Gw, ωmax, dω, M, scale)
-# end
-
-# function exact_noise_interpolation_model_1(N, Ts, M, scale)
-#   let
-#     f = linear_filter_1()
-#     sys = ss(tf(f.a, f.b))
-#     A = sys.A
-#     B = sys.B
-#     C = sys.C
-#     x0 = zeros(size(A, 1))
-#     mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
-#   end
-# end
-
-# function discrete_time_noise_model_1(K, M, scale)
-#   f = linear_filter_1()
-#   sys = ss(tf(f.a, f.b))
-#   A = sys.A
-#   B = sys.B
-#   C = sys.C
-#   x0 = zeros(size(A, 1), )
-#   mk_discrete_unconditioned_noise_model(A, B, C, K, M, scale)
-# end
-
