@@ -1,5 +1,6 @@
 # dae-param-est
 A Parameter Estimation Experiment for DAEs
+For the code used in our paper (TODO: Add link to paper), please see the branch "cdc"
 
 # Prerequisites
 The simulation routine is implemented in
