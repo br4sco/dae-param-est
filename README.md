@@ -30,9 +30,9 @@ noise yourself using the functions defined in
 [src/julia/noise_model.jl](src/julia/noise_model.jl). You should generate and
 save four noise matrices in total.
 
-1. A `K⨉1` noise matrix serving as the input u(t).
-2. Two `K⨉n` noise matrices for the true system. The true system is simulated in batches of two.
-3. A `K⨉M` noise matrix for the proposed method, where `M` is number of noise
+1. A `K✕1` noise matrix serving as the input u(t).
+2. Two `K✕n` noise matrices for the true system. The true system is simulated in batches of two.
+3. A `K✕M` noise matrix for the proposed method, where `M` is number of noise
    realizations the method should average over.
 
 The parameter `K` defines the number of steps of the noise sequence whose length
