@@ -140,7 +140,7 @@ end
 """
   `mk_exp_dir(expid)`
 
-Creates an experiment folder names `expid`
+Creates an experiment folder named `expid`
 """
 function mk_exp_dir(expid)
   joinpath(exp_path(expid), "tmp") |> mkpath
