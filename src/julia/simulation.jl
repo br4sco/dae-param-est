@@ -35,7 +35,7 @@ This model is a transformation of the index-3 formulation of the pendulum
     x' = vx
     y' = vy
     m(vx)' = xλ - k(vx)|vx| + u + w^2
-    m(vy)' = yλ - k(vy)|vy| - g
+    m(vy)' = yλ - k(vy)|vy| - mg
     x^2 + y^2 = L^2,
 
 where ' denotes differentiation w.r.t. the time, |.| denotes the absolute value,
@@ -63,7 +63,7 @@ transformation results in
     x' = vx + μ2x
     y' = vy + μ2y
     m(vx)' = xλ - k(vx)|vx| + u + w^2
-    m(vy)' = yλ - k(vy)|vy| - g
+    m(vy)' = yλ - k(vy)|vy| - mg
     x^2 + y^2 = L^2
     2(vx)x + 2(vy)y = 0.
 
@@ -74,7 +74,7 @@ final stabilized index-1 pendulum model
     x' = vx + (μint)'2x
     y' = vy + (μint)'2y
     m(vx)' = x(λint)' - k(vx)|vx| + u + w^2
-    m(vy)' = y(λint)' - k(vy)|vy| - g
+    m(vy)' = y(λint)' - k(vy)|vy| - mg
     x^2 + y^2 = L^2
     2(vx)x + 2(vy)y = 0.
 
