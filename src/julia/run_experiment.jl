@@ -179,10 +179,7 @@ function get_outputs(expid)
   mk_wm(WS::Array{Float64,2}) = (m::Int) -> interpw(WS, m)
 
   # a single realization of the noise serves as input
-  WS_input = readdlm(
-    joinpath(data_dir, "unconditioned_noise_input_001_500000_1234_alsvin.csv"),
-    ',',
-  )
+  WS_input = readdlm(joinpath(data_dir, "input_001_500000_1234.csv"), ',')
 
   u(t::Float64) = interpw(WS_input, 1)(t)
 
@@ -204,13 +201,7 @@ function get_outputs(expid)
     Y1 = readdlm(data_Y_path(expid, 1), ',')
   else
     @info "Generating output of true system batch 1"
-    WS = readdlm(
-      joinpath(
-        data_dir,
-        "unconditioned_noise_data_500_001_500000_1234_alsvin.csv",
-      ),
-      ',',
-    )
+    WS = readdlm(joinpath(data_dir, "data1_001_500000_1234.csv"), ',')
     Y1 = calc_Y(WS)
     writedlm(data_Y_path(expid, 1), Y1, ',')
   end
@@ -220,13 +211,7 @@ function get_outputs(expid)
     Y2 = readdlm(data_Y_path(expid, 2), ',')
   else
     @info "Generating output of true system batch 2"
-    WS = readdlm(
-      joinpath(
-        data_dir,
-        "unconditioned_noise_data_500_001_500000_1234_alsvin_b.csv",
-      ),
-      ',',
-    )
+    WS = readdlm(joinpath(data_dir, "data2_001_500000_1234.csv"), ',')
     Y2 = calc_Y(WS)
     writedlm(data_Y_path(expid, 2), Y2, ',')
   end
@@ -245,13 +230,7 @@ function get_outputs(expid)
 
   # === Finally we generate the output of the proposed model ==
   function calc_mean_Y()
-    WS = readdlm(
-      joinpath(
-        data_dir,
-        "unconditioned_noise_model_500_001_500000_1234_alsvin.csv",
-      ),
-      ',',
-    )
+    WS = readdlm(joinpath(data_dir, "model_001_500000_1234.csv"), ',')
     @assert (K < size(WS, 1)) "Noise data size mismatch"
     M = size(WS, 2)
     ms = collect(1:M)
