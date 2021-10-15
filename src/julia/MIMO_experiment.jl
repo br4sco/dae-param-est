@@ -2,6 +2,7 @@ using DataFrames
 using Dierckx
 using Distributions
 using LsqFit
+using Dates
 
 # include("noise_model.jl")
 include("simulation.jl")
@@ -19,9 +20,14 @@ Random.seed!(seed)
 # const δ = 0.01                  # noise sampling time
 # Used to easier recall from which experiment temp-files were generated
 const identifier = "260821"
+const data_dir = joinpath("data", "experiments")
 
-# const N = 10000
-const N = 10
+exp_path(id) = joinpath(data_dir, id)
+mk_exp_dir(id) =  id |> exp_path |> mkdir
+
+const N = 10000
+# const N = 10
+# const N = 100
 const Ts = 0.1                  # stepsize
 const T = N*Ts
 # const Ts = 0.5                  # stepsize larger
@@ -32,8 +38,9 @@ const Q = 1000
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-# const Nws = [50000, 100000, 300000, 500000]
-const Nws = [100, 200]
+const Nws = [50000, 100000, 300000, 500000]
+# const Nws = [100, 200]
+# const Nws = [1000, 2000]
 const Nw_max  = maximum(Nws)
 const factors = [Int(Nw_max÷Nw) for Nw in Nws]
 const δs = [T/Nw for Nw in Nws]
@@ -135,21 +142,48 @@ to_data(Z::Array{Float64, 2}) =
 read_Z(f::String) = readdlm(joinpath("data", "experiments", f), ',') |>
   transpose |> copy |> to_data
 
-const Zd = [randn(Nw_max + Nw_extra, nx*n_in) for e = 1:E]
-const Zm = [randn(Nw_max + Nw_extra, nx*n_in) for m = 1:M]
-const Zu = [randn(Nw_max + Nw_extra, nx*n_in)]
-
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
 
-# const XWdp = simulate_noise_process(dmdl, Zd)
-# const XWmp = simulate_noise_process(dmdl, Zm)
-const XWup = simulate_multivar_noise_process(true_mdl, Zu, n_in)
-const XWdp = simulate_multivar_noise_process(true_mdl, Zd, n_in)
-const XWd = mangle_XW(XWdp)
-const XWu = mangle_XW(XWup)
-# const XWm = mangle_XW(XWmp)
+demangle_XW(XW::Array{Float64, 2}) =
+    [XW[(i-1)*nx*n_in+1:i*nx*n_in, m] for i=1:(size(XW,1)÷(nx*n_in)), m=1:size(XW,2)]
 
+load_noise = true
+store_noise = true
+
+# N = 10000 and Nws = [50000, 100000, 300000, 500000] are a good match
+noise_identifier = "2021-09-23T18_32_39.329"  # Large dataset
+
+# N = 100 and Nws = [1000, 2000] are a good match
+# noise_identifier = "2021-09-29T17_29_17.51"     # Medium dataset
+# noise_identifier = "2021-09-30T08_55_45.2"      # Medium dataset 2
+if load_noise
+    p = joinpath(data_dir, "XWd"*noise_identifier*".csv")
+    const XWd = readdlm(p, ',')
+    p = joinpath(data_dir, "XWu"*noise_identifier*".csv")
+    const XWu = readdlm(p, ',')
+
+    const XWdp = demangle_XW(XWd)
+    const XWup = demangle_XW(XWu)
+    println("Successfully loaded disturbances")
+else
+    const Zd = [randn(Nw_max + Nw_extra, nx*n_in) for e = 1:E]
+    const Zu = [randn(Nw_max + Nw_extra, nx*n_in)]
+    const XWup = simulate_multivar_noise_process(true_mdl, Zu, n_in)
+    const XWdp = simulate_multivar_noise_process(true_mdl, Zd, n_in)
+    const XWd = mangle_XW(XWdp)
+    const XWu = mangle_XW(XWup)
+
+    if store_noise
+        date_str = replace(string(now()), ":" => "_")
+        p = joinpath(data_dir, "XWd"*date_str*".csv")
+        writedlm(p, XWd, ",")
+        p = joinpath(data_dir, "XWu"*date_str*".csv")
+        writedlm(p, XWu, ",")
+        println("Successfully stored disturbances")
+    end
+end
+const Zm = [randn(Nw_max + Nw_extra, nx*n_in) for m = 1:M]
 
 # new noise interpolation optimization attempt
 function interpx(xl::AbstractArray{Float64, 1},
@@ -182,21 +216,22 @@ end
 function mk_noise_interp(nx::Int,
                          C::Array{Float64, 2},
                          XW::Array{Float64, 2},
-                         m::Int)
+                         m::Int,
+                         δ::Float64)
 
   let
     n_tot = size(C, 2)
     function w(t::Float64)
-      n = Int(floor(t / δ_min)) + 1
+        n = Int(floor(t / δ)) + 1
+        # row of x_1(t_n) in XW
+        k = (n - 1) * n_tot + 1
 
-      k = (n - 1) * nx + 1
+        # xl = view(XW, k:(k + nx - 1), m)
+        # xu = view(XW, (k + nx):(k + 2nx - 1), m)
 
-      # xl = view(XW, k:(k + nx - 1), m)
-      # xu = view(XW, (k + nx):(k + 2nx - 1), m)
-
-      xl = XW[k:(k + n_tot - 1), m]
-      xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
-      C * interpx(xl, xu, t, δ_min, n)
+        xl = XW[k:(k + n_tot - 1), m]
+        xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+        C * interpx(xl, xu, t, δ, n)
     end
   end
 end
@@ -235,8 +270,8 @@ end
 
 isws = [initialize_isw(Q, W, nx*n_in, true) for e=1:max(E,M)]
 # wmd(e::Int) = mk_newer_noise_interp(a_true, C_true, XWdp, e, isws)
-wmd(e::Int) = mk_noise_interp(length(a_true), C_true, XWd, e)
-u(t::Float64) = mk_noise_interp(length(a_true), C_true[1:n_u,:]./w_scale[1:n_u], XWu, 1)(t) # ./w_scale removes dependence on w_scale
+wmd(e::Int) = mk_noise_interp(length(a_true), C_true, XWd, e, δ_min)
+u(t::Float64) = mk_noise_interp(length(a_true), C_true[1:n_u,:]./w_scale[1:n_u], XWu, 1, δ_min)(t) # ./w_scale removes dependence on w_scale
 
 # interpolation over w(tk)
 # wmd(e::Int) = interpw(WSd, e)
@@ -298,11 +333,6 @@ h_data(sol) = apply_outputfun(x -> f(x) + σ * rand(Normal()), sol)
 # =======================
 # === DATA GENERATION ===
 # =======================
-
-const data_dir = joinpath("data", "experiments")
-
-exp_path(id) = joinpath(data_dir, id)
-mk_exp_dir(id) =  id |> exp_path |> mkdir
 
 calc_y(e::Int) = solvew(t -> wmd(e)(t), θ0, N) |> h_data
 
@@ -368,15 +398,15 @@ function model_parametrized(δ, Zm, dummy_input, pars)
 
     # TODO: Surely we don't need to collect these, a range should work just as well?
     ms = collect(1:M)
-    reset_isws!(isws)
     A, B, C, x0 = get_ct_noise_matrices(η, nx, n_out)
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
-    # NOTE: OPTION 1: Use the rows below here for linear interpolation
-    XWm = simulate_multivar_noise_process_mangled(dmdl, Zm, n_in)
-    wmm(m::Int) = mk_noise_interp(nx, C, XWm, m)
-    # # NOTE: OPTION 2: Use the rows below here for exact interpolation
-    # XWmp = simulate_multivar_noise_process(dmdl, Zm, n_in)
-    # wmm(m::Int) = mk_newer_noise_interp_m(view(η, 1:nx), C, XWmp, m, δ, isws)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    # XWm = simulate_multivar_noise_process_mangled(dmdl, Zm, n_in)
+    # wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
+    # NOTE: OPTION 2: Use the rows below here for exact interpolation
+    reset_isws!(isws)
+    XWmp = simulate_multivar_noise_process(dmdl, Zm, n_in)
+    wmm(m::Int) = mk_newer_noise_interp_m(view(η, 1:nx), C, XWmp, m, δ, isws)
 
     calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
         solvew(t -> wmm(m)(t), θ, N) |> h
@@ -391,12 +421,15 @@ function perform_experiments(Y, pars0)
     for k = 1:length(Nws)
         Zm_k = [Zm[j][1:factors[k]:end, :] for j=1:M]
         for e = 1:E
-            fit_result, trace = get_fit(Y[:,e], pars0,
-                (dummy_input, p) -> model_parametrized(δs[k], Zm_k, dummy_input, p), e)
-            # fit_result, trace = get_fit_debug()       # DEBUG
-            opt_pars[k][:,e] = coef(fit_result)
-            writedlm(joinpath(data_dir, "tmp", "theta_opt_$(k)_$(e)_$(identifier).csv"), coef(fit_result), ',')
-            println("Stored temporary data for k=$k and e=$e at $(joinpath(data_dir, "tmp", "theta_opt_$(k)_$(e)_$(identifier).csv"))")
+            # DEBUG: The if-statement is for continuing on previously ran experiment
+            # if !(k == 1 && e <= 23)
+                fit_result, trace = get_fit(Y[:,e], pars0,
+                    (dummy_input, p) -> model_parametrized(δs[k], Zm_k, dummy_input, p), e)
+                # fit_result, trace = get_fit_debug()       # DEBUG
+                opt_pars[k][:,e] = coef(fit_result)
+                writedlm(joinpath(data_dir, "tmp", "theta_opt_$(k)_$(e)_$(identifier).csv"), coef(fit_result), ',')
+                println("Stored temporary data for k=$k and e=$e at $(joinpath(data_dir, "tmp", "theta_opt_$(k)_$(e)_$(identifier).csv"))")
+            # end
         end
     end
     write_opt_pars(opt_pars, "multipar")

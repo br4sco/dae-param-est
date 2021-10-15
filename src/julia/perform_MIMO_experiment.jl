@@ -12,6 +12,7 @@ n_u: $n_u
 T: $T
 δ: $δ_min
 Nw: $Nw_max
+N: $N
 Ts: $Ts
 W: $W
 Q: $Q"
@@ -24,16 +25,22 @@ Q: $Q"
 end
 
 load_Y = true
-Y_filename = "Y2021-08-27T20_23_31.851.csv"
+Y_filename = "Y2021-09-16T18_27_51.584.csv"         # Large dataset
+# Y_filename = "Y2021-09-29T17_32_17.022.csv"         # Medium dataset
+# Y_filename = "Y2021-09-30T08_59_05.213.csv"         # Medium dataset 2
+# Y_filename = "Y2021-09-21T12_19_14.526.csv"       # Small dataset
 
 try
     if load_Y
-        p = joinpath(data_dir, Y_filename)
+        local p = joinpath(data_dir, Y_filename)
+        println("Loading Y...")
         Y = readdlm(p, ',')
         if size(Y,1) != N+1
             throw(DimensionMismatch("N is set to $N, but length of loaded data Y was $(size(Y,1)) (should be $(N+1))"))
         end
+        println("Successfully loaded Y")
     else
+        println("Generating Y...")
         Y = calc_Y()
         try
             write_Y_and_metadata(Y)
@@ -45,9 +52,10 @@ try
     perform_experiments(Y, vcat(θ0, w_scale))
     println("Finished performing experiments")
 catch e
-    print(sprint(showerror, e, catch_backtrace()))
-    p = joinpath(data_dir, "error_msg.txt")
+    # print(sprint(showerror, e, catch_backtrace()))
+    local p = joinpath(data_dir, "error_msg.txt")
     file = open(p, "w")
     write(file, sprint(showerror, e, catch_backtrace()))
     close(file)
+    throw(e)
 end
