@@ -53,6 +53,40 @@ B = reshape([0.5; 0.0], (2,1))
 C = [0 1]
 nx = size(A)[1]
 
+# NOTE: z_all_inter is not used by any code anymore, this function can equally
+# well be replaced by [ randn(N+1, nx) for m=1:M]
+function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64)
+    # N: Number of samples of uniformly sampled noise process after time 0
+    # M: Number of different realizations of the noise process
+    # P: Number of inter-sample noise samples stored
+    # nx: Dimension of each noise sample
+
+    # z_all_uniform[m][i,j] is the j:th element of the i:th sample of
+    # realization m
+    # N+1 since times including 0 and N are included, to match convention
+    # used by ControlSystems.jl lsim()-function
+    z_all_uniform = [ randn(N+1, nx) for m=1:M]
+    # z_all_inter[m][i][p,j] is the j:th element of the p:th sample in
+    # interval i of realization m
+    # DEBUG: Generates z_all_inter in this way so that it can easily be compared
+    # with newest noise interpolation method. Can't simply transpose randn()
+    # since then its datatype stops being Array{Float64, 2}, and the code isn't
+    # written generally enough to be able to handle that
+    z_all_inter_skew = [ [ randn(nx, P) for i=1:N] for m=1:M]
+    z_all_inter = [ [ fill(NaN, P, nx) for i=1:N] for m=1:M]
+    for m=1:M
+        for i=1:N
+            for p=1:P
+                for j=1:nx
+                    z_all_inter[m][i][p,j] = z_all_inter_skew[m][i][j,p]
+                end
+            end
+        end
+    end
+
+    return z_all_uniform, z_all_inter
+end
+
 # ----------------- DATA GENERATION ----------------
 noise_model = discretize_ct_noise_model(A, B, C, δ, zeros(nx,))
 # M+1 to generate one realization for true system as well

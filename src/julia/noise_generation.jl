@@ -1,4 +1,4 @@
-using Statistics, CSV, DataFrames, ControlSystems
+using Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra
 
 struct CT_SS_Model
     # Continuous-time state-space model on the form
@@ -21,6 +21,7 @@ struct DT_SS_Model
     Cd::Array{Float64, 2}
     x0::Array{Float64, 1}
     Ts::Float64                     # Sampling period of the system
+    # In MIMO case, we have
 end
 
 # This struct is deprecated, use DT_SS_Model instead
@@ -49,41 +50,21 @@ function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
     return DT_SS_Model(AdTs, BdTs, C, x0, Ts)
 end
 
-# NOTE: z_all_inter is not used by any code anymore, this function can equally
-# well be replaced by [ randn(N+1, nx) for m=1:M]
-function generate_noise(N::Int64, M::Int64, P::Int64, nx::Int64)
-    # N: Number of samples of uniformly sampled noise process after time 0
-    # M: Number of different realizations of the noise process
-    # P: Number of inter-sample noise samples stored
-    # nx: Dimension of each noise sample
-
-    # z_all_uniform[m][i,j] is the j:th element of the i:th sample of
-    # realization m
-    # N+1 since times including 0 and N are included, to match convention
-    # used by ControlSystems.jl lsim()-function
-    z_all_uniform = [ randn(N+1, nx) for m=1:M]
-    # z_all_inter[m][i][p,j] is the j:th element of the p:th sample in
-    # interval i of realization m
-    # DEBUG: Generates z_all_inter in this way so that it can easily be compared
-    # with newest noise interpolation method. Can't simply transpose randn()
-    # since then its datatype stops being Array{Float64, 2}, and the code isn't
-    # written generally enough to be able to handle that
-    z_all_inter_skew = [ [ randn(nx, P) for i=1:N] for m=1:M]
-    z_all_inter = [ [ fill(NaN, P, nx) for i=1:N] for m=1:M]
-    for m=1:M
-        for i=1:N
-            for p=1:P
-                for j=1:nx
-                    z_all_inter[m][i][p,j] = z_all_inter_skew[m][i][j,p]
-                end
-            end
-        end
-    end
-
-    return z_all_uniform, z_all_inter
+function discretize_ct_noise_model(mdl::CT_SS_Model, Ts::Float64)::DT_SS_Model
+    nx = size(mdl.A,1)
+    Mexp    = [-mdl.A mdl.B*(mdl.B'); zeros(size(mdl.A)) mdl.A']
+    MTs     = exp(Mexp*Ts)
+    AdTs    = MTs[nx+1:end, nx+1:end]'
+    Bd2Ts   = Hermitian(AdTs*MTs[1:nx, nx+1:end])
+    CholTs  = cholesky(Bd2Ts)
+    BdTs    = CholTs.L
+    return DT_SS_Model(AdTs, BdTs, mdl.C, mdl.x0, Ts)
 end
 
-function simulate_noise_process(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1})
+function simulate_noise_process(
+    mdl::DT_SS_Model,
+    data::Array{Array{Float64,2}, 1}
+)
     # data[m][i, j] should be the j:th component of the noise at time i of
     # realization m
     M = size(data)[1]
@@ -105,12 +86,16 @@ function simulate_noise_process(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 
     return x_process
 end
 
-function simulate_multivar_noise_process(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1}, n_in::Int)
+function simulate_multivar_noise_process(
+    mdl::DT_SS_Model,
+    data::Array{Array{Float64,2}, 1}
+)
     # data[m][i, k*nx + j] should be the j:th component of the noise
     # corresponding to input k at time i of realization m
     M = length(data)
-    N = size(data[1])[1]-1
-    nx = size(mdl.Ad)[1]
+    N = size(data[1], 1)-1
+    nx = size(mdl.Ad, 1)
+    n_in = size(mdl.Cd, 2)÷nx
     # We only care about the state, not the output, so we ignore the C-matrix
     C_placeholder = zeros(1, nx)
 
@@ -133,12 +118,16 @@ function simulate_multivar_noise_process(mdl::DT_SS_Model, data::Array{Array{Flo
     return x_process
 end
 
-function simulate_multivar_noise_process_mangled(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1}, n_in::Int)
+function simulate_multivar_noise_process_mangled(
+    mdl::DT_SS_Model,
+    data::Array{Array{Float64,2}, 1},
+)
     # data[m][i, k*nx + j] should be the j:th component of the noise
     # corresponding to input k at time i of realization m
     M = length(data)
     N = size(data[1])[1]-1
     nx = size(mdl.Ad)[1]
+    n_in = size(mdl.Cd, 2)÷nx
     # We only care about the state, not the output, so we ignore the C-matrix
     C_placeholder = zeros(1, nx)
 
@@ -156,29 +145,136 @@ function simulate_multivar_noise_process_mangled(mdl::DT_SS_Model, data::Array{A
         end
     end
 
-    # x_process[i,m][j] is the j:th element of the noise model state at sample
-    # i of realization m. Sample 1 corresponds to time 0
+    # x_process[(i-1)*nx*n_in + j, m] is the j:th element of the noise model at
+    # sample i of realization m. Sample 1 corresponds to time 0
     return x_process
 end
 
-# function simulate_nonuniform_noise(mdl::CT_SS_Model, z::Array{Array{Float64,1},1}, times::Array{Float64,1})
-#     noise = [fill(NaN, size(mdl.x0))]
-#     x = mdl.x0
-#     noise[1] = x
-#     t_prev = times[1]
-#     for (i, t) = enumerate(times[2:end])
-#         Δt = t - t_prev
-#         t_prev = t
-#         d_mdl = discretize_ct_noise_model(mdl.A, mdl.B, mdl.C, Δt, x)
-#         x = d_mdl.Ad*x + d_mdl.Bd*z[i]
-#         noise[i+1] = x
-#     end
-#     return noise
-# end
+# Converts parameter values for C-matrix as entered into a single vector more
+# suitable to be used in the code
+function get_c_parameter_vector(c_vals, w_scale, nx::Int, n_out::Int, n_in::Int)
+    c_vec = zeros(nx*n_out*n_in)
+    for i = 1:n_out
+        for j = 1:n_in
+            for k = 1:nx
+                # Multiplying with w_scale[i] here is equivalent to scaling ith
+                # component of the disturbance output (w) with factor w_scale[i]
+                c_vec[(j-1)*n_out*nx + (k-1)*n_out + i] = w_scale[i]*c_vals[i,j][k]
+            end
+        end
+    end
+    return c_vec
+end
+
+function get_ct_disturbance_model(η::Array{Float64,1}, nx::Int, n_out::Int)
+    # First nx parameters of η are parameters for A-matrix, the remaining
+    # parameters are for the C-matrix
+    A = diagm(-1 => ones(nx-1,))
+    A[1,:] = -η[1:nx]
+    B = zeros(nx,1)
+    B[1] = 1.0
+    C = reshape(η[nx+1:end], n_out, :)
+    x0 = zeros(nx)
+    return CT_SS_Model(A, B, C, x0)
+end
+
+function store_disturbance_data(gen::Function, Ts::Float64, path, data_name, metadata_name)
+    data, metadata = gen(Ts)
+    p = joinpath(path, data_name)
+    if !isfile(p)
+        # data expected to be of type Array{Float64, 2}
+        writedlm(p, data, ',')
+    else
+        @warn "Failed storing data, file $(joinpath(path, data_name)) already exists"
+    end
+
+    p = joinpath(path, metadata_name)
+    if !isfile(p)
+        # metadata expected to be of type DataFrame
+        CSV.write(p, metadata)
+    else
+        @warn "Failed storing metadata, file $(joinpath(path, metadata_name)) already exists"
+    end
+end
+
+# Used for disturbance
+function disturbance_model_1(Ts::Float64)
+    nx = 2        # model order
+    n_out = 2     # number of outputs
+    n_in = 2      # number of inputs
+    w_scale = 0.6*ones(n_out)             # noise scale
+    # Denominator of every transfer function is given by p(s), where
+    # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
+    a_vec = [0.8, 4^2]
+    # Transfer function (i,j) has numerator c_[i,j][1]s^{nx-1} + ... + c_[i,j][nx]
+    c_ = [zeros(nx) for i=1:n_out, j=1:n_in]
+    c_[1,1][nx] = 1 # c_[1,1][:] = vcat(zeros(nx-1), [1])
+    c_[2,2][nx] = 1 # c_[2,2][:] = vcat(zeros(nx-1), [1])
+    c_vec = get_c_parameter_vector(c_, w_scale, nx, n_out, n_in)
+    η0 = vcat(a_vec, c_vec)
+    dη = length(η0)
+    mdl =
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
+    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0)
+end
+
+# Used for input
+function disturbance_model_2(Ts::Float64)
+    nx = 2        # model order
+    n_out = 1     # number of outputs
+    n_in = 2      # number of inputs
+    w_scale = 0.2*ones(n_out)             # noise scale
+    # Denominator of every transfer function is given by p(s), where
+    # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
+    a_vec = [0.8, 4^2]
+    c_vec = zeros(n_out*nx*n_in)
+    # The first state will act as output of the filter
+    c_vec[1] = 1
+    η0 = vcat(a_vec, c_vec)
+    dη = length(η0)
+    mdl =
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
+    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0)
+end
+
+function gen_filtered_noise_multivar(gen::Function, Ts::Float64, M::Int, Nw::Int)
+    mdl, metadata = gen(M, Ts, Nw)
+    n_tot = size(mdl.Cd,2)
+
+    ZS = [randn(Nw, n_tot) for m = 1:M]
+    XW = simulate_multivar_noise_process_mangled(mdl, ZS)
+    XW, get_system_output_mangled(mdl, XW), metadata
+end
+
+# Used for disturbance
+function gen_filtered_noise_multivar_1(M::Int, Ts::Float64, Nw::Int)
+    mdl, metadata = disturbance_model_1(Ts)
+end
+
+# Used for input
+function gen_filtered_noise_multivar_2(M::Int, Ts::Float64, Nw::Int)
+    mdl, metadata = disturbance_model_2(Ts)
+end
+
+function get_system_output_mangled(mdl::DT_SS_Model, states::Array{Float64, 2})
+    M = size(states, 2)
+    (n_out, n_tot) = size(mdl.Cd)
+    N = size(states, 1)÷n_tot
+    output = zeros(N*n_out, M)
+    for m=1:M
+        for t=1:N
+            output[(t-1)*n_out+1:t*n_out, m] = mdl.Cd*states[(t-1)*n_tot+1:t*n_tot, m]
+        end
+    end
+    return output
+end
 
 # DEBUG For checking if the simulated noise process seems to have the expected
 # statistical properties
-function test_generated_data(mdl::DT_SS_Model, x_process::Array{Array{Float64, 2}})
+function test_generated_data(
+    mdl::DT_SS_Model,
+    x_process::Array{Array{Float64, 2}}
+)
     (N, M) = size(x_process)
     nx = size(x_process[1,1])[1]
     Ad = mdl.Ad

@@ -141,25 +141,6 @@ gen_unconditioned_noise_1(ZS, δ) =
 gen_unconditioned_noise_1(M, δ, K) =
   gen_unconditioned_noise(linear_filter_1, M, δ, K)
 
-# NOTE: This function was written for the outdated version of noise interpolation
-# function mk_exact_noise_interpolation_model(A, B, C, N, x0, Ts, M, scale)
-#   let
-#     nx = size(A, 1)
-#     P = 2
-#     noise_model = discretize_ct_model(A, B, C, Ts, x0)
-#
-#     data_uniform, irrelevant_var = generate_noise(N, M, P, nx, false)
-#     # Computes all M realizations of filtered white noise
-#     x_mat = simulate_noise_process(noise_model, data_uniform)
-#
-#     function mk_w(m::Int)
-#       function w(t::Float64)::Float64
-#         scale * first(C*x_inter(t, Ts, A, B, x_mat[:, m], noise_model.x0))
-#       end
-#     end
-#   end
-# end
-
 function linear_filter_1()
   ω = 4;           # natural freq. in rad/s (tunes freq. contents/fluctuations)
   ζ = 0.1          # damping coefficient (tunes damping)

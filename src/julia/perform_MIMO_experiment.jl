@@ -25,10 +25,10 @@ Q: $Q"
 end
 
 load_Y = true
-Y_filename = "Y2021-09-16T18_27_51.584.csv"         # Large dataset
+# Y_filename = "Y2021-09-16T18_27_51.584.csv"         # Large dataset
 # Y_filename = "Y2021-09-29T17_32_17.022.csv"         # Medium dataset
 # Y_filename = "Y2021-09-30T08_59_05.213.csv"         # Medium dataset 2
-# Y_filename = "Y2021-09-21T12_19_14.526.csv"       # Small dataset
+Y_filename = "Y2021-09-29T17_27_35.631.csv"       # Small dataset
 
 try
     if load_Y

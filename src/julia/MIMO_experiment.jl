@@ -25,28 +25,28 @@ const data_dir = joinpath("data", "experiments")
 exp_path(id) = joinpath(data_dir, id)
 mk_exp_dir(id) =  id |> exp_path |> mkdir
 
-const N = 10000
-# const N = 10
+# const N = 10000
+const N = 10
 # const N = 100
 const Ts = 0.1                  # stepsize
 const T = N*Ts
 # const Ts = 0.5                  # stepsize larger
 
 # === NOISE ===
-const Q = 1000
+const Q = 1000          # Maximal number of new samples stored for each interval
 # NOTE: Currently the array of isw:s is of length E. If E < M, then one needs to
 # create a separate array of isw:s when running M simulations
 const M = 500
 const E = 500
-const Nws = [50000, 100000, 300000, 500000]
-# const Nws = [100, 200]
+# const Nws = [50000, 100000, 300000, 500000]
+const Nws = [100, 200]
 # const Nws = [1000, 2000]
 const Nw_max  = maximum(Nws)
 const factors = [Int(Nw_max÷Nw) for Nw in Nws]
 const δs = [T/Nw for Nw in Nws]
 const δ_min = T/Nw_max
-const W  = 100
-const Nw_extra = 100   # Number of extra samples of noise trajectory to generate
+const W  = 100          # Number of intervals for which isw stores data
+const Nw_extra = 100    # Number of extra samples of noise trajectory to generate
 
 # === PR-GENERATED ===
 # const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
@@ -88,14 +88,13 @@ end
 # === NOISE INTERPOLATION ===
 # Noise scale is incorporated into returned C-matrix
 function get_ct_noise_matrices(η::Array{Float64,1}, nx::Int, n_out::Int)
-    # First nx parameters of η are parameters for A-matrix. Next comes the noise
-    # scale, and finally parameters for C-matrix
+    # First nx parameters of η are parameters for A-matrix, the remaining
+    # parameters are for the C-matrix
     A = diagm(-1 => ones(nx-1,))
     A[1,:] = -η[1:nx]
     B = zeros(nx,1)
     B[1] = 1.0
-    # η[nx+1] is the noise scale, we simply multiply it by the C-matrix
-    C = diagm(η[nx+1:nx+n_out])*reshape(η[nx+n_out+1:end], n_out, :)
+    C = reshape(η[nx+1:end], n_out, :)
     x0 = zeros(nx)
     return A, B, C, x0
 end
@@ -109,38 +108,28 @@ const w_scale = 0.6*ones(n_out)             # noise scale
 # Denominator of every transfer function is given by p(s), where
 # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
 a_true = [0.8, 4^2]
-c_true_ = [zeros(nx) for i=1:n_out, j=1:n_in]
 # Transfer function (i,j) has numerator c_true_[i,j][1]s^{nx-1} + ... + c_true_[i,j][nx]
-c_true_[1,1][:] = vcat(zeros(nx-1), [1])
-c_true_[2,2][:] = vcat(zeros(nx-1), [1])
-# c_true_ = [zeros(n_out, n_in) for k=1:nx]
-# # Numberator of transfter function corresponding to output i and input j is
-# # given by b_ij(s) = c[1][i,j]*s^(n-1) + ... + c[n-1][i,j]*s + c[n][i,j]
-# c_true_[1] = zeros(n_out,n_in)  # Coefficients of s^(n-1)
-# c_true_[2] = diagm(ones(n_out))#ones(n_out,n_in)  # Coefficients of s^(n-2)
-#
+c_true_ = [zeros(nx) for i=1:n_out, j=1:n_in]
+c_true_[1,1][nx] = 1 # c_true_[1,1][:] = vcat(zeros(nx-1), [1])
+c_true_[2,2][nx] = 1 # c_true_[2,2][:] = vcat(zeros(nx-1), [1])
 # c_true contains the same information as c_true_, but in a more suitable structure
 c_true = zeros(nx*n_out*n_in)
 for i = 1:n_out
     for j = 1:n_in
         for k = 1:nx
-            c_true[(j-1)*n_out*nx + (k-1)*n_out + i] = c_true_[i,j][k]
+            # Multiplying with w_scale[i] here is equivalent to scaling ith
+            # component of the disturbance output (w) with factor w_scale[i]
+            c_true[(j-1)*n_out*nx + (k-1)*n_out + i] = w_scale[i]*c_true_[i,j][k]
         end
     end
 end
 
 # System on controllable canonical form. Note that this is different from
 # observable canonical form
-const η0 = vcat(a_true, w_scale, c_true)                 # true value of η, should be a 1D-array
+const η0 = vcat(a_true, c_true)                 # true value of η, should be a 1D-array
 const dη = length(η0)
 const A_true, B_true, C_true, x0_true = get_ct_noise_matrices(η0, nx, n_out)
 const true_mdl = discretize_ct_noise_model(A_true, B_true, C_true, δ_min, x0_true)
-
-to_data(Z::Array{Float64, 2}) =
-  [Z[:, m:(m + nx - 1)] for m = 1:nx:(size(Z, 2) / nx)]
-
-read_Z(f::String) = readdlm(joinpath("data", "experiments", f), ',') |>
-  transpose |> copy |> to_data
 
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
@@ -148,7 +137,7 @@ mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
 demangle_XW(XW::Array{Float64, 2}) =
     [XW[(i-1)*nx*n_in+1:i*nx*n_in, m] for i=1:(size(XW,1)÷(nx*n_in)), m=1:size(XW,2)]
 
-load_noise = true
+load_noise = false
 store_noise = true
 
 # N = 10000 and Nws = [50000, 100000, 300000, 500000] are a good match
@@ -169,8 +158,8 @@ if load_noise
 else
     const Zd = [randn(Nw_max + Nw_extra, nx*n_in) for e = 1:E]
     const Zu = [randn(Nw_max + Nw_extra, nx*n_in)]
-    const XWup = simulate_multivar_noise_process(true_mdl, Zu, n_in)
-    const XWdp = simulate_multivar_noise_process(true_mdl, Zd, n_in)
+    const XWup = simulate_multivar_noise_process(true_mdl, Zu)
+    const XWdp = simulate_multivar_noise_process(true_mdl, Zd)
     const XWd = mangle_XW(XWdp)
     const XWu = mangle_XW(XWup)
 
@@ -245,22 +234,7 @@ function mk_newer_noise_interp(a_vec::AbstractArray{Float64, 1},
 
    let
        function w(t::Float64)
-           xw_temp = noise_inter(t, δ, a_vec, view(XWp, :, m), isws[m])
-           return C*xw_temp
-       end
-   end
-end
-
-function mk_newer_noise_interp_m(a_vec::AbstractArray{Float64, 1},
-                                 C::Array{Float64, 2},
-                                 XWm::Array{Array{Float64, 1}, 2},
-                                 m::Int,
-                                 δ::Float64,
-                                 isws::Array{InterSampleWindow, 1})
-
-   let
-       function w(t::Float64)
-           xw_temp = noise_inter(t, δ, a_vec, view(XWm, :, m), isws[m])
+           xw_temp = noise_inter(t, δ, a_vec, n_in, view(XWp, :, m), isws[m])
            return C*xw_temp
        end
    end
@@ -401,12 +375,12 @@ function model_parametrized(δ, Zm, dummy_input, pars)
     A, B, C, x0 = get_ct_noise_matrices(η, nx, n_out)
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-    # XWm = simulate_multivar_noise_process_mangled(dmdl, Zm, n_in)
+    # XWm = simulate_multivar_noise_process_mangled(dmdl, Zm)
     # wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
     reset_isws!(isws)
-    XWmp = simulate_multivar_noise_process(dmdl, Zm, n_in)
-    wmm(m::Int) = mk_newer_noise_interp_m(view(η, 1:nx), C, XWmp, m, δ, isws)
+    XWmp = simulate_multivar_noise_process(dmdl, Zm)
+    wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWmp, m, δ, isws)
 
     calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
         solvew(t -> wmm(m)(t), θ, N) |> h
@@ -474,7 +448,7 @@ end
 #     A, B, C, x0 = get_ct_noise_matrices(collect(η))
 #     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
 #     XWmp = simulate_noise_process(dmdl, Zm)
-#     wmm(m::Int) = mk_newer_noise_interp_m(A, B, C, XWmp, m, isws)
+#     wmm(m::Int) = mk_newer_noise_interp(A, B, C, XWmp, m, isws)
 #     calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
 #         solvew(t -> w_scale * wmm(m)(t), θ, N) |> h
 #     calc_mean_y(θ::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, θ, m)

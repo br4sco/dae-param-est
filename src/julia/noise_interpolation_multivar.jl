@@ -175,6 +175,7 @@ end
 function noise_inter(t::Float64,
                      Ts::Float64,       # Sampling time of noise process
                      a_vec::AbstractArray{Float64, 1},
+                     n_in::Int,
                      x::AbstractArray,  # TODO: SHOULD RLY BE 1D ARRAY OF 1D ARRAYS!
                      isw::InterSampleWindow,
                      # num_sampled_per_interval::AbstractArray,
