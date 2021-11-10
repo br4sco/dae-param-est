@@ -129,11 +129,11 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # metadata_input_path(expid) = joinpath(exp_path(expid), "U_meta.csv")
 
 # === MODEL REALIZATION AND SIMULATION ===
-const θ0 = [k]                    # true value of θ
-const dθ = length(θ0)
-get_all_dynamic_parameters(θ::Array{Float64,1}) = [m, L, g, θ[1]]
+const θ_true = [k]                    # true value of θ
+const dθ = length(θ_true)
+get_all_θs(θ::Array{Float64,1}) = [m, L, g, θ[1]]
 realize_model(u::Function, w::Function, θ::Array{Float64, 1}, N::Int) = problem(
-  pendulum_multivar(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_dynamic_parameters(θ)),
+  pendulum_multivar(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(θ)),
   N,
   Ts,
 )
@@ -157,13 +157,7 @@ h_data(sol) = apply_outputfun(x -> f(x) + σ * randn(), sol)
 
 function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
 
-    # A single realization of the disturbance serves as input
-    # input is assumed to contain the input signal, and not the state
-    input  = readdlm(joinpath(data_dir, "small_multivar/U.csv"), ',')
-    XW     = readdlm(joinpath(data_dir, "small_multivar/XW.csv"), ',')
-    W_meta_raw, W_meta_names =
-        readdlm(joinpath(data_dir, "small_multivar/W_meta.csv"), ',', header=true)
-    W_meta = DataFrame(W_meta_raw, Symbol.(W_meta_names[:]))
+    Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid, pars0)
     nx = Int(W_meta.nx[1])
     n_in = Int(W_meta.n_in[1])
     n_out = Int(W_meta.n_out[1])
@@ -173,45 +167,8 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     dη = length(η_true)
     a_vec = η_true[1:nx]
     C = reshape(η_true[nx+1:end], (n_out, n_tot))
-    # # Use this function to specify which parameters should be free and optimized over
-    # get_all_parameters(θ::Array{Float64,1}) = vcat(θ, η0) # Only θ is optimized over
-    # get_all_parameters(p::Array{Float64,1}) = p           # All parameters are optimized over
-    # Optimizes only over pendulum parameters
-    get_all_parameters(p::Array{Float64,1}) = vcat(get_all_dynamic_parameters(p), η_true)
 
-    mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
-        (m::Int) -> mk_newer_noise_interp(
-        a_vec::AbstractArray{Float64, 1}, C, XW, m, n_in, δ, isws)
-    u(t::Float64) = interpw(input, 1, 1)(t)
-
-    # compute the maximum number of steps we can take
-    N_margin = 2    # Solver can request values of inputs after the time horizon
-                    # ends, so we require a margin of a few samples of the noise
-                    # to ensure that we can provide such values
-    # Minimum of number of available disturbance or input samples
-    Nw = min(size(XW, 1)÷n_tot, size(input, 1)÷n_in)
-    N = Int((Nw - N_margin)*δ÷Ts)     # Number of steps we can take
-
-    # === We first generate the output of the true system ===
-    function calc_Y(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1})
-        @assert (Nw < size(XW, 1)) "Disturbance data size mismatch"
-        E = size(XW, 2)
-        es = collect(1:E)
-        we = mk_we(XW, isws)
-        solve_in_parallel(e -> solvew(u, we(e), θ0, N) |> h_data, es)
-    end
-
-    if isfile(data_Y_path(expid))
-        @info "Reading output of true system"
-
-        Y = readdlm(data_Y_path(expid), ',')
-        isws = [initialize_isw(Q, W, n_tot, true) for e=1:M]
-    else
-        @info "Generating output of true system"
-        isws = [initialize_isw(Q, W, n_tot, true) for e=1:max(size(XW,2), M)]
-        Y = calc_Y(demangle_XW(XW, n_tot), isws)
-        writedlm(data_Y_path(expid), Y, ',')
-    end
+    get_all_parameters(p::Array{Float64, 1}) = vcat(get_all_θs(p[1:1]), get_all_ηs(p[2:2]))
 
     # === We then optimize parameters for the baseline model ===
     function baseline_model_parametrized(δ, dummy_input, pars)
@@ -221,21 +178,23 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         p = get_all_parameters(pars)
         θ = p[1:dθ]
 
-        calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
-            solvew(u, t -> zeros(n_out), θ, N) |> h
-        calc_mean_y(θ::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, θ, m)
-        Ym = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
+        Y_base = solvew(u, t -> zeros(n_out), θ, N ) |> h
+
         # TODO: Currently assumes scalar output from DAE-system
-        return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :)
+        return reshape(Y_base[N_trans+1:end,:], :)   # Returns 1D-array
     end
 
     E = size(Y, 2)
+    # # #DEBUG
+    # E = 1
     opt_pars_baseline = zeros(length(pars0), E)
     for e=1:E
         baseline_result, baseline_trace = get_fit(Y[:,e], pars0,
             (dummy_input, p) -> baseline_model_parametrized(δ, dummy_input, p), e)
         opt_pars_baseline[:, e] = coef(baseline_result)
     end
+
+    @info "The mean optimal parameters for baseline are given by: $(mean(opt_pars_baseline, dims=2))"
 
     # === Finally we optimize parameters for the proposed model ==
     function proposed_model_parametrized(δ, Zm, dummy_input, pars, isws)
@@ -259,7 +218,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
             solvew(u, t -> wmm(m)(t), θ, N) |> h
         calc_mean_y(θ::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, θ, m)
         Ym = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
-        return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :)
+        return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
     end
 
     # TODO: Should we consider storing and loading white noise, to improve repeatability
@@ -273,5 +232,117 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         opt_pars_proposed[:, e] = coef(proposed_result)
     end
 
+    @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
+
     return (opt_pars_baseline, opt_pars_proposed)
+end
+
+function get_outputs(expid, pars0::Array{Float64,1})
+
+    Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid, pars0)
+    nx = Int(W_meta.nx[1])
+    n_in = Int(W_meta.n_in[1])
+    n_out = Int(W_meta.n_out[1])
+    n_tot = nx*n_in
+    # Parameters of true system
+    η_true = W_meta.η
+    dη = length(η_true)
+    a_vec = η_true[1:nx]
+    C = reshape(η_true[nx+1:end], (n_out, n_tot))
+
+    # === Computes output of the baseline model ===
+    Y_base = solvew(u, t -> zeros(n_out), θ_true, N) |> h
+
+    # === Computes outputs of the proposed model ===
+    # TODO: Should we consider storing and loading white noise, to improve repeatability
+    # of the results? Currently repeatability is based on fixed random seed
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+    dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η_true, nx, n_out), δ)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    # XWm = simulate_multivar_noise_process_mangled(dmdl, Zm)
+    # wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
+    # NOTE: OPTION 2: Use the rows below here for exact interpolation
+    reset_isws!(isws)
+    XWm = simulate_multivar_noise_process(dmdl, Zm)
+    wmm(m::Int) = mk_newer_noise_interp(view(η_true, 1:nx), C, XWm, m, n_in, δ, isws)
+
+    calc_mean_y_N_prop(N::Int, θ::Array{Float64, 1}, m::Int) =
+        solvew(u, t -> wmm(m)(t), θ, N) |> h
+    calc_mean_y_prop(θ::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, θ, m)
+    Ym_prop = solve_in_parallel(m -> calc_mean_y_prop(θ_true, m), ms)
+    Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
+
+    return Y, Y_base, Ym_prop, Y_mean_prop
+end
+
+# TODO: Surely there must be a nicer way to avoid code repetition...?!!
+function get_Y_and_u(expid, pars0::Array{Float64,1},)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{InterSampleWindow, 1}, Function, Function}
+    # A single realization of the disturbance serves as input
+    # input is assumed to contain the input signal, and not the state
+    input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')
+    XW     = readdlm(joinpath(data_dir, expid*"/XW.csv"), ',')
+    W_meta_raw, W_meta_names =
+        readdlm(joinpath(data_dir, expid*"/meta_W.csv"), ',', header=true)
+    W_meta = DataFrame(W_meta_raw, Symbol.(W_meta_names[:]))
+    nx = Int(W_meta.nx[1])
+    n_in = Int(W_meta.n_in[1])
+    n_out = Int(W_meta.n_out[1])
+    n_tot = nx*n_in
+    # Parameters of true system
+    η_true = W_meta.η
+    dη = length(η_true)
+    a_vec = η_true[1:nx]
+    C = reshape(η_true[nx+1:end], (n_out, n_tot))
+
+    # Use this function to specify which parameters should be free and optimized over
+    get_all_ηs(p::Array{Float64, 1}) = vcat(p[1], η_true[2:end])
+
+    mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
+        (m::Int) -> mk_newer_noise_interp(
+        a_vec::AbstractArray{Float64, 1}, C, XW, m, n_in, δ, isws)
+    u(t::Float64) = interpw(input, 1, 1)(t)
+
+    # compute the maximum number of steps we can take
+    N_margin = 2    # Solver can request values of inputs after the time horizon
+                    # ends, so we require a margin of a few samples of the noise
+                    # to ensure that we can provide such values
+    # Minimum of number of available disturbance or input samples
+    Nw = min(size(XW, 1)÷n_tot, size(input, 1)÷n_in)
+    N = Int((Nw - N_margin)*δ÷Ts)     # Number of steps we can take
+
+    # === We first generate the output of the true system ===
+    function calc_Y(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1})
+        @assert (Nw < size(XW, 1)) "Disturbance data size mismatch"
+        E = size(XW, 2)
+        es = collect(1:E)
+        we = mk_we(XW, isws)
+        solve_in_parallel(e -> solvew(u, we(e), θ_true, N) |> h_data, es)
+    end
+
+    if isfile(data_Y_path(expid))
+        @info "Reading output of true system"
+
+        Y = readdlm(data_Y_path(expid), ',')
+        isws = [initialize_isw(Q, W, n_tot, true) for e=1:M]
+    else
+        @info "Generating output of true system"
+        isws = [initialize_isw(Q, W, n_tot, true) for e=1:max(size(XW,2), M)]
+        Y = calc_Y(demangle_XW(XW, n_tot), isws)
+        writedlm(data_Y_path(expid), Y, ',')
+    end
+
+    reset_isws!(isws)
+    # TODO: Can we bake N and Nw into W_meta somehow?
+    return Y, N, Nw, W_meta, isws, u, get_all_ηs
+end
+
+function plot_outputs(Y_ref::Array{Float64, 1}, Y_base::Array{Float64, 1}, Y_prop::Array{Float64, 1}, Y_mean_prop::Array{Float64, 1})
+    t = 1:size(Y_ref, 1)
+    mse_base = round(mean((Y_ref-Y_base).^2), sigdigits=3)
+    mse_prop= round(mean((Y_ref-Y_prop).^2), sigdigits=3)
+    mse_mean = round(mean((Y_ref-Y_mean_prop).^2), sigdigits=3)
+    p = plot(t, Y_ref, label="Reference")
+    plot!(p, Y_base, label="Baseline ($(mse_base))")
+    plot!(p, Y_prop, label="Proposed ($(mse_prop))")
+    plot!(p, Y_mean_prop, label="Proposed Mean ($(mse_mean))")
 end
