@@ -112,7 +112,7 @@ const φ0 = 0.0                   # Initial angle of pendulum from negative y-ax
 #   int(dummy)      -- integral of dummy variable (due to stabilized formulation)
 #   y               -- the output y = atan(x1/-x2) is computed by the solver
 # ]
-f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
+f(x::Array{Float64,1}) = x[1]               # applied on the state at each step
 h(sol) = apply_outputfun(f, sol)            # for our model
 h_baseline(sol) = apply_outputfun(f, sol)   # for the baseline method
 
@@ -132,8 +132,8 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 const θ_true = [k]                    # true value of θ
 const dθ = length(θ_true)
 get_all_θs(θ::Array{Float64,1}) = [m, L, g, θ[1]]
-realize_model(u::Function, w::Function, θ::Array{Float64, 1}, N::Int) = problem(
-  pendulum_multivar(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(θ)),
+realize_model(u::Function, w::Function, θ::Array{Float64, 1}, N::Int) = problem_ode(
+  pendulum_ode(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(θ)),
   N,
   Ts,
 )
@@ -143,9 +143,10 @@ const abstol = 1e-8
 const reltol = 1e-5
 const maxiters = Int64(1e8)
 
-solvew(u::Function, w::Function, θ::Array{Float64, 1}, N::Int; kwargs...) = solve(
+solvew(u::Function, w::Function, θ::Array{Float64, 1}, N::Int; kwargs...) = solve_ode(
   realize_model(u, w, θ, N),
   saveat = 0:Ts:(N*Ts),
+  # NOTE: With these extra argument, the solution seemed to take aaaaages (or get stuck, I'm not sure)
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
@@ -168,7 +169,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     a_vec = η_true[1:nx]
     C = reshape(η_true[nx+1:end], (n_out, n_tot))
 
-    get_all_parameters(p::Array{Float64, 1}) = vcat(get_all_θs(p[1:1]), get_all_ηs(p[2:2]))
+    get_all_parameters(p::Array{Float64, 1}) = vcat(get_all_θs(p), get_all_ηs(p))
 
     # === We then optimize parameters for the baseline model ===
     function baseline_model_parametrized(δ, dummy_input, pars)
@@ -185,7 +186,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     end
 
     E = size(Y, 2)
-    # # #DEBUG
+    # #DEBUG
     # E = 1
     opt_pars_baseline = zeros(length(pars0), E)
     for e=1:E
@@ -254,6 +255,7 @@ function get_outputs(expid, pars0::Array{Float64,1})
     # === Computes output of the baseline model ===
     Y_base = solvew(u, t -> zeros(n_out), θ_true, N) |> h
 
+
     # === Computes outputs of the proposed model ===
     # TODO: Should we consider storing and loading white noise, to improve repeatability
     # of the results? Currently repeatability is based on fixed random seed
@@ -296,12 +298,14 @@ function get_Y_and_u(expid, pars0::Array{Float64,1},)::Tuple{Array{Float64,2}, I
     C = reshape(η_true[nx+1:end], (n_out, n_tot))
 
     # Use this function to specify which parameters should be free and optimized over
-    get_all_ηs(p::Array{Float64, 1}) = vcat(p[1], η_true[2:end])
+    get_all_ηs(p::Array{Float64, 1}) = η_true   # Known disturbance model
 
     mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
         (m::Int) -> mk_newer_noise_interp(
         a_vec::AbstractArray{Float64, 1}, C, XW, m, n_in, δ, isws)
     u(t::Float64) = interpw(input, 1, 1)(t)
+
+
 
     # compute the maximum number of steps we can take
     N_margin = 2    # Solver can request values of inputs after the time horizon
@@ -313,6 +317,7 @@ function get_Y_and_u(expid, pars0::Array{Float64,1},)::Tuple{Array{Float64,2}, I
 
     # === We first generate the output of the true system ===
     function calc_Y(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1})
+        # NOTE: This XW should be non-mangled, which is why we don't divide by n_tot
         @assert (Nw <= size(XW, 1)) "Disturbance data size mismatch ($(Nw) > $(size(XW, 1)))"
         E = size(XW, 2)
         es = collect(1:E)
@@ -322,7 +327,6 @@ function get_Y_and_u(expid, pars0::Array{Float64,1},)::Tuple{Array{Float64,2}, I
 
     if isfile(data_Y_path(expid))
         @info "Reading output of true system"
-
         Y = readdlm(data_Y_path(expid), ',')
         isws = [initialize_isw(Q, W, n_tot, true) for e=1:M]
     else

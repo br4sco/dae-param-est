@@ -19,6 +19,11 @@ struct Model
   ic_check::Array{Float64, 1}   # residual at t0 (DEBUG)
 end
 
+struct Model_ode
+    f::Function             # ODE Function
+    x0::Array{Float64, 1}   # initial values of x
+end
+
 function interpolation(T::Float64, xs::Array{Float64, 1})
   let ts = range(0, T, length=length(xs))
     LinearInterpolation(ts, xs)
@@ -272,6 +277,33 @@ function pendulum_multivar(Φ::Float64, u::Function, w::Function, θ::Array{Floa
     end
 end
 
+function pendulum_ode(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model_ode
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        # Similarly to the DAE-implementation, we don't use the ability of passing
+        # the parameters to the function f. Instead, we create a new problem for
+        # new values of the parameters by calling pendulum_ode() again when
+        # f(x,p,t) = [x[2]; (m^2)*(L^2)*g*cos(x[1])-k*(L^2)*x[2]^2 + u(t)[1] + w(t)[1]^2]
+        f(x,p,t) = [x[2]; (m^2)*(L^2)*g*cos(x[1])-k*(L^2)*x[2]*abs(x[2]) + u(t)[1] + w(t)[1]^2]
+        x0 = [Φ; 0.0]
+        return Model_ode(f, x0)
+    end
+end
+
+function pendulum_sensitivity_ode(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model_ode
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        # Similarly to the DAE-implementation, we don't use the ability of passing
+        # the parameters to the function f. Instead, we create a new problem for
+        # new values of the parameters by calling pendulum_ode() again when
+        # parameters change. Therefore, the argument p is unused.
+        f(x,p,t) = [x[2];
+                    (m^2)*(L^2)*g*cos(x[1])-k*(L^2)*x[2]*abs(x[2]) + u(t)[1] + w(t)[1]^2
+                    x[4]
+                    -(m^2)*(L^2)*g*sin(x[1])*x[3]-2*k*(L^2)*abs(x[2])*x[4] - (L^2)*x[2]*abs(x[2])]
+        x0 = [Φ; 0.0; 0.0; 0.0]
+        return Model_ode(f, x0)
+    end
+end
+
 # T = 200.0
 # m = pendulum2(pi/4, t -> 0., t -> 0.1sin(t), [0.3, 3.0, 9.81, 0.1])
 # prob = DAEProblem(m.f!, m.xp0, m.x0, (0, T), [])
@@ -298,8 +330,18 @@ function problem(m::Model, N::Int, Ts::Float64)
   DAEProblem(m.f!, m.xp0, m.x0, (0, T), [], differential_vars=m.dvars)
 end
 
+function problem_ode(m::Model_ode, N::Int, Ts::Float64)
+    T = N * Ts
+    ODEProblem(m.f, m.x0, (0,T), [])
+end
+
 function solve(prob; kwargs...)
   DifferentialEquations.solve(prob, IDA(); kwargs...)
+end
+
+# TODO: Might be worth specifying solver instead of letting it be picked automatically
+function solve_ode(prob; kwargs...)
+    DifferentialEquations.solve(prob; kwargs...)
 end
 
 function apply_outputfun(h, sol)
@@ -318,9 +360,9 @@ function solve_in_parallel(solve, is)
   Y[:, 1] += y1
   next!(p)
   Threads.@threads for m = 2:M
-    y = solve(is[m])
-    Y[:, m] .+= y
-    next!(p)
+      y = solve(is[m])
+      Y[:, m] .+= y
+      next!(p)
   end
   Y
 end
