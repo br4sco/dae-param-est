@@ -59,6 +59,30 @@ end
 #     end
 # end
 
+# This function relies on XW being mangled
+function mk_noise_interp(nx::Int,
+                         C::Array{Float64, 2},
+                         XW::Array{Float64, 2},
+                         m::Int,
+                         δ::Float64)
+
+  let
+    n_tot = size(C, 2)
+    function w(t::Float64)
+        n = Int(floor(t / δ)) + 1
+        # row of x_1(t_n) in XW
+        k = (n - 1) * n_tot + 1
+
+        # xl = view(XW, k:(k + nx - 1), m)
+        # xu = view(XW, (k + nx):(k + 2nx - 1), m)
+
+        xl = XW[k:(k + n_tot - 1), m]
+        xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+        return C*(xl + (t-k*δ)*(xu-xl)/δ)
+    end
+  end
+end
+
 # Function for using conditional interpolation
 function mk_newer_noise_interp(a_vec::AbstractArray{Float64, 1},
                                C::Array{Float64, 2},
@@ -146,7 +170,6 @@ const maxiters = Int64(1e8)
 solvew(u::Function, w::Function, θ::Array{Float64, 1}, N::Int; kwargs...) = solve_ode(
   realize_model(u, w, θ, N),
   saveat = 0:Ts:(N*Ts),
-  # NOTE: With these extra argument, the solution seemed to take aaaaages (or get stuck, I'm not sure)
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
@@ -208,12 +231,12 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-        # XWm = simulate_multivar_noise_process_mangled(dmdl, Zm)
-        # wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
+        XWm = simulate_noise_process_mangled(dmdl, Zm)
+        wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
         # NOTE: OPTION 2: Use the rows below here for exact interpolation
-        reset_isws!(isws)
-        XWm = simulate_multivar_noise_process(dmdl, Zm)
-        wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
+        # reset_isws!(isws)
+        # XWm = simulate_noise_process(dmdl, Zm)
+        # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
         calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
             solvew(u, t -> wmm(m)(t), θ, N) |> h
@@ -262,12 +285,12 @@ function get_outputs(expid, pars0::Array{Float64,1})
     Zm = [randn(Nw, n_tot) for m = 1:M]
     dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η_true, nx, n_out), δ)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-    # XWm = simulate_multivar_noise_process_mangled(dmdl, Zm)
-    # wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
+    XWm = simulate_noise_process_mangled(dmdl, Zm)
+    wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
-    reset_isws!(isws)
-    XWm = simulate_multivar_noise_process(dmdl, Zm)
-    wmm(m::Int) = mk_newer_noise_interp(view(η_true, 1:nx), C, XWm, m, n_in, δ, isws)
+    # reset_isws!(isws)
+    # XWm = simulate_noise_process(dmdl, Zm)
+    # wmm(m::Int) = mk_newer_noise_interp(view(η_true, 1:nx), C, XWm, m, n_in, δ, isws)
 
     calc_mean_y_N_prop(N::Int, θ::Array{Float64, 1}, m::Int) =
         solvew(u, t -> wmm(m)(t), θ, N) |> h

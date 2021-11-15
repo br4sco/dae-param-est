@@ -158,8 +158,8 @@ if load_noise
 else
     const Zd = [randn(Nw_max + Nw_extra, nx*n_in) for e = 1:E]
     const Zu = [randn(Nw_max + Nw_extra, nx*n_in)]
-    const XWup = simulate_multivar_noise_process(true_mdl, Zu)
-    const XWdp = simulate_multivar_noise_process(true_mdl, Zd)
+    const XWup = simulate_noise_process(true_mdl, Zu)
+    const XWdp = simulate_noise_process(true_mdl, Zd)
     const XWd = mangle_XW(XWdp)
     const XWu = mangle_XW(XWup)
 
@@ -379,7 +379,7 @@ function model_parametrized(δ, Zm, dummy_input, pars)
     # wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
     reset_isws!(isws)
-    XWmp = simulate_multivar_noise_process(dmdl, Zm)
+    XWmp = simulate_noise_process(dmdl, Zm)
     wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWmp, m, δ, isws)
 
     calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =

@@ -273,7 +273,7 @@ end
 #     return mdl, DataFrame(nx = size(s.A,2), n_in = 1, n_out = 1, n_a = length(a), η = vcat(a, b))
 # end
 
-function get_filtered_noise_multivar(gen::Function, Ts::Float64, M::Int, Nw::Int
+function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int
     )::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
 
     mdl, metadata = gen(Ts)

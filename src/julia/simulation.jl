@@ -352,6 +352,14 @@ function apply_outputfun(h, sol)
   map(h, sol.u)
 end
 
+function apply_two_outputfun(h1, h2, sol)
+    if sol.retcode != :Success
+      throw(ErrorException("Solution retcode: $(sol.retcode)"))
+    end
+
+    map(h1, sol.u), map(h2, sol.u)
+    end
+
 function solve_in_parallel(solve, is)
   M = length(is)
   p = Progress(M, 1, "Running $(M) simulations...", 50)
@@ -367,6 +375,23 @@ function solve_in_parallel(solve, is)
   Y
 end
 
+function solve_in_parallel_sens(solve, is)
+    M = length(is)
+    p = Progress(M, 1, "Running $(M) simulations...", 50)
+    y1, sens1 = solve(is[1])
+    Y = zeros(length(y1), M)
+    Ysens = zeros(length(sens1), M)
+    Y[:, 1] += y1
+    Ysens[:, 1] += sens1
+    next!(p)
+    Threads.@threads for m = 2:M
+        y, sens = solve(is[m])
+        Y[:, m] .+= y
+        Ysens[:, m] .+= sens
+        next!(p)
+    end
+    Y, Ysens
+  end
 # Old API
 
 function simulate(m::Model, N::Int, Ts::Float64; kwargs...)

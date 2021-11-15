@@ -131,8 +131,8 @@ mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
 
 # const XWdp = simulate_noise_process(dmdl, Zd)
 # const XWmp = simulate_noise_process(dmdl, Zm)
-const XWup = simulate_multivar_noise_process(true_mdl, Zu, n_in)
-const XWdp = simulate_multivar_noise_process(true_mdl, Zd, n_in)
+const XWup = simulate_noise_process(true_mdl, Zu, n_in)
+const XWdp = simulate_noise_process(true_mdl, Zd, n_in)
 const XWd = mangle_XW(XWdp)
 const XWu = mangle_XW(XWup)
 # const XWm = mangle_XW(XWmp)
@@ -359,7 +359,7 @@ function model(dummy_input, p)
     reset_isws!(isws)
     A, B, C, x0 = get_ct_noise_matrices(η, nx, n_out)
     dmdl = discretize_ct_noise_model(A, B, C, δ, x0)
-    XWmp = simulate_multivar_noise_process(dmdl, Zm, n_in)
+    XWmp = simulate_noise_process(dmdl, Zm, n_in)
     wmm(m::Int) = mk_newer_noise_interp_m(view(η, 1:nx), C, XWmp, m, isws)
     calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
         solvew(t -> wmm(m)(t), θ, N) |> h
