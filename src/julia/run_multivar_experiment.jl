@@ -59,6 +59,30 @@ end
 #     end
 # end
 
+# This function relies on XW being mangled
+function mk_noise_interp(C::Array{Float64, 2},
+                         XW::Array{Float64, 2},
+                         m::Int,
+                         δ::Float64)
+
+  let
+    n_tot = size(C, 2)
+    function w(t::Float64)
+        # n*δ <= t <= (n+1)*δ
+        n = Int(t÷δ)
+        # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
+        k = n * n_tot + 1
+
+        # xl = view(XW, k:(k + nx - 1), m)
+        # xu = view(XW, (k + nx):(k + 2nx - 1), m)
+
+        xl = XW[k:(k + n_tot - 1), m]
+        xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+        return C*(xl + (t-n*δ)*(xu-xl)/δ)
+    end
+  end
+end
+
 # Function for using conditional interpolation
 function mk_newer_noise_interp(a_vec::AbstractArray{Float64, 1},
                                C::Array{Float64, 2},
@@ -129,11 +153,11 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # metadata_input_path(expid) = joinpath(exp_path(expid), "U_meta.csv")
 
 # === MODEL REALIZATION AND SIMULATION ===
-const θ_true = [k]                    # true value of θ
-const dθ = length(θ_true)
-get_all_θs(θ::Array{Float64,1}) = [m, L, g, θ[1]]
-realize_model(u::Function, w::Function, θ::Array{Float64, 1}, N::Int) = problem(
-  pendulum_multivar(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(θ)),
+const pars_true = [k]                    # true value of θ
+get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]
+const dθ = length(get_all_θs(pars_true))
+realize_model(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
+  pendulum_multivar(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
   N,
   Ts,
 )
@@ -143,8 +167,8 @@ const abstol = 1e-8
 const reltol = 1e-5
 const maxiters = Int64(1e8)
 
-solvew(u::Function, w::Function, θ::Array{Float64, 1}, N::Int; kwargs...) = solve(
-  realize_model(u, w, θ, N),
+solvew(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
+  realize_model(u, w, pars, N),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
@@ -168,17 +192,14 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     a_vec = η_true[1:nx]
     C = reshape(η_true[nx+1:end], (n_out, n_tot))
 
-    get_all_parameters(p::Array{Float64, 1}) = vcat(get_all_θs(p[1:1]), get_all_ηs(p[2:2]))
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars[1:1]), get_all_ηs(pars[2:2]))
 
     # === We then optimize parameters for the baseline model ===
     function baseline_model_parametrized(δ, dummy_input, pars)
         # NOTE: The true input is encoded in the solvew()-function, but this function
         # still needs to to take two input arguments, so dummy_input could just be
         # anything, it's not used anyway
-        p = get_all_parameters(pars)
-        θ = p[1:dθ]
-
-        Y_base = solvew(u, t -> zeros(n_out), θ, N ) |> h
+        Y_base = solvew(u, t -> zeros(n_out), pars, N ) |> h
 
         # TODO: Currently assumes scalar output from DAE-system
         return reshape(Y_base[N_trans+1:end,:], :)   # Returns 1D-array
@@ -190,7 +211,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     opt_pars_baseline = zeros(length(pars0), E)
     for e=1:E
         baseline_result, baseline_trace = get_fit(Y[:,e], pars0,
-            (dummy_input, p) -> baseline_model_parametrized(δ, dummy_input, p), e)
+            (dummy_input, pars) -> baseline_model_parametrized(δ, dummy_input, pars), e)
         opt_pars_baseline[:, e] = coef(baseline_result)
     end
 
@@ -202,22 +223,21 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         # still needs to to take two input arguments, so dummy_input could just be
         # anything, it's not used anyway
         p = get_all_parameters(pars)
-        θ = p[1:dθ]
         η = p[dθ+1: dθ+dη]
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
         XWm = simulate_noise_process_mangled(dmdl, Zm)
-        wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
+        wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
         # NOTE: OPTION 2: Use the rows below here for exact interpolation
         # reset_isws!(isws)
         # XWm = simulate_noise_process(dmdl, Zm)
         # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-        calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
-            solvew(u, t -> wmm(m)(t), θ, N) |> h
-        calc_mean_y(θ::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, θ, m)
-        Ym = solve_in_parallel(m -> calc_mean_y(θ, m), ms)
+        calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
+            solvew(u, t -> wmm(m)(t), pars, N) |> h
+        calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+        Ym = solve_in_parallel(m -> calc_mean_y(pars, m), ms)
         return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
     end
 
@@ -228,7 +248,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     opt_pars_proposed = zeros(length(pars0), E)
     for e=1:E
         proposed_result, proposed_trace = get_fit(Y[:,e], pars0,
-            (dummy_input, p) -> proposed_model_parametrized(δ, Zm, dummy_input, p, isws), e)
+            (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws), e)
         opt_pars_proposed[:, e] = coef(proposed_result)
     end
 
@@ -252,7 +272,7 @@ function get_outputs(expid, pars0::Array{Float64,1})
     C = reshape(η_true[nx+1:end], (n_out, n_tot))
 
     # === Computes output of the baseline model ===
-    Y_base = solvew(u, t -> zeros(n_out), θ_true, N) |> h
+    Y_base = solvew(u, t -> zeros(n_out), pars_true, N) |> h
 
     # === Computes outputs of the proposed model ===
     # TODO: Should we consider storing and loading white noise, to improve repeatability
@@ -261,16 +281,16 @@ function get_outputs(expid, pars0::Array{Float64,1})
     dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η_true, nx, n_out), δ)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp(nx, C, XWm, m, δ)
+    wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
     # wmm(m::Int) = mk_newer_noise_interp(view(η_true, 1:nx), C, XWm, m, n_in, δ, isws)
 
-    calc_mean_y_N_prop(N::Int, θ::Array{Float64, 1}, m::Int) =
-        solvew(u, t -> wmm(m)(t), θ, N) |> h
+    calc_mean_y_N_prop(N::Int, pars::Array{Float64, 1}, m::Int) =
+        solvew(u, t -> wmm(m)(t), pars, N) |> h
     calc_mean_y_prop(θ::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, θ, m)
-    Ym_prop = solve_in_parallel(m -> calc_mean_y_prop(θ_true, m), ms)
+    Ym_prop = solve_in_parallel(m -> calc_mean_y_prop(pars_true, m), ms)
     Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
 
     return Y, Y_base, Ym_prop, Y_mean_prop
@@ -296,7 +316,7 @@ function get_Y_and_u(expid, pars0::Array{Float64,1},)::Tuple{Array{Float64,2}, I
     C = reshape(η_true[nx+1:end], (n_out, n_tot))
 
     # Use this function to specify which parameters should be free and optimized over
-    get_all_ηs(p::Array{Float64, 1}) = vcat(p[1], η_true[2:end])
+    get_all_ηs(pars::Array{Float64, 1}) = vcat(pars[1], η_true[2:end])
 
     mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
         (m::Int) -> mk_newer_noise_interp(
@@ -317,7 +337,7 @@ function get_Y_and_u(expid, pars0::Array{Float64,1},)::Tuple{Array{Float64,2}, I
         E = size(XW, 2)
         es = collect(1:E)
         we = mk_we(XW, isws)
-        solve_in_parallel(e -> solvew(u, we(e), θ_true, N) |> h_data, es)
+        solve_in_parallel(e -> solvew(u, we(e), pars_true, N) |> h_data, es)
     end
 
     if isfile(data_Y_path(expid))
