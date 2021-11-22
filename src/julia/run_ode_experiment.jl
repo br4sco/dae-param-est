@@ -181,7 +181,7 @@ h_data(sol) = apply_outputfun(x -> f(x) + σ * randn(), sol)
 
 function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
 
-    Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid, pars0)
+    Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid)
     nx = Int(W_meta.nx[1])
     n_in = Int(W_meta.n_in[1])
     n_out = Int(W_meta.n_out[1])
@@ -190,7 +190,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     η_true = W_meta.η
     dη = length(η_true)
     a_vec = η_true[1:nx]
-    C = reshape(η_true[nx+1:end], (n_out, n_tot))
+    C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), get_all_ηs(pars))
 
@@ -228,6 +228,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         p = get_all_parameters(pars)
         θ = p[1:dθ]
         η = p[dθ+1: dθ+dη]
+        C = reshape(η[nx+1:end], (n_out, n_tot))
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
@@ -264,7 +265,7 @@ end
 
 function get_outputs(expid, pars0::Array{Float64,1})
 
-    Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid, pars0)
+    Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid)
     nx = Int(W_meta.nx[1])
     n_in = Int(W_meta.n_in[1])
     n_out = Int(W_meta.n_out[1])
@@ -273,7 +274,7 @@ function get_outputs(expid, pars0::Array{Float64,1})
     η_true = W_meta.η
     dη = length(η_true)
     a_vec = η_true[1:nx]
-    C = reshape(η_true[nx+1:end], (n_out, n_tot))
+    C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
     # === Computes output of the baseline model ===
     Y_base = solvew(u, t -> zeros(n_out), pars_true, N) |> h
@@ -286,7 +287,7 @@ function get_outputs(expid, pars0::Array{Float64,1})
     dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η_true, nx, n_out), δ)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+    wmm(m::Int) = mk_noise_interp(C_true, XWm, m, δ)
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
@@ -302,7 +303,7 @@ function get_outputs(expid, pars0::Array{Float64,1})
 end
 
 # TODO: Surely there must be a nicer way to avoid code repetition...?!!
-function get_Y_and_u(expid, pars0::Array{Float64,1},)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{InterSampleWindow, 1}, Function, Function}
+function get_Y_and_u(expid)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{InterSampleWindow, 1}, Function, Function}
     # A single realization of the disturbance serves as input
     # input is assumed to contain the input signal, and not the state
     input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')
@@ -318,14 +319,14 @@ function get_Y_and_u(expid, pars0::Array{Float64,1},)::Tuple{Array{Float64,2}, I
     η_true = W_meta.η
     dη = length(η_true)
     a_vec = η_true[1:nx]
-    C = reshape(η_true[nx+1:end], (n_out, n_tot))
+    C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
     # Use this function to specify which parameters should be free and optimized over
     get_all_ηs(p::Array{Float64, 1}) = η_true   # Known disturbance model
 
     mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
         (m::Int) -> mk_newer_noise_interp(
-        a_vec::AbstractArray{Float64, 1}, C, XW, m, n_in, δ, isws)
+        a_vec::AbstractArray{Float64, 1}, C_true, XW, m, n_in, δ, isws)
     u(t::Float64) = interpw(input, 1, 1)(t)
 
 
@@ -362,6 +363,52 @@ function get_Y_and_u(expid, pars0::Array{Float64,1},)::Tuple{Array{Float64,2}, I
     reset_isws!(isws)
     # TODO: Can we bake N and Nw into W_meta somehow?
     return Y, N, Nw, W_meta, isws, u, get_all_ηs
+end
+
+function plot_cost_function(expid, par_ind::Int, par_range::Tuple{Float64, Float64}, fixed_pars::Array{Float64}, step_size::Float64=0.1)
+    Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid)
+    nx = Int(W_meta.nx[1])
+    n_in = Int(W_meta.n_in[1])
+    n_out = Int(W_meta.n_out[1])
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    E = size(Y, 2)
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), get_all_ηs(pars))
+    par_values = par_range[1]:step_size:par_range[2]
+    par_matrix = [get_all_parameters(vcat(fixed_pars[1:par_ind-1], par_values[i], fixed_pars[par_ind+1:end])) for i=1:length(par_values)]
+    cost_vals = zeros(length(par_values), E)
+
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+    for i=1:length(par_values)
+        p = get_all_parameters(par_matrix[i])
+        θ = p[1:dθ]
+        η = p[dθ+1: dθ+dη]
+        C = reshape(η[nx+1:end], (n_out, n_tot))
+
+        dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+        # NOTE: OPTION 1: Use the rows below here for linear interpolation
+        XWm = simulate_noise_process_mangled(dmdl, Zm)
+        wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+        # # NOTE: OPTION 2: Use the rows below here for exact interpolation
+        # reset_isws!(isws)
+        # XWm = simulate_noise_process(dmdl, Zm)
+        # wmm(m::Int) = mk_newer_noise_interp(view(η_true, 1:nx), C, XWm, m, n_in, δ, isws)
+
+        calc_mean_y_N_prop(N::Int, pars::Array{Float64, 1}, m::Int) =
+            solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_sens
+        calc_mean_y_prop(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, pars, m)
+        Ym_prop, sens_m_prop = solve_in_parallel_sens(m -> calc_mean_y_prop(par_matrix[i], m), ms)
+        Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
+
+        for e = 1:E
+            cost_vals[i, e] = mean((Y[:,e]-Y_mean_prop).^2)
+        end
+    end
+
+    p = plot(par_values, cost_vals[:,1])
+    display(p)
+
+    return cost_vals
 end
 
 function plot_outputs(Y_ref::Array{Float64, 1}, Y_base::Array{Float64, 1}, Y_prop::Array{Float64, 1}, Y_mean_prop::Array{Float64, 1})

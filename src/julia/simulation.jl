@@ -304,6 +304,40 @@ function pendulum_sensitivity_ode(Φ::Float64, u::Function, w::Function, θ::Arr
     end
 end
 
+function simple_model_sens(u::Function, w::Function, θ::Array{Float64, 1})::Model
+
+    function f(out, dx, x, p, t)
+        wt = w(t)
+        ut = u(t)
+        out[1] = dx[1] + θ[1]*x[1] - ut[1] - wt[1]      # Equation 1
+        out[2] = x[2] - x[1]^2                          # Equation 2     x
+        out[3] = θ[1]*x[3] + dx[3] + x[1]               # Sensitivity of x₁
+        out[4] = -2x[1]*x[3] + x[4]                     # Sensitivity of x₂
+    end
+
+    x₀  = [0.0, 0.0, 0.0, 0.0]
+    dx₀ = [0.0, 0.0, 0.0, 0.0]
+    dvars = [true, false, true, false]
+
+    Model(f, x -> x, x₀, dx₀, dvars, [0.0])
+end
+
+function simple_model(u::Function, w::Function, θ::Array{Float64, 1})::Model
+
+    function f(out, dx, x, p, t)
+        wt = w(t)
+        ut = u(t)
+        out[1] = dx[1] + θ[1]*x[1] - ut[1] - wt[1]      # Equation 1
+        out[2] = x[2] - x[1]^2                          # Equation 2     x                  # Sensitivity of x₂
+    end
+
+    x₀  = [0.0, 0.0]
+    dx₀ = [0.0, 0.0]
+    dvars = [true, false]
+
+    Model(f, x -> x, x₀, dx₀, dvars, [0.0])
+end
+
 # T = 200.0
 # m = pendulum2(pi/4, t -> 0., t -> 0.1sin(t), [0.3, 3.0, 9.81, 0.1])
 # prob = DAEProblem(m.f!, m.xp0, m.x0, (0, T), [])
