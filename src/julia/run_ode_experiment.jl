@@ -42,6 +42,9 @@ demangle_XW(XW::Array{Float64, 2}, n_tot::Int) =
 # n is the dimension of one sample of the state
 function interpw(W::Array{Float64, 2}, m::Int, n::Int)
     function w(t::Float64)
+        # tₖ = kδ <= t <= (k+1)δ = tₖ₊₁
+        # => The rows corresponding to tₖ start at index k*n+1
+        # since t₀ = 0 corrsponds to block starting with row 1
         k = Int(t÷δ)
         w0 = W[k*n+1:(k+1)*n, m]
         w1 = W[(k+1)*n+1:(k+2)*n, m]

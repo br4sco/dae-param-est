@@ -23,6 +23,9 @@ const Q = 1000          # Number of conditional samples stored per interval
 
 const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
 
+# Learning rate used for stochastic gradient descent. t is the iteration index
+learning_rate(t::Int) = 1000/(1+t)
+
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
 
@@ -42,6 +45,9 @@ demangle_XW(XW::Array{Float64, 2}, n_tot::Int) =
 # n is the dimension of one sample of the state
 function interpw(W::Array{Float64, 2}, m::Int, n::Int)
     function w(t::Float64)
+        # tₖ = kδ <= t <= (k+1)δ = tₖ₊₁
+        # => The rows corresponding to tₖ start at index k*n+1
+        # since t₀ = 0 corrsponds to block starting with row 1
         k = Int(t÷δ)
         w0 = W[k*n+1:(k+1)*n, m]
         w1 = W[(k+1)*n+1:(k+2)*n, m]
@@ -49,12 +55,13 @@ function interpw(W::Array{Float64, 2}, m::Int, n::Int)
     end
 end
 
-# function interpx(XW::Array{Float64, 2}, C::Array{Float64, 2}, m::Int, n::Int)
+# function interpx(XW::Array{Float64, 2}, C::Array{Float64, 2}, m::Int)
 #     function xw(t::Float64)
 #         # k = Int(t÷δ)
 #         # xw0 = XW[k*n+1:(k+1)*n, m]
 #         # xw1 = XW[(k+1)*n+1:(k+2)*n, m]
 #         # return C*(xw0 + (t-k*δ)*(xw1-xw0)/δ)
+#         n = size(C,2)
 #         return C*interpw(XW, m, n)
 #     end
 # end
@@ -136,9 +143,12 @@ const φ0 = 0.0                   # Initial angle of pendulum from negative y-ax
 #   int(dummy)      -- integral of dummy variable (due to stabilized formulation)
 #   y               -- the output y = atan(x1/-x2) is computed by the solver
 # ]
-f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
+f(x::Array{Float64,1}) = x[13]               # applied on the state at each step
+f_sens(x::Array{Float64,1}) = x[14]   # NOTE: Hard-coded right now
 h(sol) = apply_outputfun(f, sol)            # for our model
-h_baseline(sol) = apply_outputfun(f, sol)   # for the baseline method
+h_sens(sol) = apply_two_outputfun(f, f_sens, sol)           # for our model with sensitivity
+h_baseline(sol) = apply_outputfun(f, sol)                    # for the baseline method
+h_baseline_sens(sol) = apply_two_outputfun(f, f_sens, sol)   # for the baseline method with sensitivity
 
 # === HELPER FUNCTIONS TO READ AND WRITE DATA
 const data_dir = joinpath("data", "experiments")
@@ -153,28 +163,46 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # metadata_input_path(expid) = joinpath(exp_path(expid), "U_meta.csv")
 
 # === MODEL REALIZATION AND SIMULATION ===
-const pars_true = [k]                    # true value of θ
+# We use the following naming conventions for parameters:
+# θ: All parameters of the dynamical model
+# η: All parameters of the disturbance model
+# pars: All free parameters
+# p: vcat(θ, η)
+const pars_true = [k]                    # true value of all free parameters
 get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]
 const dθ = length(get_all_θs(pars_true))
-realize_model(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  pendulum_multivar(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
+  pendulum_sensitivity(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
   N,
   Ts,
 )
+# realize_model(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
+#   simple_model(t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+#   N,
+#   Ts,
+# )
 
 # === SOLVER PARAMETERS ===
 const abstol = 1e-8
 const reltol = 1e-5
 const maxiters = Int64(1e8)
 
-solvew(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
-  realize_model(u, w, pars, N),
+solvew_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
+  realize_model_sens(u, w, pars, N),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
   kwargs...,
 )
+# solvew(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
+#   realize_model(u, w, pars, N),
+#   saveat = 0:Ts:(N*Ts),
+#   abstol = abstol,
+#   reltol = reltol,
+#   maxiters = maxiters;
+#   kwargs...,
+# )
 
 # data-set output function
 h_data(sol) = apply_outputfun(x -> f(x) + σ * randn(), sol)
@@ -186,20 +214,20 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     n_in = Int(W_meta.n_in[1])
     n_out = Int(W_meta.n_out[1])
     n_tot = nx*n_in
-    # Parameters of true system
-    η_true = W_meta.η
-    dη = length(η_true)
-    a_vec = η_true[1:nx]
-    C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
+    dη = length(W_meta.η)
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars[1:1]), get_all_ηs(pars[2:2]))
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), get_all_ηs(pars))
 
     # === We then optimize parameters for the baseline model ===
     function baseline_model_parametrized(δ, dummy_input, pars)
-        # NOTE: The true input is encoded in the solvew()-function, but this function
+        # NOTE: The true input is encoded in the solvew_sens()-function, but this function
         # still needs to to take two input arguments, so dummy_input could just be
         # anything, it's not used anyway
-        Y_base = solvew(u, t -> zeros(n_out), pars, N ) |> h
+        # Y_base = solvew(u, t -> zeros(n_out), pars, N ) |> h_baseline
+
+
+        # temp, temp_sens = solvew_sens(u, t -> zeros(n_out), pars, N )
+        Y_base = solvew_sens(u, t -> zeros(n_out), pars, N ) |> h_baseline
 
         # TODO: Currently assumes scalar output from DAE-system
         return reshape(Y_base[N_trans+1:end,:], :)   # Returns 1D-array
@@ -219,10 +247,11 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # === Finally we optimize parameters for the proposed model ==
     function proposed_model_parametrized(δ, Zm, dummy_input, pars, isws)
-        # NOTE: The true input is encoded in the solvew()-function, but this function
+        # NOTE: The true input is encoded in the solvew_sens()-function, but this function
         # still needs to to take two input arguments, so dummy_input could just be
         # anything, it's not used anyway
         p = get_all_parameters(pars)
+        θ = p[1:dθ]
         η = p[dθ+1: dθ+dη]
         C = reshape(η[nx+1:end], (n_out, n_tot))
 
@@ -236,23 +265,55 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
         calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
-            solvew(u, t -> wmm(m)(t), pars, N) |> h
+            solvew_sens(u, t -> wmm(m)(t), pars, N) |> h
         calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
         Ym = solve_in_parallel(m -> calc_mean_y(pars, m), ms)
         return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
+    end
+
+    function get_gradient_estimate(y, δ, Zm, pars, isws)
+        p = get_all_parameters(pars)
+        η = p[dθ+1: dθ+dη]
+
+        dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+        # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+        # XWm = simulate_noise_process_mangled(dmdl, Zm)
+        # wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+        # NOTE: OPTION 2: Use the rows below here for exact interpolation
+        reset_isws!(isws)
+        XWm = simulate_noise_process(dmdl, Zm)
+        wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
+
+        calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
+            solvew_sens(u, t -> wmm(m)(t), θ, N) |> h_sens
+        calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+        Ym, gradYm = solve_in_parallel_sens(m -> calc_mean_y(pars, m), [1,2])   # TODO: Note we pass 1,2 instead of ms
+        # Uses different noise realizations for estimate of output and estiamte of gradient
+        # TODO: Remove/update this comment once you generalize
+        # Ym[:,1] should be 1D since it's an array of scalars
+        # gradYm[:,2:2] should be 2D since it's an array of gradients, and
+        # gradients are potentially vectors
+        # sum(*, dims=1) sums over rows, resulting in an array with the same
+        # dimensions as a gradient
+        grad_est = (2/N)*sum( (y-Ym[:,1]).*(-gradYm[:,2:2]), dims=1)
+        # grad_est will be 2D array with one dimenion equal to 1, we want to return a 1D array
+        return grad_est[:]
     end
 
     # TODO: Should we consider storing and loading white noise, to improve repeatability
     # of the results? Currently repeatability is based on fixed random seed
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
+    get_gradient_estimate_p(pars) = get_gradient_estimate(Y[:,1], δ, Zm, pars, isws)
+
     opt_pars_proposed = zeros(length(pars0), E)
     for e=1:E
-        proposed_result, proposed_trace = get_fit(Y[:,e], pars0,
-            (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws), e)
-        opt_pars_proposed[:, e] = coef(proposed_result)
+        opt_pars_proposed[:,e] = perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0)
+        println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
+        # proposed_result, proposed_trace = get_fit(Y[:,e], pars0,
+        #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws), e)
+        # opt_pars_proposed[:, e] = coef(proposed_result)
     end
-
 
     @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
 
@@ -266,36 +327,137 @@ function get_outputs(expid, pars0::Array{Float64,1})
     n_in = Int(W_meta.n_in[1])
     n_out = Int(W_meta.n_out[1])
     n_tot = nx*n_in
-    # Parameters of true system
-    η_true = W_meta.η
-    dη = length(η_true)
-    a_vec = η_true[1:nx]
-    C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
+    dη = length(W_meta.η)
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), get_all_ηs(pars))
+    p = get_all_parameters(pars0)
+    θ = p[1:dθ]
+    η = p[dθ+1: dθ+dη]
+    C = reshape(η[nx+1:end], (n_out, n_tot))
 
     # === Computes output of the baseline model ===
-    Y_base = solvew(u, t -> zeros(n_out), pars_true, N) |> h
+    Y_base, sens_base = solvew_sens(u, t -> zeros(n_out), pars0, N) |> h_baseline_sens
+
 
     # === Computes outputs of the proposed model ===
     # TODO: Should we consider storing and loading white noise, to improve repeatability
     # of the results? Currently repeatability is based on fixed random seed
     Zm = [randn(Nw, n_tot) for m = 1:M]
-    dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η_true, nx, n_out), δ)
+    dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp(C_true, XWm, m, δ)
-    # NOTE: OPTION 2: Use the rows below here for exact interpolation
+    wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+    # # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
-    # wmm(m::Int) = mk_newer_noise_interp(view(η_true, 1:nx), C, XWm, m, n_in, δ, isws)
+    # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
     calc_mean_y_N_prop(N::Int, pars::Array{Float64, 1}, m::Int) =
-        solvew(u, t -> wmm(m)(t), pars, N) |> h
-    calc_mean_y_prop(θ::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, θ, m)
-    Ym_prop = solve_in_parallel(m -> calc_mean_y_prop(pars_true, m), ms)
+        solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_sens
+    calc_mean_y_prop(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, pars, m)
+    Ym_prop, sens_m_prop = solve_in_parallel_sens(m -> calc_mean_y_prop(pars0, m), ms)
     Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
 
-    return Y, Y_base, Ym_prop, Y_mean_prop
+    # # DEBUG
+    # base_mse = mean((Y[:,1]-Y_base).^2)
+    # prop_mse = mean((Y[:,1]-Y_mean_prop).^2)
+    # println("Base mse: $base_mse, Proposed mse: $prop_mse")
+    # p = plot(Y_base, label="Baseline output with k=$pars0")
+    # #     plot!(p, der_est, label="Estimate"
+    # display(p)
+
+    return Y, Y_base, sens_base, Ym_prop, Y_mean_prop, sens_m_prop
 end
+
+# function get_outputs_debug(expid, pars0::Array{Float64,1})
+#
+#     Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid)
+#     nx = Int(W_meta.nx[1])
+#     n_in = Int(W_meta.n_in[1])
+#     n_out = Int(W_meta.n_out[1])
+#     n_tot = nx*n_in
+#     # Parameters of true system
+#     η_true = W_meta.η
+#     dη = length(η_true)
+#     a_vec = η_true[1:nx]
+#     C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
+#
+#     # === Computes output of the baseline model ===
+#     Y_base, sens_base = solvew_sens(u, t -> zeros(n_out), pars_true, N) |> h_baseline_sens
+#
+#
+#     # === Computes outputs of the proposed model ===
+#     # TODO: Should we consider storing and loading white noise, to improve repeatability
+#     # of the results? Currently repeatability is based on fixed random seed
+#     Zm = [randn(Nw, n_tot) for m = 1:M]
+#     dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η_true, nx, n_out), δ)
+#     # NOTE: OPTION 1: Use the rows below here for linear interpolation
+#     XWm = simulate_noise_process_mangled(dmdl, Zm)
+#     wmm(m::Int) = mk_noise_interp(C_true, XWm, m, δ)
+#     # # NOTE: OPTION 2: Use the rows below here for exact interpolation
+#     # reset_isws!(isws)
+#     # XWm = simulate_noise_process(dmdl, Zm)
+#     # wmm(m::Int) = mk_newer_noise_interp(view(η_true, 1:nx), C_true, XWm, m, n_in, δ, isws)
+#
+#     calc_mean_y_N_prop(N::Int, pars::Array{Float64, 1}, m::Int) =
+#         solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_sens
+#     calc_mean_y_prop(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, pars, m)
+#     Ym_prop, sens_m_prop = solve_in_parallel_sens(m -> calc_mean_y_prop(pars_true, m), [1])
+#
+#     calc_mean_y_N_prop(N::Int, pars::Array{Float64, 1}, m::Int) =
+#         solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_sens
+#     calc_mean_y_prop(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, pars, m)
+#     Ym_prop2, sens_m_prop2 = solve_in_parallel_sens(m -> calc_mean_y_prop(pars_true.+0.01, m), [1])
+#
+#     # calc_mean_y_N_prop(N::Int, pars::Array{Float64, 1}, m::Int) =
+#     #     solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_sens
+#     # calc_mean_y_prop(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, pars, m)
+#     # Ym_prop3, sens_m_prop3 = solve_in_parallel_sens(m -> calc_mean_y_prop(pars_true, m), [2])
+#
+#
+#     der_est = (Ym_prop2 - Ym_prop)/0.01
+#
+#     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), get_all_ηs(pars))
+#     function get_gradient_estimate(y, δ, Zm, pars, isws)
+#         p = get_all_parameters(pars)
+#         η = p[dθ+1: dθ+dη]
+#         C = reshape(η[nx+1:end], (n_out, n_tot))
+#
+#         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+#         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+#         XWm = simulate_noise_process_mangled(dmdl, Zm)
+#         wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+#         # NOTE: OPTION 2: Use the rows below here for exact interpolation
+#         # reset_isws!(isws)
+#         # XWm = simulate_noise_process(dmdl, Zm)
+#         # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
+#
+#         calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
+#             solvew_sens(u, t -> wmm(m)(t), θ, N) |> h_sens
+#             # solvew_sens(u, t -> 0.0, θ, N) |> h_sens # DEBUG
+#         calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+#         Ym, gradYm = solve_in_parallel_sens(m -> calc_mean_y(pars, m), [1,2])   # TODO: Note we pass 1,2 instead of ms
+#         # Uses different noise realizations for estimate of output and estiamte of gradient
+#         # TODO: Remove/update this comment once you generalize
+#         # Ym[:,1] should be 1D since it's an array of scalars
+#         # gradYm[:,2:2] should be 2D since it's an array of gradients, and
+#         # gradients are potentially vectors
+#         # sum(*, dims=1) sums over rows, resulting in an array with the same
+#         # dimensions as a gradient
+#         grad_est = (2/N)*sum( (y-Ym[:,1]).*(-gradYm[:,2:2]), dims=1)
+#         # grad_est will be 2D array with one dimenion equal to 1, we want to return a 1D array
+#         return gradYm[:,2]
+#     end
+#
+#     grad_est = get_gradient_estimate(Y[:,1], δ, Zm, pars_true, isws)
+#
+#     p = plot(sens_m_prop, label="Sensitivity")
+#     plot!(p, der_est, label="Estimate")
+#     plot!(p, grad_est, label="Gradient")
+#     # plot!(p, sens_m_prop3, label="Alternative Sensitivity")
+#     display(p)
+#
+# end
 
 # TODO: Surely there must be a nicer way to avoid code repetition...?!!
 function get_Y_and_u(expid)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{InterSampleWindow, 1}, Function, Function}
@@ -317,12 +479,14 @@ function get_Y_and_u(expid)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{
     C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
     # Use this function to specify which parameters should be free and optimized over
-    get_all_ηs(pars::Array{Float64, 1}) = vcat(pars[1], η_true[2:end])
+    get_all_ηs(pars::Array{Float64, 1}) = η_true   # Known disturbance model
 
     mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
         (m::Int) -> mk_newer_noise_interp(
         a_vec::AbstractArray{Float64, 1}, C_true, XW, m, n_in, δ, isws)
     u(t::Float64) = interpw(input, 1, 1)(t)
+
+
 
     # compute the maximum number of steps we can take
     N_margin = 2    # Solver can request values of inputs after the time horizon
@@ -334,16 +498,18 @@ function get_Y_and_u(expid)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{
 
     # === We first generate the output of the true system ===
     function calc_Y(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1})
+        # NOTE: This XW should be non-mangled, which is why we don't divide by n_tot
         @assert (Nw <= size(XW, 1)) "Disturbance data size mismatch ($(Nw) > $(size(XW, 1)))"
         E = size(XW, 2)
         es = collect(1:E)
         we = mk_we(XW, isws)
-        solve_in_parallel(e -> solvew(u, we(e), pars_true, N) |> h_data, es)
+        # solve_in_parallel(e -> solvew(u, we(e), pars_true, N) |> h_data, es)
+        Y = solve_in_parallel(e -> solvew_sens(u, we(e), pars_true, N) |> h_data, es)
+        return Y
     end
 
     if isfile(data_Y_path(expid))
         @info "Reading output of true system"
-
         Y = readdlm(data_Y_path(expid), ',')
         isws = [initialize_isw(Q, W, n_tot, true) for e=1:M]
     else
@@ -356,6 +522,24 @@ function get_Y_and_u(expid)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{
     reset_isws!(isws)
     # TODO: Can we bake N and Nw into W_meta somehow?
     return Y, N, Nw, W_meta, isws, u, get_all_ηs
+end
+
+function perform_stochastic_gradient_descent(
+    get_grad_estimate::Function,
+    pars0::Array{Float64,1},                       # Initial guess for parameters
+    learning_rate::Function=learning_rate,
+    tol::Float64=1e-5)
+
+    t = 1
+    pars = pars0
+    while true
+        grad_est = get_grad_estimate(pars)
+        println("Iteration $t, gradient norm $(norm(grad_est)) with parameter estimate $pars")
+        norm(grad_est) > tol || break
+        pars = pars - learning_rate(t)*grad_est
+        t += 1
+    end
+    return pars
 end
 
 function plot_cost_function(expid, par_ind::Int, par_range::Tuple{Float64, Float64}, fixed_pars::Array{Float64}, step_size::Float64=0.1)

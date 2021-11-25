@@ -45,8 +45,10 @@ demangle_XW(XW::Array{Float64, 2}, n_tot::Int) =
 # n is the dimension of one sample of the state
 function interpw(W::Array{Float64, 2}, m::Int, n::Int)
     function w(t::Float64)
-        # k*δ <= t <= (k+1)*δ
-        k = Int(t÷δ)            # TODO: WHY DOES mk_noise_interp HAVE +1 HERE, BUT THIS FUNCTION DOESN'T?????
+        # tₖ = kδ <= t <= (k+1)δ = tₖ₊₁
+        # => The rows corresponding to tₖ start at index k*n+1
+        # since t₀ = 0 corrsponds to block starting with row 1
+        k = Int(t÷δ)
         w0 = W[k*n+1:(k+1)*n, m]
         w1 = W[(k+1)*n+1:(k+2)*n, m]
         return w0 + (t-k*δ)*(w1-w0)/δ
@@ -283,8 +285,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
         calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
-            # solvew_sens(u, t -> wmm(m)(t), θ, N) |> h_sens
-            solvew_sens(u, t -> 0.0, θ, N) |> h_sens # DEBUG
+            solvew_sens(u, t -> wmm(m)(t), θ, N) |> h_sens
         calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
         Ym, gradYm = solve_in_parallel_sens(m -> calc_mean_y(pars, m), [1,2])   # TODO: Note we pass 1,2 instead of ms
         # Uses different noise realizations for estimate of output and estiamte of gradient
@@ -471,7 +472,7 @@ function get_Y_and_u(expid)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{
 
     mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
         (m::Int) -> mk_newer_noise_interp(
-        a_vec::AbstractArray{Float64, 1}, C, XW, m, n_in, δ, isws)
+        a_vec::AbstractArray{Float64, 1}, C_true, XW, m, n_in, δ, isws)
     u(t::Float64) = interpw(input, 1, 1)(t)
 
 

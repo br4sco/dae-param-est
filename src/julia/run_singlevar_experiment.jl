@@ -42,6 +42,9 @@ demangle_XW(XW::Array{Float64, 2}, n_tot::Int) =
 # n is the dimension of one sample of the state
 function interpw(W::Array{Float64, 2}, m::Int, n::Int)
     function w(t::Float64)
+        # tₖ = kδ <= t <= (k+1)δ = tₖ₊₁
+        # => The rows corresponding to tₖ start at index k*n+1
+        # since t₀ = 0 corrsponds to block starting with row 1
         k = Int(t÷δ)
         w0 = W[k*n+1:(k+1)*n, m]
         w1 = W[(k+1)*n+1:(k+2)*n, m]
@@ -157,7 +160,7 @@ const pars_true = [k]                    # true value of θ
 get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]
 const dθ = length(get_all_θs(pars_true))
 realize_model(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  pendulum_multivar(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+  pendulum(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
   N,
   Ts,
 )
@@ -192,7 +195,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     a_vec = η_true[1:nx]
     C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars[1:1]), get_all_ηs(pars[2:2]))
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars[1:1]), get_all_ηs(Float64[]))
 
     # === We then optimize parameters for the baseline model ===
     function baseline_model_parametrized(δ, dummy_input, pars)
@@ -206,7 +209,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     end
 
     E = size(Y, 2)
-    # # DEBUG
+    # #DEBUG
     # E = 1
     opt_pars_baseline = zeros(length(pars0), E)
     for e=1:E
@@ -317,7 +320,7 @@ function get_Y_and_u(expid)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{
     C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
     # Use this function to specify which parameters should be free and optimized over
-    get_all_ηs(pars::Array{Float64, 1}) = vcat(pars[1], η_true[2:end])
+    get_all_ηs(pars::Array{Float64, 1}) = η_true
 
     mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
         (m::Int) -> mk_newer_noise_interp(
