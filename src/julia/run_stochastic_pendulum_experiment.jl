@@ -274,6 +274,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     function get_gradient_estimate(y, δ, Zm, pars, isws)
         p = get_all_parameters(pars)
         η = p[dθ+1: dθ+dη]
+        C = reshape(η[nx+1:end], (n_out, n_tot))
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
