@@ -288,8 +288,8 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         XWm = simulate_noise_process(dmdl, [randn(Nw, n_tot) for m = 1:2])
         wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-        calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
-            solvew_sens(u, t -> wmm(m)(t), θ, N) |> h_sens
+        calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
+            solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_sens
         calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
         Ym, gradYm = solve_in_parallel_sens(m -> calc_mean_y(pars, m), [1,2])   # TODO: Note we pass 1,2 instead of ms
         # Uses different noise realizations for estimate of output and estiamte of gradient
@@ -429,15 +429,15 @@ end
 #
 #         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
 #         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-#         XWm = simulate_noise_process_mangled(dmdl, Zm)
+#         XWm = simulate_noise_process_mangled(dmdl, [randn(Nw, n_tot) for m = 1:2])
 #         wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
 #         # NOTE: OPTION 2: Use the rows below here for exact interpolation
 #         # reset_isws!(isws)
-#         # XWm = simulate_noise_process(dmdl, Zm)
+#         # XWm = simulate_noise_process(dmdl, [randn(Nw, n_tot) for m = 1:2])
 #         # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 #
-#         calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
-#             solvew_sens(u, t -> wmm(m)(t), θ, N) |> h_sens
+#         calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
+#             solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_sens
 #             # solvew_sens(u, t -> 0.0, θ, N) |> h_sens # DEBUG
 #         calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
 #         Ym, gradYm = solve_in_parallel_sens(m -> calc_mean_y(pars, m), [1,2])   # TODO: Note we pass 1,2 instead of ms
