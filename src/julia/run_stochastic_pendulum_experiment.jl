@@ -24,7 +24,7 @@ const Q = 1000          # Number of conditional samples stored per interval
 const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
 
 # Learning rate used for stochastic gradient descent. t is the iteration index
-learning_rate(t::Int) = 1000/(1+t)
+learning_rate(t::Int) = 10000000/(1+t)
 
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
@@ -277,12 +277,15 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         C = reshape(η[nx+1:end], (n_out, n_tot))
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+        # NOTE: We use new realizations of white noise every time we estimate
+        # the gradient, so that all samples of the gradient are independent
+        # of each other
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-        # XWm = simulate_noise_process_mangled(dmdl, Zm)
+        # XWm = simulate_noise_process_mangled(dmdl, [randn(Nw, n_tot) for m = 1:2])
         # wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
         # NOTE: OPTION 2: Use the rows below here for exact interpolation
         reset_isws!(isws)
-        XWm = simulate_noise_process(dmdl, Zm)
+        XWm = simulate_noise_process(dmdl, [randn(Nw, n_tot) for m = 1:2])
         wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
         calc_mean_y_N(N::Int, θ::Array{Float64, 1}, m::Int) =
@@ -460,6 +463,81 @@ end
 #
 # end
 
+# par_ind: Index in array all_pars of the parameter that we will vary in the plots
+# par_range: Tuple containing lower and upper bound of the varied parameter
+# all_pars: Vector with all free parameters. This vector should also contain
+# a value for the parameter that we will vary (corresponding to index par_ind),
+# despite this value never being used. This is simply to give all_pars the
+# correct length
+# step_size: The distance between values of the varied parameter, which start at
+# par_range[1] and end at par_range[2]
+# function plot_cost_and_grad(expid, par_ind::Int, par_range::Tuple{Float64, Float64}, all_pars::Array{Float64}, step_size::Float64=0.1)
+#     Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid)
+#     nx = Int(W_meta.nx[1])
+#     n_in = Int(W_meta.n_in[1])
+#     n_out = Int(W_meta.n_out[1])
+#     n_tot = nx*n_in
+#     dη = length(W_meta.η)
+#     E = size(Y, 2)
+#     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), get_all_ηs(pars))
+#     var_par_vals = par_range[1]:step_size:par_range[2]
+#     num_data_pts = length(var_par_vals)
+#     # Row i of par_matrix gives all free parameter values for the data-point i.
+#     # Note that only value corresponding to par_ind is varied
+#     # var_par_vals[i] is taken instead of all_pars[par_ind]
+#     par_matrix = [vcat(all_pars[1:par_ind-1], var_par_vals[i], all_pars[par_ind+1:end]) for i=1:num_data_pts]
+#     cost_vals_M = zeros(num_data_pts, E)    # Cost based on mean of M samples
+#     cost_vals_1 = zeros(num_data_pts, E)    # Cost based on only one sampled trajectory
+#     grad_vals_1 = zeros(num_data_pts, E)    # Gradient estimate based on only one sample of trajectory and one of the output gradient
+#     grad_vals_M = zeros(num_data_pts, E)    # Gradient estimate based on a total of M simulations (M÷2 trajectories and M÷2 output gradients)
+#
+#     Zm = [randn(Nw, n_tot) for m = 1:M]
+#     for i=1:num_data_pts
+#         p = get_all_parameters(par_matrix[i])
+#         θ = p[1:dθ]
+#         η = p[dθ+1: dθ+dη]
+#         C = reshape(η[nx+1:end], (n_out, n_tot))
+#
+#         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+#         # NOTE: OPTION 1: Use the rows below here for linear interpolation
+#         XWm = simulate_noise_process_mangled(dmdl, Zm)
+#         wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+#         # # NOTE: OPTION 2: Use the rows below here for exact interpolation
+#         # reset_isws!(isws)
+#         # XWm = simulate_noise_process(dmdl, Zm)
+#         # wmm(m::Int) = mk_newer_noise_interp(view(η_true, 1:nx), C, XWm, m, n_in, δ, isws)
+#
+#         calc_mean_y_N_prop(N::Int, pars::Array{Float64, 1}, m::Int) =
+#             solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_sens
+#         calc_mean_y_prop(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, pars, m)
+#         Ym, sens_m = solve_in_parallel_sens(m -> calc_mean_y_prop(par_matrix[i], m), ms)
+#         Y_mean_prop = reshape(mean(Ym, dims = 2), :)
+#
+#         for e = 1:E
+#             # NOTE: Assumed M >= 2
+#             # grad_est_1 = (2/N)*sum( (Y[:,e]-Ym[:,1]).*(-sens_m[:,2:2]), dims=1)
+#             grad_est_1 = (2/N)*sum( (Y[:,e]-Ym[:,e÷2+1]).*(-sens_m[:,(e÷2+2):(e÷2+2)]), dims=1)
+#             # NOTE: If the gradient estimates are dependent, we risk perpetuating
+#             # the same random error through all estimates!!! I'm pretty sure that,
+#             # for SGD to converge, the estimates of the gradient need to be
+#             # independent of each other
+#             grad_est_M = mean( (2/N)*sum( (Y[:,fill(e, M÷2)]-Ym[:,1:M÷2]).*(-sens_m[:,end-M÷2+1:end]), dims=1), dims=2 )
+#
+#             grad_vals_1[i, e] = first(grad_est_1)
+#             grad_vals_M[i, e] = first(grad_est_M)
+#
+#             cost_vals_M[i, e] = mean((Y[:,e]-Y_mean_prop).^2)
+#             cost_vals_1[i, e] = mean((Y[:,e]-Ym[:,1]).^2)
+#         end
+#         @info "Finished for parameter $i / $(num_data_pts) (value: $(var_par_vals[i]))"
+#     end
+#
+#     p = plot(var_par_vals, cost_vals_M[:,1])
+#     display(p)
+#
+#     return var_par_vals, cost_vals_M, cost_vals_1, grad_vals_1, grad_vals_M
+# end
+
 # TODO: Surely there must be a nicer way to avoid code repetition...?!!
 function get_Y_and_u(expid)::Tuple{Array{Float64,2}, Int, Int, DataFrame, Array{InterSampleWindow, 1}, Function, Function}
     # A single realization of the disturbance serves as input
@@ -529,13 +607,14 @@ function perform_stochastic_gradient_descent(
     get_grad_estimate::Function,
     pars0::Array{Float64,1},                       # Initial guess for parameters
     learning_rate::Function=learning_rate,
-    tol::Float64=1e-5)
+    tol::Float64=1e-8,
+    maxiters=200)
 
     t = 1
     pars = pars0
-    while true
+    while t <= maxiters
         grad_est = get_grad_estimate(pars)
-        println("Iteration $t, gradient norm $(norm(grad_est)) with parameter estimate $pars")
+        println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         norm(grad_est) > tol || break
         pars = pars - learning_rate(t)*grad_est
         t += 1
@@ -543,7 +622,15 @@ function perform_stochastic_gradient_descent(
     return pars
 end
 
-function plot_cost_function(expid, par_ind::Int, par_range::Tuple{Float64, Float64}, fixed_pars::Array{Float64}, step_size::Float64=0.1)
+# par_ind: Index in array all_pars of the parameter that we will vary in the plots
+# par_range: Tuple containing lower and upper bound of the varied parameter
+# all_pars: Vector with all free parameters. This vector should also contain
+# a value for the parameter that we will vary (corresponding to index par_ind),
+# despite this value never being used. This is simply to give all_pars the
+# correct length
+# step_size: The distance between values of the varied parameter, which start at
+# par_range[1] and end at par_range[2]
+function plot_cost_function(expid, par_ind::Int, par_range::Tuple{Float64, Float64}, all_pars::Array{Float64}, step_size::Float64=0.1)
     Y, N, Nw, W_meta, isws, u, get_all_ηs = get_Y_and_u(expid)
     nx = Int(W_meta.nx[1])
     n_in = Int(W_meta.n_in[1])
@@ -552,12 +639,15 @@ function plot_cost_function(expid, par_ind::Int, par_range::Tuple{Float64, Float
     dη = length(W_meta.η)
     E = size(Y, 2)
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), get_all_ηs(pars))
-    par_values = par_range[1]:step_size:par_range[2]
-    par_matrix = [get_all_parameters(vcat(fixed_pars[1:par_ind-1], par_values[i], fixed_pars[par_ind+1:end])) for i=1:length(par_values)]
-    cost_vals = zeros(length(par_values), E)
+    var_par_vals = par_range[1]:step_size:par_range[2]
+    # Row i of par_matrix gives all free parameter values for the data-point i.
+    # Note that only value corresponding to par_ind is varied
+    # var_par_vals[i] is taken instead of all_pars[par_ind]
+    par_matrix = [vcat(all_pars[1:par_ind-1], var_par_vals[i], all_pars[par_ind+1:end]) for i=1:length(var_par_vals)]
+    cost_vals = zeros(length(var_par_vals), E)
 
     Zm = [randn(Nw, n_tot) for m = 1:M]
-    for i=1:length(par_values)
+    for i=1:length(var_par_vals)
         p = get_all_parameters(par_matrix[i])
         θ = p[1:dθ]
         η = p[dθ+1: dθ+dη]
@@ -583,7 +673,7 @@ function plot_cost_function(expid, par_ind::Int, par_range::Tuple{Float64, Float
         end
     end
 
-    p = plot(par_values, cost_vals[:,1])
+    p = plot(var_par_vals, cost_vals[:,1])
     display(p)
 
     return cost_vals

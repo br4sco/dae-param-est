@@ -240,7 +240,6 @@ function disturbance_model_2(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}
 end
 
 # Used for scalar disturbance and input
-# Used for input
 function disturbance_model_3(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
