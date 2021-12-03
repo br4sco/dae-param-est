@@ -23,8 +23,11 @@ const Q = 1000          # Number of conditional samples stored per interval
 
 const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
 
+# M_rate(t) specifies over how many realizations the gradient estimate should be
+# computed at iteration t
+M_rate(t::Int) = 1
 # Learning rate used for stochastic gradient descent. t is the iteration index
-learning_rate(t::Int) = 100000/(1+t)
+learning_rate(t::Int) = 1000000/(1+t)
 
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
@@ -241,40 +244,44 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         baseline_result, baseline_trace = get_fit(Y[:,e], pars0,
             (dummy_input, pars) -> baseline_model_parametrized(δ, dummy_input, pars), e)
         opt_pars_baseline[:, e] = coef(baseline_result)
+        # println("trace_type: $(typeof(baseline_trace[1].metadata))")
+        # println("value: $(baseline_trace[1].metadata)")
     end
 
     @info "The mean optimal parameters for baseline are given by: $(mean(opt_pars_baseline, dims=2))"
 
     # === Finally we optimize parameters for the proposed model ==
-    function proposed_model_parametrized(δ, Zm, dummy_input, pars, isws)
-        # NOTE: The true input is encoded in the solvew_sens()-function, but this function
-        # still needs to to take two input arguments, so dummy_input could just be
-        # anything, it's not used anyway
+    # function proposed_model_parametrized(δ, Zm, dummy_input, pars, isws)
+    #     # NOTE: The true input is encoded in the solvew_sens()-function, but this function
+    #     # still needs to to take two input arguments, so dummy_input could just be
+    #     # anything, it's not used anyway
+    #     p = get_all_parameters(pars)
+    #     θ = p[1:dθ]
+    #     η = p[dθ+1: dθ+dη]
+    #     C = reshape(η[nx+1:end], (n_out, n_tot))
+    #
+    #     dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    #     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    #     XWm = simulate_noise_process_mangled(dmdl, Zm)
+    #     wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+    #     # NOTE: OPTION 2: Use the rows below here for exact interpolation
+    #     # reset_isws!(isws)
+    #     # XWm = simulate_noise_process(dmdl, Zm)
+    #     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
+    #
+    #     calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
+    #         solvew_sens(u, t -> wmm(m)(t), pars, N) |> h
+    #     calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+    #     Ym = solve_in_parallel(m -> calc_mean_y(pars, m), ms)
+    #     return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
+    # end
+
+    # M_mean specified over how many realizations the gradient estimate is computed
+    function get_gradient_estimate(y, δ, Zm, pars, isws, M_mean::Int=1)
         p = get_all_parameters(pars)
-        θ = p[1:dθ]
         η = p[dθ+1: dθ+dη]
         C = reshape(η[nx+1:end], (n_out, n_tot))
-
-        dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
-        # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-        XWm = simulate_noise_process_mangled(dmdl, Zm)
-        wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
-        # NOTE: OPTION 2: Use the rows below here for exact interpolation
-        # reset_isws!(isws)
-        # XWm = simulate_noise_process(dmdl, Zm)
-        # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
-
-        calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
-            solvew_sens(u, t -> wmm(m)(t), pars, N) |> h
-        calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
-        Ym = solve_in_parallel(m -> calc_mean_y(pars, m), ms)
-        return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
-    end
-
-    function get_gradient_estimate(y, δ, Zm, pars, isws)
-        p = get_all_parameters(pars)
-        η = p[dθ+1: dθ+dη]
-        C = reshape(η[nx+1:end], (n_out, n_tot))
+        ms = collect(1:2M_mean)
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
         # NOTE: We use new realizations of white noise every time we estimate
@@ -285,21 +292,24 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         # wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
         # NOTE: OPTION 2: Use the rows below here for exact interpolation
         reset_isws!(isws)
-        XWm = simulate_noise_process(dmdl, [randn(Nw, n_tot) for m = 1:2])
+        XWm = simulate_noise_process(dmdl, [randn(Nw, n_tot) for m = ms])
         wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
         calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
             solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_sens
         calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
-        Ym, gradYm = solve_in_parallel_sens(m -> calc_mean_y(pars, m), [1,2])   # TODO: Note we pass 1,2 instead of ms
+        Ym, gradYm = solve_in_parallel_sens(m -> calc_mean_y(pars, m), ms)
         # Uses different noise realizations for estimate of output and estiamte of gradient
         # TODO: Remove/update this comment once you generalize
         # Ym[:,1] should be 1D since it's an array of scalars
         # gradYm[:,2:2] should be 2D since it's an array of gradients, and
         # gradients are potentially vectors
         # sum(*, dims=1) sums over rows, resulting in an array with the same
-        # dimensions as a gradient
-        grad_est = (2/N)*sum( (y[N_trans+1:end]-Ym[N_trans+1:end,1]).*(-gradYm[N_trans+1:end,2:2]), dims=1)
+        # dimensions as the gradient
+        grad_est = (2/N)*sum(
+            mean(y[N_trans+1:end].-Ym[N_trans+1:end,1:M_mean], dims=2)
+            .*mean(-gradYm[N_trans+1:end,M_mean+1:end], dims=2)
+            , dims=1)
         # grad_est will be 2D array with one dimenion equal to 1, we want to return a 1D array
         return grad_est[:]
     end
@@ -308,11 +318,13 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     # of the results? Currently repeatability is based on fixed random seed
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
-    get_gradient_estimate_p(pars) = get_gradient_estimate(Y[:,1], δ, Zm, pars, isws)
+    get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,1], δ, Zm, pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
+    trace_proposed = [Float64[] for e=1:E]
     for e=1:E
-        opt_pars_proposed[:,e] = perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0)
+        opt_pars_proposed[:,e], trace_proposed[e] =
+            perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0)
         println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
         # proposed_result, proposed_trace = get_fit(Y[:,e], pars0,
         #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws), e)
@@ -321,7 +333,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
 
-    return (opt_pars_baseline, opt_pars_proposed)
+    return (opt_pars_baseline, opt_pars_proposed, trace_proposed)
 end
 
 function get_outputs(expid, pars0::Array{Float64,1})
@@ -612,14 +624,17 @@ function perform_stochastic_gradient_descent(
 
     t = 1
     pars = pars0
+    trace = Float64[] # NOTE: Only works for scalar parameter right now
+    push!(trace, pars[1])
     while t <= maxiters
-        grad_est = get_grad_estimate(pars)
+        grad_est = get_grad_estimate(pars, M_rate(t))
         println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         norm(grad_est) > tol || break
         pars = pars - learning_rate(t)*grad_est
+        push!(trace, pars[1])
         t += 1
     end
-    return pars
+    return pars, trace
 end
 
 # NOTE: Works only for scalar parameter!!!
