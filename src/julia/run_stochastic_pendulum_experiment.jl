@@ -1,4 +1,4 @@
-using DataFrames, LsqFit, Statistics
+using DataFrames, LsqFit, StatsPlots, LaTeXStrings
 include("simulation.jl")
 include("noise_interpolation_multivar.jl")
 include("noise_generation.jl")
@@ -24,7 +24,7 @@ const Q = 1000          # Number of conditional samples stored per interval
 const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
 
 # Learning rate used for stochastic gradient descent. t is the iteration index
-learning_rate(t::Int) = 10000000/(1+t)
+learning_rate(t::Int) = 100000/(1+t)
 
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
@@ -299,7 +299,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         # gradients are potentially vectors
         # sum(*, dims=1) sums over rows, resulting in an array with the same
         # dimensions as a gradient
-        grad_est = (2/N)*sum( (y-Ym[:,1]).*(-gradYm[:,2:2]), dims=1)
+        grad_est = (2/N)*sum( (y[N_trans+1:end]-Ym[N_trans+1:end,1]).*(-gradYm[N_trans+1:end,2:2]), dims=1)
         # grad_est will be 2D array with one dimenion equal to 1, we want to return a 1D array
         return grad_est[:]
     end
@@ -620,6 +620,32 @@ function perform_stochastic_gradient_descent(
         t += 1
     end
     return pars
+end
+
+# NOTE: Works only for scalar parameter!!!
+# param_set_i[j,k] should contain optimal parameters corresponding to method i,
+# time horizon Ns[j] and data-set k
+function plot_parameter_boxplots(param_set_1::Array{Float64,2}, param_set_2::Array{Float64, 2}, Ns::Array{Int, 1})
+    # θhatbs =
+    # map(N -> calc_theta_hats(outputs.θs, outputs.Y, outputs.Yb, N_trans, N), Ns)
+    # θhatms =
+    # map(N -> calc_theta_hats(outputs.θs, outputs.Y, outputs.Ym, N_trans, N), Ns)
+    # θhats = hcat(θhatbs..., θhatms...)
+
+    labels = reshape([map(N -> "bl $(N)", Ns); map(N -> "m $(N)", Ns)], (1, :))
+    idxs = 1:(2length(Ns))
+    θhats = hcat(transpose(param_set_1), transpose(param_set_2))
+    # Quantiles are computed over dimension 1, dimension 2 interpreted as
+    # different box plots
+    p = boxplot(
+    θhats,
+    xticks = (idxs, labels),
+    label = "",
+    ylabel = L"\hat{\theta}",
+    notch = false,
+    )
+
+    hline!(p, pars_true, label = L"\theta_0", linestyle = :dot, linecolor = :gray)
 end
 
 # par_ind: Index in array all_pars of the parameter that we will vary in the plots
