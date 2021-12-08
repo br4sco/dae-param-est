@@ -398,7 +398,7 @@ function perform_experiments(Y, pars0)
             # DEBUG: The if-statement is for continuing on previously ran experiment
             # if !(k == 1 && e <= 23)
                 fit_result, trace = get_fit(Y[:,e], pars0,
-                    (dummy_input, p) -> model_parametrized(δs[k], Zm_k, dummy_input, p), e)
+                    (dummy_input, p) -> model_parametrized(δs[k], Zm_k, dummy_input, p))
                 # fit_result, trace = get_fit_debug()       # DEBUG
                 opt_pars[k][:,e] = coef(fit_result)
                 writedlm(joinpath(data_dir, "tmp", "theta_opt_$(k)_$(e)_$(identifier).csv"), coef(fit_result), ',')
@@ -418,7 +418,7 @@ end
 
 # NOTE:use coef(fit_result) to get optimal parameter values!!!!!!!!!!!!!
 # TODO: This only gets optimal parameters for one out of E realizations, extend it
-function get_fit(Ye, pars, model, e)
+function get_fit(Ye, pars, model)
     # # Use this line if you are using the original LsqFit-package
     # return curve_fit(model, 1:2, Y[:,1], p, show_trace=true)
     # Use this line if you are using the modified LsqFit-package that also

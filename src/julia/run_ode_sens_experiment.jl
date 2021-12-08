@@ -110,7 +110,7 @@ function mk_newer_noise_interp(a_vec::AbstractArray{Float64, 1},
 end
 
 # NOTE:use coef(fit_result) to get optimal parameter values
-function get_fit(Ye, pars, model, e)
+function get_fit(Ye, pars, model)
     # # Use this line if you are using the original LsqFit-package
     # return curve_fit(model, 1:2, Y[:,1], p, show_trace=true)
     # Use this line if you are using the modified LsqFit-package that also
@@ -239,7 +239,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
     opt_pars_baseline = zeros(length(pars0), E)
     for e=1:E
         baseline_result, baseline_trace = get_fit(Y[:,e], pars0,
-            (dummy_input, pars) -> baseline_model_parametrized(δ, dummy_input, pars), e)
+            (dummy_input, pars) -> baseline_model_parametrized(δ, dummy_input, pars))
         opt_pars_baseline[:, e] = coef(baseline_result)
     end
 
@@ -312,7 +312,7 @@ function get_estimates(expid, pars0::Array{Float64,1}, N_trans::Int = 0)
         opt_pars_proposed[:,e] = perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0)
         println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
         # proposed_result, proposed_trace = get_fit(Y[:,e], pars0,
-        #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws), e)
+        #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws))
         # opt_pars_proposed[:, e] = coef(proposed_result)
     end
 

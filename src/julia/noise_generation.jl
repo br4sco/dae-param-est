@@ -24,6 +24,13 @@ struct DT_SS_Model
     # In MIMO case, we have
 end
 
+struct DisturbanceMetaData
+    nx::Int
+    n_in::Int
+    n_out::Int
+    η::Array{Float64,1}
+end
+
 # =================== Helper Functions ==========================
 
 function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
@@ -198,6 +205,8 @@ end
 
 # ============== Functions for generating specific realization ===============
 
+# TODO: Instead of having disturbance metadata as a DataFrame, isn't it better
+# to create a custom struct???
 
 # Used for disturbance
 function disturbance_model_1(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}

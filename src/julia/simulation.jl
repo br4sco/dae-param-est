@@ -155,6 +155,48 @@ function pendulum(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}):
     end
 end
 
+# Equivalent to pendulum(), but variables labeled using Robert's convention instead
+function pendulum_new(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # the residual function
+        function f!(res, xp, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = xp[1] - x[4] + 2xp[6]*x[1]
+            res[2] = xp[2] - x[5] + 2xp[6]*x[2]
+            res[3] = m*xp[4] - xp[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*xp[5] - xp[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Equation for obtaining angle
+            res[7] = x[7] - atan(x[1] / -x[2])
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(Φ)
+        x2_0 = -L * cos(Φ)
+        dx3_0 = m*g/x2_0
+        dx4_0 = -g*tan(Φ) + (u0 + w0^2)/m
+
+        x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        xp0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
+
+        dvars = vcat(fill(true, 6), [false])
+
+        r0 = zeros(length(x0))
+        f!(r0, xp0, x0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, xp0, dvars, r0)
+    end
+end
+
 function pendulum_multivar(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
@@ -291,31 +333,32 @@ function pendulum_sensitivity(Φ::Float64, u::Function, w::Function, θ::Array{F
             res[4] = m*xp[5] - xp[3]*x[2] + k*abs(x[5])*x[5] + m*g
             res[5] = x[1]^2 + x[2]^2 - L^2
             res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
             # Sensitivity Equations
-            res[7]  = -x[10] + xp[7] + 2x[1]*xp[12] + 2x[7]*xp[6]
-            res[8]  = -x[11] + xp[8] + 2x[2]*xp[12] + 2x[8]*xp[6]
-            res[9]  = abs(x[4])*x[4] + 2k*x[10]*abs(x[4]) - x[1]*xp[9] + m*xp[10] - x[7]*xp[3]
-            res[10] = abs(x[5])*x[5] + 2k*x[11]*abs(x[5]) - x[2]*xp[9] + m*xp[11] - x[8]*xp[3]
-            res[11] = -2x[7]*x[1] - 2x[8]*x[2]
-            res[12] = x[10]*x[1] + x[11]*x[2] + x[7]*x[4] + x[8]*x[5]
-            # Equation for obtaining angle and angle sensitivity wrt k
-            res[13] = x[13] - atan(x[1] / -x[2])
+            res[8]  = -x[11] + xp[8] + 2x[1]*xp[13] + 2x[8]*xp[6]
+            res[9]  = -x[12] + xp[9] + 2x[2]*xp[13] + 2x[9]*xp[6]
+            res[10] = abs(x[4])*x[4] + 2k*x[11]*abs(x[4]) - x[1]*xp[10] + m*xp[11] - x[8]*xp[3]
+            res[11] = abs(x[5])*x[5] + 2k*x[12]*abs(x[5]) - x[2]*xp[10] + m*xp[12] - x[9]*xp[3]
+            res[12] = -2x[8]*x[1] - 2x[9]*x[2]
+            res[13] = x[11]*x[1] + x[12]*x[2] + x[8]*x[4] + x[9]*x[5]
+            # Sensitivity of angle of pendulum
             # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
             # L^2 (though they should be equal), is it fine to substitute L^2 here?
-            res[14] = x[14] - (x[1]*x[8] - x[7]*x[2])/(L^2)
+            res[14] = x[14] - (x[1]*x[9] - x[8]*x[2])/(L^2)
 
             # These equations sensitivity are written on the intuitive form. To
             # obtain form correct for this funciton, do the following replacements:
-            # s[1] -> x[7],  s[2] -> x[8],  s[3] -> x[9]
-            # s[4] -> x[10], s[5] -> x[11], s[6] -> x[12]
+            # s[1] -> x[8],  s[2] -> x[9],  s[3] -> x[10]
+            # s[4] -> x[11], s[5] -> x[12], s[6] -> x[13]
             # and the corresponding replacements for sp and xp
 
-            # res[7]  = -s[4] + sp[1] + 2x[1]*sp[6] + 2s[1]*xp[6]
-            # res[8]  = -s[5] + sp[2] + 2x[2]*sp[6] + 2s[2]*xp[6]
-            # res[9]  = abs(x[4])*x[4] + 2k*s[4]*abs(x[4]) - x[1]*sp[3] + m*sp[4] - s[1]*xp[3]
-            # res[10] = abs(x[5])*x[5] + 2k*s[5]*abs(x[5]) - x[2]*sp[3] + m*sp[5] - s[2]*xp[3]
-            # res[11] = -2s[1]*x[1] - 2s[2]*x[2]
-            # res[12] = s[4]*x[1] + s[5]*x[2] + s[1]*x[4] + s[2]*x[5]
+            # res[8]  = -s[4] + sp[1] + 2x[1]*sp[6] + 2s[1]*xp[6]
+            # res[9]  = -s[5] + sp[2] + 2x[2]*sp[6] + 2s[2]*xp[6]
+            # res[10]  = abs(x[4])*x[4] + 2k*s[4]*abs(x[4]) - x[1]*sp[3] + m*sp[4] - s[1]*xp[3]
+            # res[11] = abs(x[5])*x[5] + 2k*s[5]*abs(x[5]) - x[2]*sp[3] + m*sp[5] - s[2]*xp[3]
+            # res[12] = -2s[1]*x[1] - 2s[2]*x[2]
+            # res[13] = s[4]*x[1] + s[5]*x[2] + s[1]*x[4] + s[2]*x[5]
 
             nothing
         end
@@ -329,10 +372,10 @@ function pendulum_sensitivity(Φ::Float64, u::Function, w::Function, θ::Array{F
         dx3_0 = m*g/x2_0
         dx4_0 = -g*tan(Φ) + (u0 + w0^2)/m
 
-        x0 = vcat([x1_0, x2_0], zeros(10), [atan(x1_0 / -x2_0)], [0.0])
+        x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(7))
         xp0 = vcat([0., 0., dx3_0, dx4_0], zeros(10))
 
-        dvars = vcat(fill(true, 12), [false, false])
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false])
 
         r0 = zeros(length(x0))
         f!(r0, xp0, x0, [], 0.0)
