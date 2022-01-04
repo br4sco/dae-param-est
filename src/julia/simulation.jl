@@ -385,6 +385,120 @@ function pendulum_sensitivity(Φ::Float64, u::Function, w::Function, θ::Array{F
     end
 end
 
+function pendulum_sensitivity2(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # the residual function
+        function f!(res, xp, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = xp[1] - x[4] + 2xp[6]*x[1]
+            res[2] = xp[2] - x[5] + 2xp[6]*x[2]
+            res[3] = m*xp[4] - xp[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*xp[5] - xp[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
+            # Sensitivity equations for k
+            res[8]  = -x[11] + xp[8] + 2x[1]*xp[13] + 2x[8]*xp[6]
+            res[9]  = -x[12] + xp[9] + 2x[2]*xp[13] + 2x[9]*xp[6]
+            res[10] = abs(x[4])*x[4] + 2k*x[11]*abs(x[4]) - x[1]*xp[10] + m*xp[11] - x[8]*xp[3]
+            res[11] = abs(x[5])*x[5] + 2k*x[12]*abs(x[5]) - x[2]*xp[10] + m*xp[12] - x[9]*xp[3]
+            res[12] = -2x[8]*x[1] - 2x[9]*x[2]
+            res[13] = x[11]*x[1] + x[12]*x[2] + x[8]*x[4] + x[9]*x[5]
+            # Sensitivity of angle of pendulum to k
+            # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
+            # L^2 (though they should be equal), is it fine to substitute L^2 here?
+            res[14] = x[14] - (x[1]*x[9] - x[8]*x[2])/(L^2)
+            # # Sensitivity equations for L
+            res[15]  = xp[15] - x[18] + 2x[15]xp[6] + 2xp[20]x[1]
+            res[16]  = xp[16] - x[19] + 2x[16]xp[6] + 2xp[20]x[2]
+            res[17] = 2k*x[18]*abs(x[4]) + m*xp[18] - x[15]xp[3] - xp[17]x[1]
+            res[18] = 2k*x[19]*abs(x[5]) + m*xp[19] - x[16]xp[3] - xp[17]x[2]
+            res[19] = 2L -2x[15]x[1] - 2x[16]x[2]
+            res[20] = x[15]x[4] + x[18]x[1] + x[16]x[5] + x[19]x[2]
+            # Sensitivity of angle of pendulum to L
+            # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
+            # L^2 (though they should be equal), is it fine to substitute L^2 here?
+            res[21] = x[21] - (x[1]*x[16] - x[15]*x[2])/(L^2)
+
+            # These equations sensitivity are written on the intuitive form. To
+            # obtain form correct for this funciton, do the following replacements:
+            # s[1] -> x[8],  s[2] -> x[9],  s[3] -> x[10]
+            # s[4] -> x[11], s[5] -> x[12], s[6] -> x[13]
+            # t[1] -> x[15],  t[2] -> x[16],  t[3] -> x[17]
+            # t[4] -> x[18], t[5] -> x[19], t[6] -> x[20]
+            # and the corresponding replacements for sp/xp and tp/xp
+
+            # res[8]  = -s[4] + sp[1] + 2x[1]*sp[6] + 2s[1]*xp[6]
+            # res[9]  = -s[5] + sp[2] + 2x[2]*sp[6] + 2s[2]*xp[6]
+            # res[10]  = abs(x[4])*x[4] + 2k*s[4]*abs(x[4]) - x[1]*sp[3] + m*sp[4] - s[1]*xp[3]
+            # res[11] = abs(x[5])*x[5] + 2k*s[5]*abs(x[5]) - x[2]*sp[3] + m*sp[5] - s[2]*xp[3]
+            # res[12] = -2s[1]*x[1] - 2s[2]*x[2]
+            # res[13] = s[4]*x[1] + s[5]*x[2] + s[1]*x[4] + s[2]*x[5]
+            # res[14] = (x[1]*s[2] - x[2]*s[1])/(L^2)
+
+            # MATLAB form
+            # res[15]  = tp[1] - t[4] + 2t[1]xp[6] + 2tp[6]x[1]
+            # res[16]  = tp[2] - t[5] + 2t[2]xp[6] + 2tp[6]x[2]
+            # res[17] = 2k*t[4]*abs(x[4]) + m*tp[4] - t[1]xp[3] - tp[3]x[1]
+            # res[18] = 2k*t[5]*abs(x[5]) + m*tp[5] - t[2]xp[3] - tp[3]x[2]
+            # res[19] = 2L -2t[1]x[1] - 2t[2]x[2]
+            # res[20] = t[1]x[4] + t[4]x[1] + t[2]x[5] + t[5]x[2]
+            # res[21] = (x[1]*t[2] - x[2]*t[1])/(L^2)
+
+            # Hand-derived form
+            # res[15]  = -t[4] + tp[1] + 2x[1]*tp[6] + 2t[1]*xp[6]
+            # res[16]  = -t[5] + tp[2] + 2x[2]*tp[6] + 2t[2]*xp[6]
+            # res[17] = 2k*t[4]*abs(x[4]) - x[1]*tp[3] + m*tp[4] - t[1]*xp[3]
+            # res[18] = 2k*t[5]*abs(x[5]) - x[2]*tp[3] + m*tp[5] - t[2]*xp[3]
+            # res[19] = -2t[1]*x[1] - 2t[2]*x[2] + 2*L
+            # res[20] = t[4]*x[1] + t[5]*x[2] + t[1]*x[4] + t[2]*x[5]
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(Φ)
+        x2_0 = -L * cos(Φ)
+        dx3_0 = m*g/x2_0
+        dx4_0 = -g*tan(Φ) + (u0 + w0^2)/m
+
+        pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        pendp0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
+        # pend_dvar = vcat(fill(true, 6))
+        s0  = zeros(7)
+        sp0 = zeros(7)
+        t0 = vcat([sin(Φ), -cos(Φ)], zeros(5))
+        tp0 = vcat([0.,0.], [-dx3_0/L], zeros(4))
+        # if x1_0 != 0.0
+        #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(2x1_0*x2_0)], zeros(4))
+        # else
+        #     t0  = vcat([0.0, L/x2_0], zeros(5))
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(x2_0^2)], zeros(4))
+        # end
+
+        x0  = vcat(pend0, s0, t0)
+        xp0 = vcat(pendp0, sp0, tp0)
+        # x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(14))
+        # xp0 = vcat([0., 0., dx3_0, dx4_0], zeros(17))
+
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false], fill(true, 6), [false])
+
+        r0 = zeros(length(x0))
+        f!(r0, xp0, x0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, xp0, dvars, r0)
+    end
+end
+
 function pendulum_ode(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model_ode
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         # Similarly to the DAE-implementation, we don't use the ability of passing
@@ -500,7 +614,37 @@ function apply_two_outputfun(h1, h2, sol)
     end
 
     map(h1, sol.u), map(h2, sol.u)
+end
+
+function apply_outputfun_mvar(h, sol)
+  if sol.retcode != :Success
+    throw(ErrorException("Solution retcode: $(sol.retcode)"))
+  end
+
+  out_mat = zeros(length(sol.u), length(h(sol.u[1])))
+  for ind in 1:length(sol.u)
+      out_mat[ind,:] = h(sol.u[ind])
+  end
+  # map(h, sol.u)
+  return out_mat
+end
+
+function apply_two_outputfun_mvar(h1, h2, sol)
+    if sol.retcode != :Success
+      throw(ErrorException("Solution retcode: $(sol.retcode)"))
     end
+
+    # out_mat1 = zeros(length(sol.u), length(h1(sol.u[1])))
+    out_mat2 = zeros(length(sol.u), length(h2(sol.u[1])))
+    for ind in 1:length(sol.u)
+        # out_mat1[ind,:] = h1(sol.u[ind])
+        out_mat2[ind,:] = h2(sol.u[ind])
+    end
+    # map(h1, sol.u), map(h2, sol.u)
+    # return out_mat1, out_mat2
+    # NOTE: Currently supporting several parameters but only scalar output
+    return map(h1, sol.u), out_mat2
+end
 
 function solve_in_parallel(solve, is)
   M = length(is)
@@ -521,15 +665,15 @@ function solve_in_parallel_sens(solve, is)
     M = length(is)
     p = Progress(M, 1, "Running $(M) simulations...", 50)
     y1, sens1 = solve(is[1])
+    Ysens = [Array{Float64,2}(undef, length(sens1), length(sens1[1])) for m=1:M]
     Y = zeros(length(y1), M)
-    Ysens = zeros(length(sens1), M)
-    Y[:, 1] += y1
-    Ysens[:, 1] += sens1
+    Y[:,1] = y1
+    Ysens[1] = sens1
     next!(p)
     Threads.@threads for m = 2:M
         y, sens = solve(is[m])
-        Y[:, m] .+= y
-        Ysens[:, m] .+= sens
+        Y[:,m] += y
+        Ysens[m] = sens
         next!(p)
     end
     Y, Ysens
