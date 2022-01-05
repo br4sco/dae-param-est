@@ -34,7 +34,7 @@ end
 # Nw is given by Nw >= (Ts/δ)*N
 const δ = 0.01                  # noise sampling time
 const Ts = 0.1                  # step-size
-const M = 50       # Number of monte-carlo simulations used for estimating mean
+const M = 500       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
@@ -205,9 +205,7 @@ f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
 # f_sens(x::Array{Float64,1}) = [x[14]]   # NOTE: Hard-coded right now
 # NOTE: Has to be changed when number of free dynamical parameters is changed.
 # Specifically, f_sens() must return sensitivity of all free dynamical parameters
-# f_sens(x::Array{Float64,1}) = [x[14], x[21]]   # NOTE: Hard-coded right now
-f_sens(x::Array{Float64,1}) = [x[14]]   # NOTE: Hard-coded right now
-# f_sens(x::Array{Float64,1}) = [x[21]]   # NOTE: Hard-coded right now    # DEBUG, ONLY TAKING L INTO ACCOUNT!!!
+f_sens(x::Array{Float64,1}) = [x[14], x[21]]   # NOTE: Hard-coded right now
 h(sol) = apply_outputfun(f, sol)                            # for our model
 h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete model with dynamics sensitivity
 h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity
@@ -245,21 +243,12 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 #       must refere to DAE-problem that includes sensitvity equations for all
 #       free dynamical parameters
 # sensitivity for all free dynamical variables
-# const pars_true = [k, L]                    # true value of all free parameters
-# get_all_θs(pars::Array{Float64,1}) = [m, pars[2], g, pars[1]]
-# # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-# dyn_par_bounds = [0.1 1e4; 0.1 1e4]
-# realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-#   pendulum_sensitivity2(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
-#   N,
-#   Ts,
-# )
-const pars_true = [k]                    # true value of all free parameters
-get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]
+const pars_true = [k, L]                    # true value of all free parameters
+get_all_θs(pars::Array{Float64,1}) = [m, pars[2], g, pars[1]]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-dyn_par_bounds = [0.1 1e4]
+dyn_par_bounds = [0.1 1e4; 0.1 1e4]
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  pendulum_sensitivity(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+  pendulum_sensitivity2(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
   N,
   Ts,
 )
@@ -311,6 +300,10 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     n_tot = nx*n_in
     dη = length(W_meta.η)
 
+    if !isdir(joinpath(data_dir, "tmp/"))
+        mkdir(joinpath(data_dir, "tmp/"))
+    end
+
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
 
@@ -346,6 +339,9 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
             baseline_model_parametrized, jacobian_model_b,
             par_bounds[:,1], par_bounds[:,2])
         opt_pars_baseline[:, e] = coef(baseline_result)
+
+        writedlm(joinpath(data_dir, "tmp/backup_baseline_e$e.csv"), opt_pars_baseline[:,e], ',')
+
         # Sometimes (the first returned value I think) the baseline_trace
         # has no elements, and therefore doesn't contain the metadata x
         if length(baseline_trace) > 1
@@ -388,6 +384,8 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         opt_pars_proposed[:,e], trace_proposed[e] =
             perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
+
+        writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
 
         # proposed_result, proposed_trace = get_fit(Y[:,e], pars0,
         #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws),
@@ -478,6 +476,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     N = Int((Nw - N_margin)*δ÷Ts)     # Number of steps we can take
     W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true)
 
+    # TODO: Create boolean vector, each entry represents whether the corresponding
+    # parameter is a free variable or not!
     # Use this function to specify which parameters should be free and optimized over
     get_all_ηs(pars::Array{Float64, 1}) = η_true   # Known disturbance model
     # Array of tuples containing lower and upper bound for each free disturbance parameter
