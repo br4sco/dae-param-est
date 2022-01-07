@@ -125,6 +125,46 @@ function mk_noise_interp(C::Array{Float64, 2},
   end
 end
 
+function mk_noise_interp_with_sens(C::Array{Float64, 2},
+                         XW::Array{Float64, 2},
+                         m::Int,
+                         δ::Float64,
+                         nx::Int64,
+                         sens_inds::Array{Int64, 1})
+
+     let
+         n_out = size(C, 1)
+         n_tot = size(C, 2)
+         n_sens = length(sens_inds)
+
+         # Creates C-matrix that also extracts relevant disturbance state sensitivities
+         C_temp = zeros(n_out*n_sens, n_tot)
+         # NOTE: Only works if all sens_inds are strictly greater than nx
+         # since this method is only meant for c-parameters, not a-parameters
+         for is in 1:n_sens
+             ind = sens_inds[is]
+             k = rem( (ind-1), nx ) + 1
+             j = rem( (ind - k - nx), n_tot )÷nx + 1
+             i = (ind - j*nx - k)÷n_tot + 1
+             C_temp[ (is-1)*n_out + i, k + (j-1)*nx] = 1.0
+         end
+         C_new = vcat(C, C_temp)
+
+         function w(t::Float64)
+             # n*δ <= t <= (n+1)*δ
+             n = Int(t÷δ)
+             # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
+             k = n * n_tot + 1
+             # xl = view(XW, k:(k + nx - 1), m)
+             # xu = view(XW, (k + nx):(k + 2nx - 1), m)
+
+             xl = XW[k:(k + n_tot - 1), m]
+             xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+             return C_new*(xl + (t-n*δ)*(xu-xl)/δ)
+         end
+     end
+end
+
 # Function for using conditional interpolation
 function mk_newer_noise_interp(a_vec::AbstractArray{Float64, 1},
                                C::Array{Float64, 2},
@@ -205,7 +245,7 @@ f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
 # f_sens(x::Array{Float64,1}) = [x[14]]   # NOTE: Hard-coded right now
 # NOTE: Has to be changed when number of free dynamical parameters is changed.
 # Specifically, f_sens() must return sensitivity of all free dynamical parameters
-f_sens(x::Array{Float64,1}) = [x[14], x[21]]   # NOTE: Hard-coded right now
+f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]   # NOTE: Hard-coded right now
 h(sol) = apply_outputfun(f, sol)                            # for our model
 h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete model with dynamics sensitivity
 h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity
@@ -247,8 +287,9 @@ const pars_true = [k, L]                    # true value of all free parameters
 get_all_θs(pars::Array{Float64,1}) = [m, pars[2], g, pars[1]]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
 dyn_par_bounds = [0.1 1e4; 0.1 1e4]
+const num_dyn_pars = size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  pendulum_sensitivity2(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+  pendulum_sensitivity2_with_dist_sens_c(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
   N,
   Ts,
 )
@@ -285,9 +326,6 @@ solvew(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = s
 h_data(sol) = apply_outputfun(x -> f(x) + σ * randn(), sol)
 
 function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
-
-    @assert (length(pars0) == length(pars_true)) "Please pass exactly $(length(pars_true)) parameter values"
-
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     u = exp_data.u
@@ -299,6 +337,9 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     n_out = W_meta.n_out
     n_tot = nx*n_in
     dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    @assert (length(pars0) == num_dyn_pars+length(dist_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
 
     if !isdir(joinpath(data_dir, "tmp/"))
         mkdir(joinpath(data_dir, "tmp/"))
@@ -312,23 +353,23 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         # NOTE: The true input is encoded in the solvew_sens()-function, but this function
         # still needs to to take two input arguments, so dummy_input could just be
         # anything, it's not used anyway
-        Y_base = solvew(u, t -> zeros(n_out), pars, N ) |> h
+        Y_base = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N ) |> h
 
         # NOTE: SCALAR_OUTPUT is assumed
         return reshape(Y_base[N_trans+1:end,:], :)   # Returns 1D-array
     end
 
     function jacobian_model_b(dummy_input, pars)
-        jac = solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
+        jac = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N) |> h_sens
         return jac[N_trans+1:end, :]
     end
 
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    # E = size(Y, 2)
-    # DEBUG
-    E = 1
+    E = size(Y, 2)
+    # # DEBUG
+    # E = 1
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
@@ -402,7 +443,6 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 end
 
 function get_outputs(expid::String, pars0::Array{Float64,1})
-
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
@@ -414,6 +454,9 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
     n_out = W_meta.n_out
     n_tot = nx*n_in
     dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    @assert (length(pars0) == num_dyn_pars+length(W_meta.free_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
 
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
     p = get_all_parameters(pars0)
@@ -422,7 +465,7 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
     C = reshape(η[nx+1:end], (n_out, n_tot))
 
     # === Computes output of the baseline model ===
-    Y_base, sens_base = solvew_sens(u, t -> zeros(n_out), pars0, N) |> h_comp
+    Y_base, sens_base = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars0, N) |> h_comp
 
     # === Computes outputs of the proposed model ===
     # TODO: Should we consider storing and loading white noise, to improve repeatability
@@ -431,7 +474,7 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
     dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+    wmm(m::Int) = mk_noise_interp_with_sens(C, XWm, m, δ, nx, dist_par_inds)
     # # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
@@ -467,6 +510,22 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     a_vec = η_true[1:nx]
     C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
+    # NOTE: Has to be changed when number of free disturbance parameters is changed.
+    # Use this function to specify which parameters should be free and optimized over
+    # Each element represent whether the corresponding element in η is a free parameter
+    # free_pars = fill(false, size(η_true))       # Known disturbance model
+    free_pars = vcat(fill(false, nx), true, fill(false, nx-1))       # First parameter of c-vector unknown # TODO: C-vector has potentially more than nx parameters
+    free_par_inds = findall(free_pars)          # Indices of free variables in η
+    # Array of tuples containing lower and upper bound for each free disturbance parameter
+    # dist_par_bounds = Array{Float64}(undef, 0, 2)
+    dist_par_bounds = [-Inf Inf]
+    function get_all_ηs(pars::Array{Float64, 1})
+        all_η = η_true
+        all_η[free_par_inds] = pars[num_dyn_pars+1:end]
+        return all_η
+     end
+     @assert (sum(free_par_inds .<= nx) == 0) "The ability to select the first nx = $nx parameters (corresponding to a-vector) as free is not implemented yet."
+
     # compute the maximum number of steps we can take
     N_margin = 2    # Solver can request values of inputs after the time horizon
                     # ends, so we require a margin of a few samples of the noise
@@ -474,14 +533,7 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Minimum of number of available disturbance or input samples
     Nw = min(size(XW, 1)÷n_tot, size(input, 1)÷n_in)
     N = Int((Nw - N_margin)*δ÷Ts)     # Number of steps we can take
-    W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true)
-
-    # TODO: Create boolean vector, each entry represents whether the corresponding
-    # parameter is a free variable or not!
-    # Use this function to specify which parameters should be free and optimized over
-    get_all_ηs(pars::Array{Float64, 1}) = η_true   # Known disturbance model
-    # Array of tuples containing lower and upper bound for each free disturbance parameter
-    dist_par_bounds = Array{Float64}(undef, 0, 2)
+    W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds)
 
     mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
         (m::Int) -> mk_newer_noise_interp(
@@ -673,6 +725,7 @@ function simulate_system_sens(
     n_tot = nx*n_in
     dη = length(W_meta.η)
     N = size(exp_data.Y, 1)-1
+    dist_par_inds = W_meta.free_par_inds
 
     p = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
     θ = p[1:dθ]
@@ -682,7 +735,7 @@ function simulate_system_sens(
     dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+    wmm(m::Int) = mk_noise_interp_with_sens(C, XWm, m, δ, nx, dist_par_inds)
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
@@ -1262,7 +1315,7 @@ function debug_proposed_cost_func(expid::String, par_vector::Array{Array{Float64
     return costs, cost_gradients
 end
 
-function debug_output_jacobian(expid::String, pars::Array{Float64, 1})
+function debug_output_jacobian_dynamics(expid::String, pars::Array{Float64, 1})
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
@@ -1281,18 +1334,14 @@ function debug_output_jacobian(expid::String, pars::Array{Float64, 1})
     # Each rows represents the displacement of one variable used for estimating jacobian
     dvars = step*Matrix{Float64}(I, length(pars), length(pars))
 
-    # Zm = [randn(Nw, n_tot)]
-    # Y, sens = simulate_system_sens(exp_data, pars, 1, isws, Zm)
-    # sens = sens[1]
-    # Y, sens = solvew_sens(exp_data.u, t -> 0.0, pars, N) |> h_comp
-    Y, sens = solvew_sens(t -> 0.0, t -> 0.0, pars, N) |> h_comp
+    # NOTE: All simulations here are done without any disturbance
+
+    Y, sens = solvew_sens(exp_data.u, t -> 0.0, pars, N) |> h_comp
     Jac_est = zeros(length(Y), length(pars))
 
     for ind in 1:length(pars)
         reset_isws!(isws)
-        # Ynew = simulate_system(exp_data, pars+dvars[ind,:], 1, isws, Zm)
-        # Ynew = solvew(exp_data.u, t -> 0.0, pars, N) |> h
-        Ynew = solvew(t -> 0.0, t -> 0.0, pars+dvars[ind,:], N) |> h
+        Ynew = solvew(exp_data.u, t -> 0.0, pars+dvars[ind,:], N) |> h
         Jac_est[:,ind] = (Ynew - Y)/step
     end
 
@@ -1301,6 +1350,72 @@ function debug_output_jacobian(expid::String, pars::Array{Float64, 1})
     display(p)
 
     return sens, Jac_est
+end
+
+function debug_output_jacobian_disturbance(expid::String, pars::Array{Float64,1})
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    u = exp_data.u
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+
+    W_meta = exp_data.W_meta
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    N = size(exp_data.Y, 1)-1
+    Zm = [randn(Nw, n_tot)]
+
+    step = 0.01
+    # NOTE: Currently only treats case where disturbance parameters correspond
+    # to parameters in the "c-vector"
+    dist_par_inds = nx+1:nx+n_tot*n_out
+
+    p = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    θ = p[1:dθ]
+    η = p[dθ+1: dθ+dη]
+    C = reshape(η[nx+1:end], (n_out, n_tot))
+
+    dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    XWm = simulate_noise_process_mangled(dmdl, Zm)
+
+    sens_estimates  = zeros(size(Y,1), length(dist_par_inds))
+    euler_estimates = zeros(size(Y,1), length(dist_par_inds))
+
+    # TODO: results "res" change depending on when they are generated, i.e.
+    # if we change the order of parameters in dist_par_inds, we will not get the
+    # same realization for same parameter. I'm not sure why, might be very
+    # reasonable explanation for it, but I don't know of the top of my head
+    # and I don't really want to spend more time on it
+    for (i, dist_par_ind) in enumerate(dist_par_inds)
+        η2 = η
+        η2[dist_par_ind] += step
+        C2 = reshape(η2[nx+1:end], (n_out, n_tot))
+
+        wmm(m::Int) = mk_noise_interp_with_sens(C, XWm, m, δ, nx, [dist_par_ind])
+        wmm2(m::Int) = mk_noise_interp_with_sens(C2, XWm, m, δ, nx, [dist_par_ind])
+
+        # We must re-simulate "true" system to get sensitivity wrt the correct paramter
+        res = solvew_sens(exp_data.u, t -> wmm(1)(t), pars, N) |> h_comp
+        # @info "N: $N, y: $(size(Y)), res: $(size(res[2])), type: $(typeof(res[2]))"
+        res2 = solvew_sens(exp_data.u, t -> wmm2(1)(t), pars, N) |> h_comp
+        sens_estimates[:, i] = res[2][:,3]
+        euler_estimates[:, i] = (res2[1]-res[1])/step
+    end
+
+    return sens_estimates, euler_estimates
+
+    # p = plot(euler_estimate)
+    # plot!(p, sens_estimate)
+    # display(p)
 end
 
 # Similar to perform_stochastic_gradient_descent() but also returns
