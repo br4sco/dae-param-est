@@ -125,46 +125,6 @@ function mk_noise_interp(C::Array{Float64, 2},
   end
 end
 
-function mk_noise_interp_with_sens(C::Array{Float64, 2},
-                         XW::Array{Float64, 2},
-                         m::Int,
-                         δ::Float64,
-                         nx::Int64,
-                         sens_inds::Array{Int64, 1})
-
-     let
-         n_out = size(C, 1)
-         n_tot = size(C, 2)
-         n_sens = length(sens_inds)
-
-         # Creates C-matrix that also extracts relevant disturbance state sensitivities
-         C_temp = zeros(n_out*n_sens, n_tot)
-         # NOTE: Only works if all sens_inds are strictly greater than nx
-         # since this method is only meant for c-parameters, not a-parameters
-         for is in 1:n_sens
-             ind = sens_inds[is]
-             k = rem( (ind-1), nx ) + 1
-             j = rem( (ind - k - nx), n_tot )÷nx + 1
-             i = (ind - j*nx - k)÷n_tot + 1
-             C_temp[ (is-1)*n_out + i, k + (j-1)*nx] = 1.0
-         end
-         C_new = vcat(C, C_temp)
-
-         function w(t::Float64)
-             # n*δ <= t <= (n+1)*δ
-             n = Int(t÷δ)
-             # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
-             k = n * n_tot + 1
-             # xl = view(XW, k:(k + nx - 1), m)
-             # xu = view(XW, (k + nx):(k + 2nx - 1), m)
-
-             xl = XW[k:(k + n_tot - 1), m]
-             xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
-             return C_new*(xl + (t-n*δ)*(xu-xl)/δ)
-         end
-     end
-end
-
 # Function for using conditional interpolation
 function mk_newer_noise_interp(a_vec::AbstractArray{Float64, 1},
                                C::Array{Float64, 2},
@@ -242,10 +202,11 @@ const φ0 = 0.0                   # Initial angle of pendulum from negative y-ax
 #   y               -- the output y = atan(x1/-x2) is computed by the solver
 # ]
 f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-# f_sens(x::Array{Float64,1}) = [x[14]]   # NOTE: Hard-coded right now
-# NOTE: Has to be changed when number of free dynamical parameters is changed.
-# Specifically, f_sens() must return sensitivity of all free dynamical parameters
-f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]   # NOTE: Hard-coded right now
+f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
+# NOTE: Has to be changed when number of free  parameters is changed.
+# Specifically, f_sens() must return sensitivity wrt to all free parameters
+# f_sens(x::Array{Float64,1}) = [x[14], x[21]]   # NOTE: Hard-coded right now
+# f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]   # NOTE: Hard-coded right now
 h(sol) = apply_outputfun(f, sol)                            # for our model
 h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete model with dynamics sensitivity
 h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity
@@ -283,13 +244,13 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 #       must refere to DAE-problem that includes sensitvity equations for all
 #       free dynamical parameters
 # sensitivity for all free dynamical variables
-const pars_true = [k, L]                    # true value of all free parameters
-get_all_θs(pars::Array{Float64,1}) = [m, pars[2], g, pars[1]]
+const pars_true = [m, L, g, k]                    # true value of all free parameters
+get_all_θs(pars::Array{Float64,1}) = pars[1:4]#[m, L, g, pars[1]]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-dyn_par_bounds = [0.1 1e4; 0.1 1e4]
+dyn_par_bounds = [0.1 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
 const num_dyn_pars = size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  pendulum_sensitivity2_with_dist_sens_c(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+  pendulum_sensitivity_full(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
   N,
   Ts,
 )
@@ -367,9 +328,9 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    E = size(Y, 2)
-    # # DEBUG
-    # E = 1
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
@@ -399,7 +360,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # Returns estimate of gradient of cost function
     # M_mean specifies over how many realizations the gradient estimate is computed
     function get_gradient_estimate(y, pars, isws, M_mean::Int=1)
-        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, isws)
+        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, dist_par_inds, isws)
         # Uses different noise realizations for estimate of output and estiamte of jacobian
         grad_est = get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
         # grad_est will be 2D array with one dimenion equal to 1, we want to return a 1D array
@@ -408,7 +369,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # Returns estimate of gradient of output
     function get_proposed_jacobian(pars, isws, M_mean::Int=1)
-        jacYm = simulate_system_sens(exp_data, pars, M_mean, isws)[2]
+        jacYm = simulate_system_sens(exp_data, pars, M_mean, dist_par_inds, isws)[2]
         return mean(jacYm, dims=2)
     end
 
@@ -462,7 +423,7 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
     p = get_all_parameters(pars0)
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
-    C = reshape(η[nx+1:end], (n_out, n_tot))
+    # C = reshape(η[nx+1:end], (n_out, n_tot))
 
     # === Computes output of the baseline model ===
     Y_base, sens_base = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars0, N) |> h_comp
@@ -471,10 +432,25 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
     # TODO: Should we consider storing and loading white noise, to improve repeatability
     # of the results? Currently repeatability is based on fixed random seed
     Zm = [randn(Nw, n_tot) for m = 1:M]
-    dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    q_a = length(dist_par_inds[findall(dist_par_inds .<= nx)])
+    n_sens = nx*(1+q_a)
+    # Creating Z_sens should ensure that the white noise that is fed into the
+    # nominal (non-sensitivity) part of the disturbance system is the same as
+    # the noise in Zm, so that the disturbance model state should always give
+    # the same realization given the same Zm, regardless of the number of free
+    # disturbance parameters corresponding to the "a-vector" in the disturbance model
+    Z_sens = [zeros(Nw, n_tot*(1+q_a)) for m = 1:M]
+    for m = 1:M
+        for i = 1:n_out
+            Z_sens[m][:, (i-1)*n_sens+1:(i-1)*n_sens+nx] = Zm[m][:, (i-1)*nx+1:i*nx]
+            Z_sens[m][:, (i-1)*n_sens+nx+1:i*n_sens] = randn(Nw, q_a*nx)
+        end
+    end
+    # dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
-    XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp_with_sens(C, XWm, m, δ, nx, dist_par_inds)
+    XWm = simulate_noise_process_mangled(dmdl, Z_sens)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
     # # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
@@ -511,20 +487,23 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
     # NOTE: Has to be changed when number of free disturbance parameters is changed.
+    # Specifically: Both vector free_pars and the corresponding vector
+    #dist_par_bounds need to be updated
+
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
-    # free_pars = fill(false, size(η_true))       # Known disturbance model
-    free_pars = vcat(fill(false, nx), true, fill(false, nx-1))       # First parameter of c-vector unknown # TODO: C-vector has potentially more than nx parameters
-    free_par_inds = findall(free_pars)          # Indices of free variables in η
+    free_pars = fill(false, size(η_true))       # Known disturbance model
+    # free_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))       # First parameter of c-vector unknown
+    # free_pars = vcat(true, fill(false, nx-1), false, fill(false, n_tot*n_out-1))       # First parameter of a-vector and first parameter of c-vector unknown
+    free_par_inds = findall(free_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
-    # dist_par_bounds = Array{Float64}(undef, 0, 2)
-    dist_par_bounds = [-Inf Inf]
+    dist_par_bounds = Array{Float64}(undef, 0, 2)
+    # dist_par_bounds = [-Inf Inf]
     function get_all_ηs(pars::Array{Float64, 1})
         all_η = η_true
         all_η[free_par_inds] = pars[num_dyn_pars+1:end]
         return all_η
      end
-     @assert (sum(free_par_inds .<= nx) == 0) "The ability to select the first nx = $nx parameters (corresponding to a-vector) as free is not implemented yet."
 
     # compute the maximum number of steps we can take
     N_margin = 2    # Solver can request values of inputs after the time horizon
@@ -662,6 +641,7 @@ function simulate_system(
     exp_data::ExperimentData,
     pars::Array{Float64,1},
     M::Int,
+    dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1},
     Zm::Array{Array{Float64,2},1})::Array{Float64,2}
 
@@ -678,7 +658,8 @@ function simulate_system(
     η = p[dθ+1: dθ+dη]
     C = reshape(η[nx+1:end], (n_out, n_tot))
 
-    dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    # dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, sens_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
     wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
@@ -698,6 +679,7 @@ function simulate_system(
     exp_data::ExperimentData,
     pars::Array{Float64,1},
     M::Int,
+    dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1})::Array{Float64,2}
 
     W_meta = exp_data.W_meta
@@ -706,7 +688,7 @@ function simulate_system(
     n_tot = nx*n_in
     Nw = exp_data.Nw
     Zm = [randn(Nw, n_tot) for m = 1:M]
-    simulate_system(exp_data, pars, M, isws, Zm)
+    simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm)
 end
 
 # Simulates system with specified white noise
@@ -714,6 +696,7 @@ function simulate_system_sens(
     exp_data::ExperimentData,
     pars::Array{Float64,1},
     M::Int,
+    dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1},
     Zm::Array{Array{Float64,2},1})::Tuple{Array{Float64,2}, Array{Array{Float64,2},1}}
 
@@ -730,12 +713,12 @@ function simulate_system_sens(
     p = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
-    C = reshape(η[nx+1:end], (n_out, n_tot))
+    # C = reshape(η[nx+1:end], (n_out, n_tot))
 
-    dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp_with_sens(C, XWm, m, δ, nx, dist_par_inds)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
@@ -752,6 +735,7 @@ function simulate_system_sens(
     exp_data::ExperimentData,
     pars::Array{Float64,1},
     M::Int,
+    dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1})::Tuple{Array{Float64,2}, Array{Array{Float64,2},1}}
 
     W_meta = exp_data.W_meta
@@ -760,7 +744,7 @@ function simulate_system_sens(
     n_tot = nx*n_in
     Nw = exp_data.Nw
     Zm = [randn(Nw, n_tot) for m = 1:M]
-    simulate_system_sens(exp_data, pars, M, isws, Zm)
+    simulate_system_sens(exp_data, pars, M, dist_sens_inds, isws, Zm)
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
@@ -1400,8 +1384,10 @@ function debug_output_jacobian_disturbance(expid::String, pars::Array{Float64,1}
         η2[dist_par_ind] += step
         C2 = reshape(η2[nx+1:end], (n_out, n_tot))
 
-        wmm(m::Int) = mk_noise_interp_with_sens(C, XWm, m, δ, nx, [dist_par_ind])
-        wmm2(m::Int) = mk_noise_interp_with_sens(C2, XWm, m, δ, nx, [dist_par_ind])
+        # wmm(m::Int) = mk_noise_interp(C, XWm, m, δ, nx, [dist_par_ind])
+        # wmm2(m::Int) = mk_noise_interp(C2, XWm, m, δ, nx, [dist_par_ind])
+        wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+        wmm2(m::Int) = mk_noise_interp(C2, XWm, m, δ)
 
         # We must re-simulate "true" system to get sensitivity wrt the correct paramter
         res = solvew_sens(exp_data.u, t -> wmm(1)(t), pars, N) |> h_comp

@@ -21,7 +21,6 @@ struct DT_SS_Model
     Cd::Array{Float64, 2}
     x0::Array{Float64, 1}
     Ts::Float64                     # Sampling period of the system
-    # In MIMO case, we have
 end
 
 struct DisturbanceMetaData
@@ -29,6 +28,7 @@ struct DisturbanceMetaData
     n_in::Int
     n_out::Int
     η::Array{Float64,1}
+    free_par_inds::Array{Int64,1}
 end
 
 # =================== Helper Functions ==========================
@@ -53,6 +53,79 @@ function discretize_ct_noise_model(mdl::CT_SS_Model, Ts::Float64)::DT_SS_Model
     CholTs  = cholesky(Bd2Ts)
     BdTs    = CholTs.L
     return DT_SS_Model(AdTs, BdTs, mdl.C, mdl.x0, Ts)
+end
+
+function discretize_ct_noise_model_with_sensitivities(
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
+    # sens_inds: indices of parameter with respect to which we compute the
+    # sensitivity of disturbance output w
+
+    nx = size(mdl.A,1)
+    n_out = size(mdl.C, 1)
+    n_in  = size(mdl.C, 2)÷nx
+    function get_k_j_i(zeta::Int64)::Tuple{Int64, Int64, Int64}
+        k = rem( (zeta-1), nx ) + 1
+        j = rem( (zeta - k - nx), nx*n_in)÷nx + 1
+        i = (zeta - j*nx - k)÷(nx*n_in) + 1
+        return k, j, i
+    end
+
+    # Indices of free parameters corresponding to "a-vector" in disturbance model
+    sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
+    q   = length(sens_inds)
+    q_a = length(sens_inds_a)
+    nx_sens = (1+q_a)*nx
+    A_mat = zeros(nx_sens, nx_sens)
+    A_mat[1:nx, 1:nx] = mdl.A
+    for i in 1:length(sens_inds_a)
+        Aη = zeros(nx, nx)
+        Aη[1, sens_inds_a[i]] = -1
+        A_mat[i*nx+1:(i+1)*nx, i*nx+1:(i+1)*nx] = mdl.A
+        A_mat[i*nx+1:(i+1)*nx, 1:nx] = Aη
+    end
+    B_mat = vcat(mdl.B, zeros(q_a*nx, size(mdl.B, 2)) )
+    my_I = Matrix{Float64}(I, q_a*nx, q_a*nx)
+    C_mat = zeros((q+1)n_out, nx_sens*n_in)
+    for row_block = 1:q+1
+        if row_block == 1
+            for col_block = 1:n_in
+                C_mat[(row_block-1)*n_out+1:row_block*n_out,
+                    (col_block-1)*(q_a+1)*nx+1:(col_block-1)*(q_a+1)*nx+nx] =
+                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+                # C_mat[:, (col_block-1)*(q_a+1)*nx+1:col_block*(q_a+1)*nx]
+                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, q_a*nx))
+            end
+        elseif row_block <= q_a+1
+            ind = row_block-1
+            for col_block = 1:n_in
+                C_mat[(row_block-1)*n_out+1:row_block*n_out,
+                    ind*nx+(col_block-1)*(q_a+1)*nx+1:ind*nx+(col_block-1)*(q_a+1)*nx+nx] =
+                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+            end
+        else
+            k, j, i = get_k_j_i(sens_inds[row_block-1])
+            C_mat[(row_block-1)*n_out+i, (j-1)*(q_a+1)*nx+k] = 1
+        end
+    end
+
+    # for col_block = 1:n_in
+    #     C_mat[1:n_out, (col_block-1)*(q_a+1)*nx+1:(col_block-1)*(q_a+1)*nx+nx] =
+    #         mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+    # end
+    # for row_block = 2:1+q_a
+    #     C_mat[n_out+(row_block-2)*nx*q_a+1:n_out+(row_block-1)*nx*q_a,
+    #         nx+(row_block-2)*(q_a+1)*nx+1:nx+(row_block-2)*(q_a+1)*nx+q_a*nx] =
+    #         my_I
+    # end
+
+    Mexp    = [-A_mat B_mat*(B_mat'); zeros(size(A_mat)) A_mat']
+    MTs     = exp(Mexp*Ts)
+    AdTs    = MTs[nx_sens+1:end, nx_sens+1:end]'
+    Bd2Ts   = Hermitian(AdTs*MTs[1:nx_sens, nx_sens+1:end])
+    CholTs  = cholesky(Bd2Ts)
+    BdTs    = CholTs.L
+    svd_Bd = svd(Bd2Ts)
+    return DT_SS_Model(AdTs, BdTs, C_mat, zeros(nx_sens*n_in), Ts)
 end
 
 # Converts parameter values for C-matrix as entered into a single vector more
@@ -178,8 +251,8 @@ function simulate_noise_process_mangled(
     # data[m][i, k*nx + j] should be the j:th component of the noise
     # corresponding to input k at time i of realization m
     M = length(data)
-    N = size(data[1])[1]-1
-    nx = size(mdl.Ad)[1]
+    N = size(data[1], 1)-1
+    nx = size(mdl.Ad, 1)
     n_in = size(mdl.Cd, 2)÷nx
     # We only care about the state, not the output, so we ignore the C-matrix
     C_placeholder = zeros(1, nx)
