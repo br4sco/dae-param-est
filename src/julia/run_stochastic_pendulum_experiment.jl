@@ -49,7 +49,8 @@ M_rate_max = 4
 # will be performed for estimating the gradient of the cost functions
 M_rate(t::Int) = M_rate_max
 # This learning rate works very well with M_rate = 8
-learning_rate(t::Int, grad_norm::Float64) = if (t < 50) 1/grad_norm else 1/(grad_norm*(1+1*(t-50) )) end
+lr_break = 50
+learning_rate(t::Int, grad_norm::Float64) = if (t < lr_break) 1/grad_norm else 1/(grad_norm*(1+1*(t-lr_break) )) end
 
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
@@ -202,7 +203,8 @@ const φ0 = 0.0                   # Initial angle of pendulum from negative y-ax
 #   y               -- the output y = atan(x1/-x2) is computed by the solver
 # ]
 f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
+# f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
+f_sens(x::Array{Float64, 1}) = [x[14]]
 # NOTE: Has to be changed when number of free  parameters is changed.
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
 # f_sens(x::Array{Float64,1}) = [x[14], x[21]]   # NOTE: Hard-coded right now
@@ -244,13 +246,15 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 #       must refere to DAE-problem that includes sensitvity equations for all
 #       free dynamical parameters
 # sensitivity for all free dynamical variables
-const pars_true = [m, L, g, k]                    # true value of all free parameters
-get_all_θs(pars::Array{Float64,1}) = pars[1:4]#[m, L, g, pars[1]]
+# const pars_true = [m, L, g, k]                    # true value of all free parameters
+const pars_true = [k]                    # true value of all free parameters
+get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]#pars[1:4]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-dyn_par_bounds = [0.1 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
+# dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
+dyn_par_bounds = [0.1 1e4]
 const num_dyn_pars = size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  pendulum_sensitivity_full(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+  pendulum_sensitivity(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
   N,
   Ts,
 )
@@ -328,9 +332,9 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    # E = size(Y, 2)
+    E = size(Y, 2)
     # DEBUG
-    E = 1
+    # E = 1
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
@@ -558,15 +562,13 @@ function perform_stochastic_gradient_descent(
     pars0::Array{Float64,1},                        # Initial guess for parameters
     bounds::Array{Float64, 2},                      # Parameter bounds
     learning_rate::Function=learning_rate;
-    tol::Float64=1e-4,# tol::Float64=1e-8,
+    tol::Float64=1e-4,
     maxiters=200,
     verbose=false)
 
-    last_10_params = zeros(10, length(pars0))
-    last_10_params[end,:] .= 10000  # Fills one parameter with some large number
-    # mean((last_10_params - mean(last_10_params, dims=1)).^2) is the trace of
-    # the covariance matrix of the last 10 parameters, divided by 10*length(pars0)
-    running_criterion() = mean((last_10_params .- mean(last_10_params, dims=1)).^2) > tol
+    q = lr_break+50
+    last_q_norms = fill(Inf, q)
+    running_criterion() = mean(last_q_norms) > tol
 
     t = 1
     pars = pars0
@@ -576,14 +578,14 @@ function perform_stochastic_gradient_descent(
         # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         # running_criterion(grad_est) || break
         if verbose
-            println("Iteration $t, scaled trace of covariance $(mean((last_10_params .- mean(last_10_params, dims=1)).^2)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
+            println("Iteration $t, average gradient norm $(mean(last_q_norms)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         end
         running_criterion() || break
         pars = pars - learning_rate(t, norm(grad_est))*grad_est
         project_on_bounds!(pars, bounds)
         push!(trace, pars)
         # (t-1)%10+1 maps t to a number between 1 and 10 (inclusive)
-        last_10_params[(t-1)%10+1, :] = pars
+        last_q_norms[(t-1)%q+1] = norm(grad_est)
         t += 1
     end
     return pars, trace
@@ -659,7 +661,7 @@ function simulate_system(
     C = reshape(η[nx+1:end], (n_out, n_tot))
 
     # dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
-    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, sens_inds)
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
     wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
@@ -708,6 +710,7 @@ function simulate_system_sens(
     n_tot = nx*n_in
     dη = length(W_meta.η)
     N = size(exp_data.Y, 1)-1
+    @info "N in here is $N, and M: $M, and size Zm[1]: $(size(Zm[1]))"  #DEBUG
     dist_par_inds = W_meta.free_par_inds
 
     p = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
@@ -727,6 +730,11 @@ function simulate_system_sens(
     calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
         solvew_sens(exp_data.u, t -> wmm(m)(t), pars, N) |> h_comp
     calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+
+    # DEBUG
+    temp, temp_sens = calc_mean_y(pars, 1)
+    @info "Size temp: $(size(temp)), temp sens: $(size(temp_sens))"
+
     return solve_in_parallel_sens(m -> calc_mean_y(pars, m), collect(1:M))  # Returns Ym and JacsYm
 end
 
@@ -771,6 +779,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     dη = length(W_meta.η)
     u = exp_data.u
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
 
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
@@ -792,10 +801,17 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1
+    E = 6
     opt_pars_baseline = zeros(length(pars0), E)
     trace_base = [[pars0] for e=1:E]
     for e=1:E
+
+        # DEBUG
+        mdl_out = baseline_model_parametrized(δ, 0, pars0)
+        jac_out = jacobian_model_b(0, pars0)
+        println("B model out: $(size(mdl_out))")
+        println("B jac_out: $(size(jac_out))")
+
         # HACK: Uses trace returned due to hacked LsqFit package
         baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
             (dummy_input, pars) -> baseline_model_parametrized(δ, dummy_input, pars),
@@ -838,7 +854,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         # NOTE: If we don't pass Zm here, we will see that the cost function
         # looks very irregular even with M = 500. That's a bit suprising,
         # I would expect it to average out over that many iterations
-        Ym = simulate_system(exp_data, [prop_par_vals[ind]], M, isws, Zm)
+        Ym = simulate_system(exp_data, [prop_par_vals[ind]], M, dist_sens_inds, isws, Zm)
         Y_mean = mean(Ym, dims=2)
         # Y has columns indexed with 1:E because in case E is changed for debugging purposes,
         # without the dimensions of Y changing, we can get a mismatch otherwise
@@ -855,7 +871,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         η = p[dθ+1: dθ+dη]
         C = reshape(η[nx+1:end], (n_out, n_tot))
 
-        dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+        dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ) # TODO: Use new discretizations
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
         XWm = simulate_noise_process_mangled(dmdl, Zm)
         wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
@@ -874,7 +890,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     # Returns estimate of gradient of cost function
     # M_mean specified over how many realizations the gradient estimate is computed
     function get_gradient_estimate(y, δ, pars, isws, M_mean::Int=1)
-        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, isws)
+        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, dist_sens_inds, isws)
         # Uses different noise realizations for estimate of output and estiamte of gradient
         grad_est = get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
         # grad_est will be 2D array with one dimenion equal to 1, we want to return a 1D array
@@ -884,7 +900,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     # Returns estimate of gradient of cost function
     # M_mean specified over how many realizations the gradient estimate is computed
     function get_gradient_estimate_debug(y, δ, pars, isws, M_mean::Int=1)
-        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, isws)
+        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, dist_sens_inds, isws)
         # Uses different noise realizations for estimate of output and estiamte of gradient
         grad_est = get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
         cost = mean((y[N_trans+1:end]-Ym[N_trans+1:end,1]).^2)
@@ -894,8 +910,8 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
 
     # Returns estimate of gradient of output
     function get_proposed_jacobian(pars, isws, M_mean::Int=1)
-        jacYm = simulate_system_sens(exp_data, pars, M_mean, isws)[2]
-        return mean(jacYm[N_trans+1:end, :], dims=2)
+        jacsYm = simulate_system_sens(exp_data, pars, M_mean, dist_sens_inds, isws)[2]
+        return mean(jacsYm)[N_trans+1:end, :]
     end
 
     @info "Finding proposed minimum..."
@@ -911,6 +927,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         jacobian_model(x, p) = get_proposed_jacobian(p, isws, M)
         # opt_pars_proposed[:,e], trace_proposed[e] =
         #     perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
+
         opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_norms[e] =
             perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=500, tol=1e-6)
         reset_isws!(isws)
@@ -928,6 +945,9 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
 
     @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
 
+    # trace_proposed is an array with E elements, where each element is an array
+    # of parameters that the SGD has gone through, and where every parameter
+    # is an array of Float64-values
     return opt_pars_baseline, opt_pars_proposed, trace_base, trace_proposed, base_cost_vals, prop_cost_vals, trace_costs, base_par_vals, prop_par_vals, opt_pars_proposed_LSQ
 end
 
@@ -1412,15 +1432,13 @@ function perform_stochastic_gradient_descent_debug(
     pars0::Array{Float64,1},                       # Initial guess for parameters
     bounds::Array{Float64, 2},                      # Parameter bounds
     learning_rate::Function=learning_rate;
-    tol::Float64=1e-4,# tol::Float64=1e-8,
+    tol::Float64=1e-4,
     maxiters=200,
     verbose=false)
 
-    last_10_params = zeros(10, length(pars0))
-    last_10_params[end,:] .= 10000  # Fills one parameter with some large number
-    # mean((last_10_params - mean(last_10_params, dims=1)).^2) is the trace of
-    # the covariance matrix of the last 10 parameters, divided by 10*length(pars0)
-    running_criterion() = mean((last_10_params .- mean(last_10_params, dims=1)).^2) > tol
+    q = lr_break+50
+    last_q_norms = fill(Inf, q)
+    running_criterion() = mean(last_q_norms) > tol
 
     t = 1
     pars = pars0
@@ -1434,7 +1452,7 @@ function perform_stochastic_gradient_descent_debug(
         # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         # running_criterion(grad_est) || break
         if verbose
-            println("Iteration $t, scaled trace of covariance $(mean((last_10_params .- mean(last_10_params, dims=1)).^2)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
+            println("Iteration $t, average gradient norm $(mean(last_q_norms)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         end
         running_criterion() || break
         # pars = pars - learning_rate(t)*grad_est
@@ -1442,17 +1460,17 @@ function perform_stochastic_gradient_descent_debug(
         project_on_bounds!(pars, bounds)
         push!(trace, pars)
         # (t-1)%10+1 maps t to a number between 1 and 10 (inclusive)
-        last_10_params[(t-1)%10+1, :] = pars
+        last_q_norms[(t-1)%q+1] = norm(grad_est)
         t += 1
     end
     return pars, trace, cost_vals, grad_norms
 end
 
-function visualize_SGD_search(par_vals::Array{Float64,1}, cost_vals::Array{Float64, 1}, SGD_trace::Array{Float64, 1}, opt_par::Float64; file_name = "SGD.gif")
+function visualize_SGD_search(par_vals::Array{Float64,1}, cost_vals::Array{Float64, 1}, SGD_trace::Array{Array{Float64, 1},1}, opt_par::Float64; file_name = "SGD.gif")
     anim = @animate for i = 1:length(SGD_trace)
         p = plot(par_vals, cost_vals, label="Cost Function")
         vline!(p, [opt_par], label="Final parameter")
-        vline!(p, [SGD_trace[i]], label="Current parameter")
+        vline!(p, SGD_trace[i], label="Current parameter")
     end
     gif(anim, file_name, fps = 15)
     # # NOTE: Not sure if maybe this is faster?
@@ -1463,8 +1481,11 @@ function visualize_SGD_search(par_vals::Array{Float64,1}, cost_vals::Array{Float
     # end every 1
 end
 
-function Roberts_gif_generator(par_vals::Array{Float64,1}, cost_vals::Array{Float64, 2}, SGD_traces::Array{Array{Float64,1},1}, opt_pars::Array{Float64, 1})
+# SGD_traces should be an array with E elements, where each element is an array
+# of parameters that the optimization has gone through, and where every
+# parameter is an array of Float64-values
+function Roberts_gif_generator(par_vals::Array{Float64,1}, cost_vals::Array{Float64, 2}, SGD_traces::Array{Array{Array{Float64,1},1},1}, opt_pars::Array{Float64, 1})
     for i = 1:6
-        visualize_SGD_search(par_vals, cost_vals[:,i], SGD_traces[i], opt_pars[i], file_name="M100_Mgrad8_newspecrate1e5_0p1_rel$(i).gif")
+        visualize_SGD_search(par_vals, cost_vals[:,i], SGD_traces[i], opt_pars[i], file_name="newer_stopping_criterion$(i).gif")
     end
 end
