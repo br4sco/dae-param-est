@@ -710,7 +710,6 @@ function simulate_system_sens(
     n_tot = nx*n_in
     dη = length(W_meta.η)
     N = size(exp_data.Y, 1)-1
-    @info "N in here is $N, and M: $M, and size Zm[1]: $(size(Zm[1]))"  #DEBUG
     dist_par_inds = W_meta.free_par_inds
 
     p = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
@@ -733,7 +732,6 @@ function simulate_system_sens(
 
     # DEBUG
     temp, temp_sens = calc_mean_y(pars, 1)
-    @info "Size temp: $(size(temp)), temp sens: $(size(temp_sens))"
 
     return solve_in_parallel_sens(m -> calc_mean_y(pars, m), collect(1:M))  # Returns Ym and JacsYm
 end
@@ -929,7 +927,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         #     perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
 
         opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_norms[e] =
-            perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=500, tol=1e-6)
+            perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=500, tol=1e-8)
         reset_isws!(isws)
         proposed_result, proposed_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
             (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws),
