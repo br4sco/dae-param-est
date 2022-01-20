@@ -42,7 +42,7 @@ const Q = 1000          # Number of conditional samples stored per interval
 
 const noise_method_name = "Pre-generated unconditioned noise (δ = $(δ))"
 
-M_rate_max = 4
+M_rate_max = 4#16
 # max_allowed_step = 1.0  # Maximum magnitude of step that SGD is allowed to take
 # M_rate(t) specifies over how many realizations the output jacobian estimate
 # should be computed at iteration t. NOTE: A total of 2*M_rate(t) iterations
@@ -702,7 +702,6 @@ function simulate_system_sens(
     isws::Array{InterSampleWindow,1},
     Zm::Array{Array{Float64,2},1})::Tuple{Array{Float64,2}, Array{Array{Float64,2},1}}
 
-    M_used = M÷2
     W_meta = exp_data.W_meta
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -729,10 +728,6 @@ function simulate_system_sens(
     calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
         solvew_sens(exp_data.u, t -> wmm(m)(t), pars, N) |> h_comp
     calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
-
-    # DEBUG
-    temp, temp_sens = calc_mean_y(pars, 1)
-
     return solve_in_parallel_sens(m -> calc_mean_y(pars, m), collect(1:M))  # Returns Ym and JacsYm
 end
 
@@ -803,13 +798,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     opt_pars_baseline = zeros(length(pars0), E)
     trace_base = [[pars0] for e=1:E]
     for e=1:E
-
-        # DEBUG
-        mdl_out = baseline_model_parametrized(δ, 0, pars0)
-        jac_out = jacobian_model_b(0, pars0)
-        println("B model out: $(size(mdl_out))")
-        println("B jac_out: $(size(jac_out))")
-
+    # for e=4:4
         # HACK: Uses trace returned due to hacked LsqFit package
         baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
             (dummy_input, pars) -> baseline_model_parametrized(δ, dummy_input, pars),
@@ -846,7 +835,10 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     # NOTE: CURRENTLY ONLY TREATS SCALAR PARAMETERS
     @info "Plotting proposed cost function..."
     # prop_par_vals = 1.0:0.5:35.0
-    prop_par_vals = 1.0:2.0:35.0    # DEBUG
+    vals1 = 1.0:0.25:8.0
+    vals2 = 9.0:2.0:35.0
+    # prop_par_vals = 1.0:2.0:35.0    # DEBUG
+    prop_par_vals = vcat(vals1, vals2)
     prop_cost_vals = zeros(length(prop_par_vals), E)
     for ind = 1:length(prop_par_vals)
         # NOTE: If we don't pass Zm here, we will see that the cost function
@@ -920,6 +912,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     trace_costs = [Float64[] for e=1:E]
     grad_norms  = [Float64[] for e=1:E]
     for e=1:E
+    # for e=4:4
         get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,e], δ, pars, isws, M_mean)
         get_gradient_estimate_p_debug(pars, M_mean) = get_gradient_estimate_debug(Y[:,e], δ, pars, isws, M_mean)
         jacobian_model(x, p) = get_proposed_jacobian(p, isws, M)
@@ -927,7 +920,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         #     perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
 
         opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_norms[e] =
-            perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=500, tol=1e-8)
+            perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=300, tol=1e-8)
         reset_isws!(isws)
         proposed_result, proposed_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
             (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws),
@@ -946,7 +939,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     # trace_proposed is an array with E elements, where each element is an array
     # of parameters that the SGD has gone through, and where every parameter
     # is an array of Float64-values
-    return opt_pars_baseline, opt_pars_proposed, trace_base, trace_proposed, base_cost_vals, prop_cost_vals, trace_costs, base_par_vals, prop_par_vals, opt_pars_proposed_LSQ
+    return opt_pars_baseline, opt_pars_proposed, trace_base, trace_proposed, base_cost_vals, prop_cost_vals, trace_costs, base_par_vals, prop_par_vals, opt_pars_proposed_LSQ, grad_norms
 end
 
 function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
@@ -1209,6 +1202,61 @@ function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans:
     return base_par_vals, second_par, base_cost_vals, base_cost_vals1, base_cost_vals2
 end
 
+function debug_grad_norm(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 6
+
+    # === Computing cost function for proposed model ===
+    # TODO: Should we consider storing and loading white noise, to improve repeatability
+    # of the results? Currently repeatability is based on fixed random seed
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # NOTE: CURRENTLY ONLY TREATS SCALAR PARAMETERS
+    @info "Plotting proposed cost function..."
+    # prop_par_vals = 1.0:0.5:35.0
+    vals1 = 1.0:0.25:8.0
+    vals2 = 9.0:2.0:35.0
+    # prop_par_vals = 1.0:2.0:35.0    # DEBUG
+    prop_par_vals = vcat(vals1, vals2)
+    prop_cost_vals = zeros(length(prop_par_vals), E)
+    grad_vals = zeros(length(prop_par_vals), E)
+    for ind = 1:length(prop_par_vals)
+        # NOTE: If we don't pass Zm here, we will see that the cost function
+        # looks very irregular even with M = 500. That's a bit suprising,
+        # I would expect it to average out over that many iterations
+        Yms = simulate_system(exp_data, [prop_par_vals[ind]], M, dist_sens_inds, isws, Zm)
+        _, jacsYm = simulate_system_sens(exp_data, [prop_par_vals[ind]], M_rate_max, dist_sens_inds, isws)
+        Y_mean = mean(Yms, dims=2)
+        for e=1:E
+            grad_vals[ind,e] = first(get_cost_gradient(Y[:,e], Y_mean, jacsYm))
+        end
+
+        # Y has columns indexed with 1:E because in case E is changed for debugging purposes,
+        # without the dimensions of Y changing, we can get a mismatch otherwise
+        prop_cost_vals[ind,:] = mean((Y[N_trans+1:end, 1:E].-Y_mean[N_trans+1:end]).^2, dims=1)
+    end
+
+    return prop_par_vals, prop_cost_vals, grad_vals
+    # return opt_pars_baseline, opt_pars_proposed, trace_base, trace_proposed, base_cost_vals, prop_cost_vals, trace_costs, base_par_vals, prop_par_vals, opt_pars_proposed_LSQ, grad_norms
+end
+
 # function debug_1par_simulation(expid, pars0::Array{Float64, 1}, N_trans::Int = 0)
 #     exp_data, isws = get_experiment_data(expid)
 #     W_meta = exp_data.W_meta
@@ -1435,6 +1483,8 @@ function perform_stochastic_gradient_descent_debug(
     verbose=false)
 
     q = lr_break+50
+    # q = lr_break+20 #DEBUG
+    # q = 10
     last_q_norms = fill(Inf, q)
     running_criterion() = mean(last_q_norms) > tol
 
@@ -1450,7 +1500,8 @@ function perform_stochastic_gradient_descent_debug(
         # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         # running_criterion(grad_est) || break
         if verbose
-            println("Iteration $t, average gradient norm $(mean(last_q_norms)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
+            noninf_average = mean(last_q_norms[findall(last_q_norms .!= Inf)])
+            println("Iteration $t, average gradient norm $(mean(last_q_norms)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars, grad norm: $(norm(grad_est)), noninfmean: $(noninf_average)")
         end
         running_criterion() || break
         # pars = pars - learning_rate(t)*grad_est
@@ -1484,6 +1535,6 @@ end
 # parameter is an array of Float64-values
 function Roberts_gif_generator(par_vals::Array{Float64,1}, cost_vals::Array{Float64, 2}, SGD_traces::Array{Array{Array{Float64,1},1},1}, opt_pars::Array{Float64, 1})
     for i = 1:6
-        visualize_SGD_search(par_vals, cost_vals[:,i], SGD_traces[i], opt_pars[i], file_name="newer_stopping_criterion$(i).gif")
+        visualize_SGD_search(par_vals, cost_vals[:,i], SGD_traces[i], opt_pars[i], file_name="newer_stopping_criterion_Mrate4_new$(i).gif")
     end
 end
