@@ -591,6 +591,44 @@ function perform_stochastic_gradient_descent(
     return pars, trace
 end
 
+# Uses alternative stopping criterion based on variance in the last 10
+# parameter estimates, instead of average gradient norm
+function perform_stochastic_gradient_descent_alt(
+    get_grad_estimate::Function,
+    pars0::Array{Float64,1},                        # Initial guess for parameters
+    bounds::Array{Float64, 2},                      # Parameter bounds
+    learning_rate::Function=learning_rate;
+    tol::Float64=1e-6,
+    maxiters=200,
+    verbose=false)
+
+    last_10_params = zeros(10, length(pars0))
+    last_10_params[end,:] .= 10000  # Fills one parameter with some large number
+    # mean((last_10_params - mean(last_10_params, dims=1)).^2) is the trace of
+    # the covariance matrix of the last 10 parameters, divided by 10*length(pars0)
+    running_criterion() = mean((last_10_params .- mean(last_10_params, dims=1)).^2) > tol
+
+    t = 1
+    pars = pars0
+    trace = [pars]
+    while t <= maxiters
+        grad_est = get_grad_estimate(pars, M_rate(t))
+        # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
+        # running_criterion(grad_est) || break
+        if verbose
+            println("Iteration $t, scaled trace of covariance $(mean((last_10_params .- mean(last_10_params, dims=1)).^2)) and normalized gradient $(grad_est./(norm(grad_est))) and non-normalized gradient $(grad_est), with parameter estimate $pars")
+        end
+        running_criterion() || break
+        pars = pars - learning_rate(t, norm(grad_est))*grad_est
+        project_on_bounds!(pars, bounds)
+        push!(trace, pars)
+        # (t-1)%10+1 maps t to a number between 1 and 10 (inclusive)
+        last_10_params[(t-1)%10+1, :] = pars
+        t += 1
+    end
+    return pars, trace
+end
+
 # Row i of bounds should have two columns, where first element is lower bound
 # for parameter i, and second element is upper bound for parameter i
 function project_on_bounds!(vec::Array{Float64,1}, bounds::Array{Float64,2})
@@ -757,6 +795,18 @@ function compute_forward_difference_derivative(x_vals::Array{Float64,1}, y_vals:
     end
     diff[end] = diff[end-1]
     return diff
+end
+
+function read_from_backup(dir::String, E::Int)
+    sample = readdlm(joinpath(dir, "backup_baseline_e1.csv"), ',')
+    k = length(sample)
+    opt_pars_baseline = zeros(E,k)
+    opt_pars_proposed = zeros(E,k)
+    for e=1:E
+        opt_pars_baseline[e,:] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
+        opt_pars_proposed[e,:] = readdlm(joinpath(dir, "backup_proposed_e$e.csv"), ',')
+    end
+    return opt_pars_baseline, opt_pars_proposed
 end
 
 function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
