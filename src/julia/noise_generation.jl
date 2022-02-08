@@ -282,7 +282,7 @@ end
 # to create a custom struct???
 
 # Used for disturbance
-function disturbance_model_1(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_1(Ts::Float64; bias::Float64=0.0)::Tuple{DT_SS_Model, DataFrame}
     nx = 2        # model order
     n_out = 2     # number of outputs
     n_in = 2      # number of inputs
@@ -299,30 +299,30 @@ function disturbance_model_1(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
-    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0)
+    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
 end
 
 # Used for input
-function disturbance_model_2(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_2(Ts::Float64; bias::Float64=0.0)::Tuple{DT_SS_Model, DataFrame}
     nx = 2        # model order
     n_out = 1     # number of outputs
     n_in = 2      # number of inputs
-    w_scale = 0.2*ones(n_out)             # noise scale
+    u_scale = 0.2 # input scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [0.8, 4^2]
     c_vec = zeros(n_out*nx*n_in)
     # The first state will act as output of the filter
-    c_vec[1] = 1
-    η0 = vcat(a_vec, c_vec)
+    c_vec[1] = u_scale
+    η0 = vcat(a_vec, Diagonal(w_scale)*c_vec)
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
-    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0)
+    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
 end
 
 # Used for scalar disturbance and input
-function disturbance_model_3(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_3(Ts::Float64; bias::Float64=0.0)::Tuple{DT_SS_Model, DataFrame}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
     nx = 2        # model order
@@ -332,12 +332,12 @@ function disturbance_model_3(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [2*ω*ζ, ω^2]
-    c_vec = [0, 1]
+    c_vec = Diagonal(w_scale)*[0, 1]
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
-    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0)
+    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
 end
 # function disturbance_model_3(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}
 #
@@ -354,15 +354,15 @@ end
 #     return mdl, DataFrame(nx = size(s.A,2), n_in = 1, n_out = 1, n_a = length(a), η = vcat(a, b))
 # end
 
-function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int
-    )::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
+function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
+    bias::Float64=0.0)::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
 
-    mdl, metadata = gen(Ts)
+    mdl, metadata = gen(Ts, bias=bias)
     n_tot = size(mdl.Cd,2)
 
     ZS = [randn(Nw, n_tot) for m = 1:M]
     XW = simulate_noise_process_mangled(mdl, ZS)
-    XW, get_system_output_mangled(mdl, XW), metadata
+    XW, get_system_output_mangled(mdl, XW).+ metadata.bias[1], metadata
 end
 
 # function get_filtered_noise_scalar(gen::Function, Ts::Float64, M::Int, Nw::Int

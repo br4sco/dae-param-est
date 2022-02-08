@@ -182,12 +182,6 @@ end
 
 # === MODEL (AND DATA) PARAMETERS ===
 const σ = 0.002                 # measurement noise variance
-# NOTE: The input scale and bias only affects the input generated if there is
-# no existing data to read from the experiment directory. Changing these values
-# without deleting any stored version of input and output will have no effect
-# on the used input!
-const u_scale = 0.2             # input scale
-const u_bias = 0.0              # input bias
 
 const m = 0.3                   # [kg]
 const L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not
@@ -261,12 +255,12 @@ dyn_par_bounds = [0.1 1e4; 0.1 1e4]
 model_to_use = pendulum_sensitivity_sans_g
 const num_dyn_pars = size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  model_to_use(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+  model_to_use(φ0, u, w, get_all_θs(pars)),
   N,
   Ts,
 )
 realize_model(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  pendulum_new(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+  pendulum_new(φ0, u, w, get_all_θs(pars)),
   N,
   Ts,
 )
@@ -1255,12 +1249,12 @@ function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans:
 
     # Overwrites solvew()-functions
     realize_model_sens1(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-      pendulum_sensitivity(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+      pendulum_sensitivity(φ0, u, w, get_all_θs(pars)),
       N,
       Ts,
     )
     realize_model_sens2(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-      pendulum_sensitivity2(φ0, t -> u_scale * u(t) .+ u_bias, w, get_all_θs(pars)),
+      pendulum_sensitivity2(φ0, u, w, get_all_θs(pars)),
       N,
       Ts,
     )
