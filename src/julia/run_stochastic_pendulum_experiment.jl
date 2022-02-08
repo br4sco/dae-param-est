@@ -247,12 +247,12 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 #       free dynamical parameters
 # sensitivity for all free dynamical variables
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
-const pars_true = [m, k]                    # true value of all free parameters
-get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, pars[2]]#pars[1:4]
+const pars_true = [k]                    # true value of all free parameters
+get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]#pars[1:4]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
-dyn_par_bounds = [0.1 1e4; 0.1 1e4]
-model_to_use = pendulum_sensitivity_sans_g
+dyn_par_bounds = [0.1 1e4]
+model_to_use = pendulum_sensitivity
 const num_dyn_pars = size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
   model_to_use(φ0, u, w, get_all_θs(pars)),
@@ -1571,25 +1571,52 @@ function debug_output_jacobian_disturbance(expid::String, pars::Array{Float64,1}
     # display(p)
 end
 
-# function debug_input_effect(expid::String, N_trans::Int = 0)
-#     exp_data, isws = get_experiment_data(expid)
-#     W_meta = exp_data.W_meta
-#     Y = exp_data.Y
-#     N = size(Y,1)-1
-#     Nw = exp_data.Nw
-#     nx = W_meta.nx
-#     n_in = W_meta.n_in
-#     n_out = W_meta.n_out
-#     n_tot = nx*n_in
-#     dη = length(W_meta.η)
-#     u = exp_data.u
-#     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
-#     dist_sens_inds = W_meta.free_par_inds
-#
-#     Zm = [randn(Nw, n_tot) for m = 1:M] # TODO: I'm not sure we need M, 1 enough?
-#
-#     Ym, jacsYm = simulate_system_sens(exp_data, pars, M, dist_sens_inds, isws, Zm)
-# end
+function debug_input_effect(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    Zm = [randn(Nw, n_tot) for m = 1:M] # TODO: I'm not sure we need M, 1 enough?
+
+
+    # NOTE: Assumes disturbance model isn't parametrized, so just uses true pars
+    p = vcat(get_all_θs(pars_true), exp_data.get_all_ηs(pars_true))
+    θ = p[1:dθ]
+    η = p[dθ+1: dθ+dη]
+
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+    # NOTE: OPTION 2: Use the rows below here for exact interpolation
+    # reset_isws!(isws)
+    # XWm = simulate_noise_process(dmdl, Zm)
+    # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
+
+    ks = 4.0:0.25:20.0
+    u_scales = 0.2:0.2:2.0
+
+    # NOTE: Assumes scalar output!!!
+    Ys = [fill(NaN, (length(ks), N+1)) for u_scale in u_scales]
+    # NOTE: Assumes that k is the only free parameter!
+    for (i,u_scale) in enumerate(u_scales)
+        for (j,k) in enumerate(ks)
+            Ys[i][j,:] = solvew(t -> u_scale.*exp_data.u(t), t -> wmm(1)(t), [k], N) |> h
+        end
+    end
+
+    return Ys
+end
 
 # Similar to perform_stochastic_gradient_descent() but also returns
 # the estimated costs at all the tested parameters as well as a log of
