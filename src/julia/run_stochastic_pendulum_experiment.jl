@@ -53,7 +53,6 @@ lr_break = 80
 # learning_rate(t::Int, grad_norm::Float64) = if (t < lr_break) 1/grad_norm else 1/(grad_norm*(1+1*(t-lr_break) )) end
 learning_rate(t::Int, grad_norm::Float64) = if (t < lr_break) 1e6 else 1e6/(1+t) end
 learning_rate_adam(t::Int, grad_norm::Float64) = 0.1#if (t < lr_break) 1e0 else 1e0/(1+t) end
-learning_rate_vec(t::Int, grad_norm::Float64) = [0.1, 1.0]  #NOTE Dimensions must be equal to number of free parameters
 
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
   hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
@@ -205,7 +204,7 @@ const φ0 = 0.0                   # Initial angle of pendulum from negative y-ax
 # ]
 f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
 # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
-f_sens(x::Array{Float64, 1}) = [x[14], x[28]]
+f_sens(x::Array{Float64, 1}) = [x[14], x[21], x[28]]
 # NOTE: Has to be changed when number of free  parameters is changed.
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
 # f_sens(x::Array{Float64,1}) = [x[14], x[21]]   # NOTE: Hard-coded right now
@@ -248,11 +247,12 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 #       free dynamical parameters
 # sensitivity for all free dynamical variables
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
-const pars_true = [m, k]                    # true value of all free parameters
-get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, pars[2]]#pars[1:4]
+const pars_true = [m, L, k]#[m, L, g, k]                    # true value of all free parameters
+get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
-dyn_par_bounds = [0.01 1e4; 0.1 1e4]
+dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]
+learning_rate_vec(t::Int, grad_norm::Float64) = [0.1, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
 model_to_use = pendulum_sensitivity_sans_g
 const num_dyn_pars = size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
@@ -334,9 +334,9 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    # E = size(Y, 2)
-    # DEBUG
-    E = 6
+    E = size(Y, 2)
+    # # DEBUG
+    # E = 6
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
@@ -661,7 +661,6 @@ function perform_SGD_adam(
         # if norm(grad_est) > 1e-5
         #     grad_est = (1e-5)*(grad_est/norm(grad_est))
         # end
-
         s = betas[1]*s + (1-betas[1])*grad_est
         r = betas[2]*r + (1-betas[2])*(grad_est.^2)
         shat = s/(1-betas[1]^t)
@@ -1706,9 +1705,9 @@ function perform_SGD_adam_debug(
     tol::Float64=1e-4,
     maxiters=200,
     verbose=false,
-    betas::Array{Float64,1} = [0.9, 0.999])   # betas are the decay parameters of moment estimates
+    betas::Array{Float64,1} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
 
-    eps = 1e-8
+    eps = 1e-13
     q = 20#lr_break+10
     last_q_norms = fill(Inf, q)
     running_criterion() = mean(last_q_norms) > tol
@@ -1728,7 +1727,8 @@ function perform_SGD_adam_debug(
         r = betas[2]*r + (1-betas[2])*(grad_est.^2)
         shat = s/(1-betas[1]^t)
         rhat = r/(1-betas[2]^t)
-        step = -learning_rate_adam(t, norm(grad_est))*shat./(sqrt.(rhat).+eps)
+        # step = -learning_rate_adam(t, norm(grad_est))*shat./(sqrt.(rhat).+eps)
+        step = -learning_rate_vec(t, norm(grad_est)).*shat./(sqrt.(rhat).+eps)
         # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         # running_criterion(grad_est) || break
         if verbose
