@@ -51,7 +51,7 @@ M_rate(t::Int) = M_rate_max
 # This learning rate works very well with M_rate = 8
 lr_break = 80
 # learning_rate(t::Int, grad_norm::Float64) = if (t < lr_break) 1/grad_norm else 1/(grad_norm*(1+1*(t-lr_break) )) end
-learning_rate(t::Int, grad_norm::Float64) = if (t < lr_break) 1e6 else 1e6/(1+t) end
+learning_rate(t::Int, grad_norm::Float64) = if (t < lr_break) 1e6 else 1e6/(1+t) end    #DEBUG
 learning_rate_adam(t::Int, grad_norm::Float64) = 0.1#if (t < lr_break) 1e0 else 1e0/(1+t) end
 
 mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
@@ -191,28 +191,6 @@ const k = 6.25                  # [1/s^2]
 
 const φ0 = 0.0                   # Initial angle of pendulum from negative y-axis
 
-# === OUTPUT FUNCTIONS ===
-# The state vector x from the solver is organized as follows:
-# x = [
-#   x1              -- position in the x-direction
-#   x1'             -- velocity in the x-direction
-#   x2              -- position in the y-direction
-#   x2'             -- velocity in the y-direction
-#   int(x3)         -- integral of the tension per unit length (due to stabilized formulation)
-#   int(dummy)      -- integral of dummy variable (due to stabilized formulation)
-#   y               -- the output y = atan(x1/-x2) is computed by the solver
-# ]
-f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-# f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
-f_sens(x::Array{Float64, 1}) = [x[14], x[21], x[28]]
-# NOTE: Has to be changed when number of free  parameters is changed.
-# Specifically, f_sens() must return sensitivity wrt to all free parameters
-# f_sens(x::Array{Float64,1}) = [x[14], x[21]]   # NOTE: Hard-coded right now
-# f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]   # NOTE: Hard-coded right now
-h(sol) = apply_outputfun(f, sol)                            # for our model
-h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete model with dynamics sensitivity
-h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity
-
 # === HELPER FUNCTIONS TO READ AND WRITE DATA
 const data_dir = joinpath("data", "experiments")
 
@@ -247,23 +225,45 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 #       free dynamical parameters
 # sensitivity for all free dynamical variables
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
-const pars_true = [m, L, k]#[m, L, g, k]                    # true value of all free parameters
-get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]
+# const pars_true = [m, L, g, k]                    # true value of all free parameters
+const pars_true = [m, L, g, k]
+get_all_θs(pars::Array{Float64,1}) = pars#[m, pars[2], pars[1], k]#[pars[1], L, pars[2], k]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
-dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]
-learning_rate_vec(t::Int, grad_norm::Float64) = [0.1, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
-model_to_use = pendulum_sensitivity_sans_g
+dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
+# dyn_par_bounds = [0.1 1e4; 0.1 1e4]
+vec_temp = [0.1, 1.0, 1.0, 1.0]
+learning_rate_vec(t::Int, grad_norm::Float64) = vec_temp#if (t < 100) vec_temp else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
+model_to_use = pendulum_sensitivity_full
+# === OUTPUT FUNCTIONS ===
+# The state vector x from the solver is organized as follows:
+# x = [
+#   x1              -- position in the x-direction
+#   x1'             -- velocity in the x-direction
+#   x2              -- position in the y-direction
+#   x2'             -- velocity in the y-direction
+#   int(x3)         -- integral of the tension per unit length (due to stabilized formulation)
+#   int(dummy)      -- integral of dummy variable (due to stabilized formulation)
+#   y               -- the output y = atan(x1/-x2) is computed by the solver
+# ]
+f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
+f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
+# NOTE: Has to be changed when number of free  parameters is changed.
+# Specifically, f_sens() must return sensitivity wrt to all free parameters
+h(sol) = apply_outputfun(f, sol)                            # for our model
+h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete model with dynamics sensitivity
+h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity
+
 const num_dyn_pars = size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  model_to_use(φ0, u, w, get_all_θs(pars)),
-  N,
-  Ts,
+    model_to_use(φ0, u, w, get_all_θs(pars)),
+    N,
+    Ts,
 )
 realize_model(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-  pendulum_new(φ0, u, w, get_all_θs(pars)),
-  N,
-  Ts,
+    pendulum_new(φ0, u, w, get_all_θs(pars)),
+    N,
+    Ts,
 )
 const dθ = length(get_all_θs(pars_true))
 
@@ -271,6 +271,7 @@ const dθ = length(get_all_θs(pars_true))
 const abstol = 1e-8
 const reltol = 1e-5
 const maxiters = Int64(1e8)
+debug_delete_me = 1
 
 solvew_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
   realize_model_sens(u, w, pars, N),
@@ -336,7 +337,8 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     E = size(Y, 2)
     # # DEBUG
-    # E = 6
+    # E = 1
+    # @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
@@ -367,6 +369,20 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # M_mean specifies over how many realizations the gradient estimate is computed
     function get_gradient_estimate(y, pars, isws, M_mean::Int=1)
         Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, dist_par_inds, isws)
+
+        # #DEBUG
+        # @warn "Using debugged get_gradient_estimate()"
+        # Ym, jacsYm = simulate_system_sens(exp_data, pars, 3M_mean, dist_par_inds, isws)
+        # # DEBUG DELETE VARIABLE DEFINITION ALSO
+        # # global debug_delete_me
+        # # writedlm("data/experiments/some_jacs/jac$debug_delete_me.csv", jacsYm[1], ',')
+        # # writedlm("data/experiments/some_jacs/Ydiff$debug_delete_me.csv", Y[:,1]-Ym[:,1], ',')
+        # # debug_delete_me += 1
+        # jacs = [hcat(jacsYm[M_mean+i][:,1], jacsYm[2M_mean+i][:,2]) for i=1:M_mean] #DEBUG
+        # @info "$(sum(sign.(jacsYm[M_mean+1][N_trans+1:end,1]) .== sign.(jacsYm[2M_mean+1][N_trans+1:end,2]) )) out of $(size(jacsYm[1],1)-N_trans)"
+        # @info "$(sum(sign.(jacsYm[M_mean+1][N_trans+1:end,1]) .== sign.(jacsYm[M_mean+1][N_trans+1:end,2]) )) out of $(size(jacsYm[1],1)-N_trans)"
+        # grad_est = get_cost_gradient(y, Ym[:,1:M_mean], jacs, N_trans)  #DEBUG
+
         # Uses different noise realizations for estimate of output and estiamte of jacobian
         grad_est = get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
         # grad_est will be 2D array with one dimenion equal to 1, we want to return a 1D array
@@ -391,7 +407,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     for e=1:E
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         opt_pars_proposed[:,e], trace_proposed[e] =
-            perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-6)
+            perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8)
             # perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
 
         writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
@@ -521,9 +537,14 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     N = Int((Nw - N_margin)*δ÷Ts)     # Number of steps we can take
     W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds)
 
+    # Exact interpolation
     mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
         (m::Int) -> mk_newer_noise_interp(
         a_vec::AbstractArray{Float64, 1}, C_true, XW, m, n_in, δ, isws)
+    # Linear interpolation. Not recommended DEBUG
+    # mk_we(XW::Array{Array{Float64,1},2}, isws::Array{InterSampleWindow, 1}) =
+    #     (m::Int) -> mk_noise_interp(C_true, mangle_XW(XW), m, δ)
+
     u(t::Float64) = interpw(input, 1, 1)(t)
 
     # === We first generate the output of the true system ===
@@ -671,7 +692,6 @@ function perform_SGD_adam(
         # running_criterion(grad_est) || break
         if verbose
             println("Iteration $t, average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
-            println("-s: $(-s), -shat: $(-shat), rhat: $(rhat)")
         end
         running_criterion() || break
         pars = pars + step
@@ -816,7 +836,7 @@ function simulate_system_sens(
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
-    # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
+    # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), dmdl.Cd, XWm, m, n_in, δ, isws)
 
     calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
         solvew_sens(exp_data.u, t -> wmm(m)(t), pars, N) |> h_comp
@@ -852,8 +872,40 @@ function compute_forward_difference_derivative(x_vals::Array{Float64,1}, y_vals:
     return diff
 end
 
+function simulate_experiment(expid::String, pars::Array{Float64, 1}, Zm::Array{Array{Float64,2},1})
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    u = exp_data.u
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    Ym = simulate_system(exp_data, pars, M, dist_par_inds, isws, Zm)
+    return Ym, Zm
+end
+
+function simulate_experiment(expid::String, pars::Array{Float64, 1})
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+
+    Zm = [randn(Nw, n_tot) for m=1:M]
+    simulate_experiment(expid, pars, Zm)
+end
+
 function read_from_backup(dir::String, E::Int)
     sample = readdlm(joinpath(dir, "backup_baseline_e1.csv"), ',')
+    # sample = readdlm(joinpath(dir, "backup_proposed_e1.csv"), ',')
     k = length(sample)
     opt_pars_baseline = zeros(E,k)
     opt_pars_proposed = zeros(E,k)
@@ -1110,8 +1162,8 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     # base_par_vals2 = opt_pars_baseline[2,1] .+ base_par_diffs2
     # base_par_vals1 = 0.1:0.2:opt_pars_baseline[1,1]+0.4   # For m_true = 0.3
     # base_par_vals2 = (4.25-0.6):0.2:opt_pars_baseline[2,1]+0.4
-    base_par_vals1 = 0.1:0.1:5.0
-    base_par_vals2 = [4.25]
+    base_par_vals1 = 0.25:0.025:0.45
+    base_par_vals2 = 8.41:0.2:10.21
 
     base_cost_vals = [zeros(length(base_par_vals1), length(base_par_vals2)) for e=1:E]
     base_cost_true = zeros(E)
@@ -1189,6 +1241,29 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
         return mean(jacYm)
     end
 
+    # TODO: Delete this, no need to have it if it turns out that everything else works fine! :D
+    # # DEBUG CHECKING IF DERIVATIVE IS COMPUTED CORRECTLY!!
+    # ref = [0.46578317883875403,8.680637207610472]
+    # Δ = 0.01
+    # Ymd, jacsd = simulate_system_sens(exp_data, ref, 2, dist_sens_inds, isws)
+    # grad = get_gradient_estimate(Y[:,1], δ, ref, isws, 1)
+    # Yref = mean(simulate_system(exp_data, ref, 1, dist_sens_inds, isws, Zm), dims=2)
+    # Ym = mean(simulate_system(exp_data, [ref[1]+Δ, ref[2]], 1, dist_sens_inds, isws, Zm), dims=2)
+    # Yg = mean(simulate_system(exp_data, [ref[1], ref[2]+Δ], 1, dist_sens_inds, isws, Zm), dims=2)
+    # dYdm = (Ym-Yref)./Δ
+    # dYdg = (Yg-Yref)./Δ
+    # return jacsd, dYdm, dYdg
+    #
+    # # cost_ref = mean((Y[N_trans+1:end, 1].-Yref[N_trans+1:end]).^2)
+    # # cost_m    = mean((Y[N_trans+1:end, 1].-Ym[N_trans+1:end]).^2)
+    # # cost_g    = mean((Y[N_trans+1:end, 1].-Yg[N_trans+1:end]).^2)
+    # # dcdm = (cost_m-cost_ref)/Δ
+    # # dcdg = (cost_g-cost_ref)/Δ
+    # # @info "grad: $grad, dcdm: $dcdm, dcdg: $dcdg"
+    # @warn "FINISHED DEBUGGING NOW!!!"
+    # return
+    # # END OF DEBUG
+
     @info "Finding proposed minimum..."
 
     opt_pars_proposed = zeros(length(pars0), E)
@@ -1224,17 +1299,20 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     # prop_par_diffs2 = -0.6:0.2:0.6
     # prop_par_vals1 = opt_pars_proposed[1,1] .+ prop_par_diffs1
     # prop_par_vals2 = opt_pars_proposed[2,1] .+ prop_par_diffs2
-    prop_par_vals1 = 0.1:0.2:opt_pars_proposed[1,1]+0.4   # For m_true = 0.3
-    prop_par_vals2 = (4.25-0.6):0.2:opt_pars_proposed[2,1]+0.4
+    # prop_par_vals1 = 0.1:0.2:opt_pars_proposed[1,1]+0.4   # For m_true = 0.3
+    # prop_par_vals2 = (4.25-0.6):0.2:opt_pars_proposed[2,1]+0.4
+    prop_par_vals1 = 0.2:0.05:0.6   # For m_true = 0.3
+    # prop_par_vals2 = (4.25-0.6):0.2:(9.81+0.4)
+    prop_par_vals2 = 8.01:0.2:11.01
     # prop_par_vals1 = 0.1:0.1:5.0
     # prop_par_vals2 = [4.25]
     prop_cost_vals = [zeros(length(prop_par_vals1), length(prop_par_vals2)) for e=1:E]
     prop_cost_true = zeros(E)
     for ind1 = 1:length(prop_par_vals1)
         for ind2 = 1:length(prop_par_vals2)
+            pars = [prop_par_vals1[ind1], prop_par_vals2[ind2]]
+            Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
             for e=1:E
-                pars = [prop_par_vals1[ind1], prop_par_vals2[ind2]]
-                Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
                 prop_cost_vals[e][ind1, ind2] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
             end
         end
@@ -1251,14 +1329,153 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     #NOTE: To get interactive 3D-plot, do as follows:
     # > using Plots
     # > plotlyjs()
-    # > plot(prop_par_vals[1][:,1], prop_par_vals[2][:,e], prop_cost_vals[e], st=:surface, xlabel="m values", ylabel="k values", zlabel="cost", size=(1200,1000))
-    # > plot(prop_par_vals[1][:,1], prop_par_vals[2][:,1], prop_cost_vals[1], st=:surface, xlabel="m values", ylabel="k values", zlabel="cost", size=(1200,1000))
+    # > plot(prop_par_vals[1][:,1], prop_par_vals[2][:,e], transpose(prop_cost_vals[e]), st=:surface, xlabel="m values", ylabel="k values", zlabel="cost", size=(1200,1000))
+    # > plot(prop_par_vals[1][:,1], prop_par_vals[2][:,1], transpose(prop_cost_vals[1]), st=:surface, xlabel="m values", ylabel="g values", zlabel="cost", size=(1200,1000))
     # NOTE: Make sure x- and y-values are a 1D-vector, NOT a flat 2D-vector
 
     base_par_vals = (base_par_vals1, base_par_vals2)
     prop_par_vals = (prop_par_vals1, prop_par_vals2)
     # return Yms, jacsYm, my_grad_est
-    return opt_pars_baseline, opt_pars_proposed, trace_base, trace_proposed, base_cost_vals, prop_cost_vals, base_par_vals, prop_par_vals, base_cost_true, prop_cost_true, temp_res
+    return opt_pars_baseline, opt_pars_proposed, trace_base, trace_proposed, base_cost_vals, prop_cost_vals, base_par_vals, prop_par_vals, base_cost_true, prop_cost_true
+end
+
+function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{Float64,1}=[0.5, 4.25, 11.0, 4.25])
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+
+    # === Optimizing parameters for the proposed model or stochastic gradient descent ==
+    function proposed_model_parametrized(δ, Zm, dummy_input, pars, isws)
+        # NOTE: The true input is encoded in the solvew_sens()-function, but this function
+        # still needs to to take two input arguments, so dummy_input could just be
+        # anything, it's not used anyway
+        p = get_all_parameters(pars)
+        θ = p[1:dθ]
+        η = p[dθ+1: dθ+dη]
+        C = reshape(η[nx+1:end], (n_out, n_tot))
+
+        dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+        # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+        XWm = simulate_noise_process_mangled(dmdl, Zm)
+        wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+        # NOTE: OPTION 2: Use the rows below here for exact interpolation
+        # reset_isws!(isws)
+        # XWm = simulate_noise_process(dmdl, Zm)
+        # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
+
+        calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
+            solvew(u, t -> wmm(m)(t), pars, N) |> h
+        calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+        Ym = solve_in_parallel(m -> calc_mean_y(pars, m), ms)
+        return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
+    end
+
+    # Returns estimate of gradient of cost function
+    # M_mean specified over how many realizations the gradient estimate is computed
+    function get_gradient_estimate(y, δ, pars, isws, M_mean::Int=1)
+        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, dist_sens_inds, isws)
+        # Uses different noise realizations for estimate of output and estiamte of gradient
+        grad_est = get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
+        # grad_est will be 2D array with one dimenion equal to 1, we want to return a 1D array
+        return grad_est[:]
+    end
+
+    # Returns estimate of gradient of cost function
+    # M_mean specified over how many realizations the gradient estimate is computed
+    function get_gradient_estimate_debug(y, δ, pars, isws, M_mean::Int=1)
+        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, dist_sens_inds, isws)
+        # Uses different noise realizations for estimate of output and estiamte of gradient
+        grad_est = get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
+        cost = mean((y[N_trans+1:end]-Ym[N_trans+1:end,1]).^2)
+        # grad_est will be 2D array with one dimenion equal to 1, we want to return a 1D array
+        return grad_est[:], cost
+    end
+
+    # Returns estimate of gradient of output
+    function get_proposed_jacobian(pars, isws, M_mean::Int=1)
+        jacYm = simulate_system_sens(exp_data, pars, M_mean, dist_sens_inds, isws)[2]
+        return mean(jacYm)
+    end
+
+    @info "Finding proposed minimum..."
+
+    opt_pars_proposed = zeros(length(pars0), E)
+    opt_pars_proposed_LSQ = zeros(length(pars0), E)
+    trace_proposed = [[Float64[]] for e=1:E]
+    trace_costs = [Float64[] for e=1:E]
+    grad_norms  = [Float64[] for e=1:E]
+    for e=1:E
+        get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,e], δ, pars, isws, M_mean)
+        get_gradient_estimate_p_debug(pars, M_mean) = get_gradient_estimate_debug(Y[:,e], δ, pars, isws, M_mean)
+        jacobian_model(x, p) = get_proposed_jacobian(p, isws, M)
+        # opt_pars_proposed[:,e], trace_proposed[e] =
+        #     perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
+        opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_norms[e] =
+            perform_SGD_adam_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=200, tol=1e-8)
+            # perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=300, tol=1e-4)
+        reset_isws!(isws)
+        # proposed_result, proposed_trace = get_fit_sens(Y[:,e], pars0,
+        #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws),
+        #     jacobian_model, par_bounds[:,1], par_bounds[:,2])
+        # # proposed_result, proposed_trace = get_fit_sens(Y[:,e], pars0,
+        # #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws), jacobian_model)
+        # # opt_pars_proposed[:, e] = coef(proposed_result)
+        # opt_pars_proposed_LSQ[:, e] = coef(proposed_result)
+
+        println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
+    end
+
+    @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
+
+
+    mdiffs = [-0.1, 0.0, 0.1]
+    Ldiffs = [-0.5, 0.0, 0.5]
+    gdiffs = [-0.6, 0.0, 0.6]
+    kdiffs = [-0.5, 0.0, 0.6]
+    # NOTE: ASSUMED E=1 ATM!
+    opt_pars = opt_pars_proposed[:,1]
+    # mvals = [0.2, 0.3, 0.4]   # For m_true = 0.3
+    # Lvals = [5.75, 6.25, 6.75]
+    # gvals = [9.21, 9.81, 10.41]
+    # kvals = [5.75, 6.25, 6.75]
+    cost_vals = [zeros(length(mdiffs)*length(Ldiffs)*length(gdiffs)*length(kdiffs)) for e=1:E]
+    all_pars = zeros(4, length(mdiffs)*length(Ldiffs)*length(gdiffs)*length(kdiffs))
+    ind = 1
+    for mdiff in mdiffs
+        for Ldiff in Ldiffs
+            for gdiff in gdiffs
+                for kdiff in kdiffs
+                    pars = [opt_pars[1]+mdiff, opt_pars[2]+Ldiff, opt_pars[3]+gdiff, opt_pars[4]+kdiff]
+                    all_pars[:,ind] = pars
+                    Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                    for e = 1:E
+                        cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                    end
+                    ind += 1
+                end
+            end
+        end
+    end
+
+    return all_pars, cost_vals
 end
 
 function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans::Int = 0)
