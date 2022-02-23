@@ -226,13 +226,14 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # sensitivity for all free dynamical variables
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
-const pars_true = [m, L, g, k]
-get_all_θs(pars::Array{Float64,1}) = pars#[m, pars[2], pars[1], k]#[pars[1], L, pars[2], k]
+const pars_true = [k]#[m, L, g, k]
+get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]#[pars[1], L, pars[2], k]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
-dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
+# dyn_par_bounds = [0.01 1e4; 0.1 1e4]#; 0.1 1e4; 0.1 1e4]
+dyn_par_bounds = [0.1 1e4]#; 0.1 1e4; 0.1 1e4]
 # dyn_par_bounds = [0.1 1e4; 0.1 1e4]
-vec_temp = [0.1, 1.0, 1.0, 1.0]
+vec_temp = [1.0]#, 1.0, 1.0]
 learning_rate_vec(t::Int, grad_norm::Float64) = vec_temp#if (t < 100) vec_temp else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
 model_to_use = pendulum_sensitivity_full
 # === OUTPUT FUNCTIONS ===
@@ -247,7 +248,8 @@ model_to_use = pendulum_sensitivity_full
 #   y               -- the output y = atan(x1/-x2) is computed by the solver
 # ]
 f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
+# f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
+f_sens(x::Array{Float64,1}) = [x[35]]
 # NOTE: Has to be changed when number of free  parameters is changed.
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
 h(sol) = apply_outputfun(f, sol)                            # for our model
@@ -1241,7 +1243,7 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
         return mean(jacYm)
     end
 
-    # TODO: Delete this, no need to have it if it turns out that everything else works fine! :D
+    # # TODO: Delete this, no need to have it if it turns out that everything else works fine! :D
     # # DEBUG CHECKING IF DERIVATIVE IS COMPUTED CORRECTLY!!
     # ref = [0.46578317883875403,8.680637207610472]
     # Δ = 0.01
@@ -1271,26 +1273,26 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     trace_proposed = [[Float64[]] for e=1:E]
     trace_costs = [Float64[] for e=1:E]
     grad_norms  = [Float64[] for e=1:E]
-    # for e=1:E
-    #     get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,e], δ, pars, isws, M_mean)
-    #     get_gradient_estimate_p_debug(pars, M_mean) = get_gradient_estimate_debug(Y[:,e], δ, pars, isws, M_mean)
-    #     jacobian_model(x, p) = get_proposed_jacobian(p, isws, M)
-    #     # opt_pars_proposed[:,e], trace_proposed[e] =
-    #     #     perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
-    #     opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_norms[e] =
-    #         perform_SGD_adam_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=300, tol=1e-8)
-    #         # perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=300, tol=1e-4)
-    #     reset_isws!(isws)
-    #     # proposed_result, proposed_trace = get_fit_sens(Y[:,e], pars0,
-    #     #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws),
-    #     #     jacobian_model, par_bounds[:,1], par_bounds[:,2])
-    #     # # proposed_result, proposed_trace = get_fit_sens(Y[:,e], pars0,
-    #     # #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws), jacobian_model)
-    #     # # opt_pars_proposed[:, e] = coef(proposed_result)
-    #     # opt_pars_proposed_LSQ[:, e] = coef(proposed_result)
-    #
-    #     println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
-    # end
+    for e=1:E
+        get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,e], δ, pars, isws, M_mean)
+        get_gradient_estimate_p_debug(pars, M_mean) = get_gradient_estimate_debug(Y[:,e], δ, pars, isws, M_mean)
+        jacobian_model(x, p) = get_proposed_jacobian(p, isws, M)
+        # opt_pars_proposed[:,e], trace_proposed[e] =
+        #     perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
+        opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_norms[e] =
+            perform_SGD_adam_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=150, tol=1e-8)
+            # perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=300, tol=1e-4)
+        reset_isws!(isws)
+        # proposed_result, proposed_trace = get_fit_sens(Y[:,e], pars0,
+        #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws),
+        #     jacobian_model, par_bounds[:,1], par_bounds[:,2])
+        # # proposed_result, proposed_trace = get_fit_sens(Y[:,e], pars0,
+        # #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws), jacobian_model)
+        # # opt_pars_proposed[:, e] = coef(proposed_result)
+        # opt_pars_proposed_LSQ[:, e] = coef(proposed_result)
+
+        println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
+    end
 
     @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
 
@@ -1303,7 +1305,7 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     # prop_par_vals2 = (4.25-0.6):0.2:opt_pars_proposed[2,1]+0.4
     prop_par_vals1 = 0.2:0.05:0.6   # For m_true = 0.3
     # prop_par_vals2 = (4.25-0.6):0.2:(9.81+0.4)
-    prop_par_vals2 = 8.01:0.2:11.01
+    prop_par_vals2 = 6.0:0.05:6.40
     # prop_par_vals1 = 0.1:0.1:5.0
     # prop_par_vals2 = [4.25]
     prop_cost_vals = [zeros(length(prop_par_vals1), length(prop_par_vals2)) for e=1:E]

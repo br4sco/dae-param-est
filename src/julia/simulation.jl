@@ -545,9 +545,9 @@ function pendulum_sensitivity_full(Φ::Float64, u::Function, w::Function, θ::Ar
             # Sensitivity with respect to k
             res[29]  = -x[32] + xp[29] + 2x[1]*xp[34] + 2x[29]*xp[6]
             res[30]  = -x[33] + xp[30] + 2x[2]*xp[34] + 2x[30]*xp[6]
-            res[31] = 2k*x[32]*abs(x[4]) - x[1]*xp[31] + m*xp[32] - x[29]*xp[3]
-            res[32] = 2k*x[33]*abs(x[5]) - x[2]*xp[31] + m*xp[33] - x[30]*xp[3] + abs(x[4])x[4]
-            res[33] = -2x[29]*x[1] - 2x[30]*x[2] + abs(x[5])x[5]
+            res[31] = 2k*x[32]*abs(x[4]) - x[1]*xp[31] + m*xp[32] - x[29]*xp[3] + abs(x[4])x[4]
+            res[32] = 2k*x[33]*abs(x[5]) - x[2]*xp[31] + m*xp[33] - x[30]*xp[3] + abs(x[5])x[5]
+            res[33] = -2x[29]*x[1] - 2x[30]*x[2]
             res[34] = x[32]*x[1] + x[33]*x[2] + x[29]*x[4] + x[30]*x[5]
             res[35] = x[35] - (x[1]*x[30] - x[2]*x[29])/(L^2)
 
@@ -656,9 +656,9 @@ function pendulum_sensitivity_sans_g(Φ::Float64, u::Function, w::Function, θ::
             # Sensitivity with respect to k
             res[22]  = -x[25] + xp[22] + 2x[1]*xp[27] + 2x[22]*xp[6]
             res[23]  = -x[26] + xp[23] + 2x[2]*xp[27] + 2x[23]*xp[6]
-            res[24] = 2k*x[25]*abs(x[4]) - x[1]*xp[24] + m*xp[25] - x[22]*xp[3]
-            res[25] = 2k*x[26]*abs(x[5]) - x[2]*xp[24] + m*xp[26] - x[23]*xp[3] + abs(x[4])x[4]
-            res[26] = -2x[22]*x[1] - 2x[23]*x[2] + abs(x[5])x[5]
+            res[24] = 2k*x[25]*abs(x[4]) - x[1]*xp[24] + m*xp[25] - x[22]*xp[3] + abs(x[4])x[4]
+            res[25] = 2k*x[26]*abs(x[5]) - x[2]*xp[24] + m*xp[26] - x[23]*xp[3] + abs(x[5])x[5]
+            res[26] = -2x[22]*x[1] - 2x[23]*x[2]
             res[27] = x[25]*x[1] + x[26]*x[2] + x[22]*x[4] + x[23]*x[5]
             res[28] = x[28] - (x[1]*x[23] - x[2]*x[22])/(L^2)
 
@@ -759,9 +759,9 @@ function pendulum_sensitivity_sans_g_scaled_m(Φ::Float64, u::Function, w::Funct
             # Sensitivity with respect to k
             res[22]  = -x[25] + xp[22] + 2x[1]*xp[27] + 2x[22]*xp[6]
             res[23]  = -x[26] + xp[23] + 2x[2]*xp[27] + 2x[23]*xp[6]
-            res[24] = 2k*x[25]*abs(x[4]) - x[1]*xp[24] + cinv*m*xp[25] - x[22]*xp[3]
-            res[25] = 2k*x[26]*abs(x[5]) - x[2]*xp[24] + cinv*m*xp[26] - x[23]*xp[3] + abs(x[4])x[4]
-            res[26] = -2x[22]*x[1] - 2x[23]*x[2] + abs(x[5])x[5]
+            res[24] = 2k*x[25]*abs(x[4]) - x[1]*xp[24] + cinv*m*xp[25] - x[22]*xp[3] + abs(x[4])x[4]
+            res[25] = 2k*x[26]*abs(x[5]) - x[2]*xp[24] + cinv*m*xp[26] - x[23]*xp[3] + abs(x[5])x[5]
+            res[26] = -2x[22]*x[1] - 2x[23]*x[2]
             res[27] = x[25]*x[1] + x[26]*x[2] + x[22]*x[4] + x[23]*x[5]
             res[28] = x[28] - (x[1]*x[23] - x[2]*x[22])/(L^2)
 
