@@ -65,3 +65,5 @@ testing_conditional_distributions.m
 *.svg
 *.png
 src/julia/test_randjump_deleteme.jl
+*.gif
+*.csv

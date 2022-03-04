@@ -488,35 +488,36 @@ function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::In
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    # E = size(Y, 2)
+    E = size(Y, 2)
     # DEBUG
-    E = 1
-    @warn "Using E = $E instead of default"
+    # E = 1
+    # @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
     trace_base = [[pars0] for e=1:E]
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
-    for e=1:E
-        time_start = now()
-        # HACK: Uses trace returned due to hacked LsqFit package
-        baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
-            baseline_model_parametrized, jacobian_model_b,
-            par_bounds[:,1], par_bounds[:,2])
-        opt_pars_baseline[:, e] = coef(baseline_result)
-
-        writedlm(joinpath(data_dir, "tmp/backup_baseline_e$e.csv"), opt_pars_baseline[:,e], ',')
-
-        # Sometimes (the first returned value I think) the baseline_trace
-        # has no elements, and therefore doesn't contain the metadata x
-        if length(baseline_trace) > 1
-            for j=2:length(baseline_trace)
-                push!(trace_base[e], baseline_trace[j].metadata["x"])
-            end
-        end
-        baseline_durations[e] = now()-time_start
-    end
+    @warn "Not running baseline identification now" # DEBUG
+    # for e=1:E
+    #     time_start = now()
+    #     # HACK: Uses trace returned due to hacked LsqFit package
+    #     baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
+    #         baseline_model_parametrized, jacobian_model_b,
+    #         par_bounds[:,1], par_bounds[:,2])
+    #     opt_pars_baseline[:, e] = coef(baseline_result)
+    #
+    #     writedlm(joinpath(data_dir, "tmp/backup_baseline_e$e.csv"), opt_pars_baseline[:,e], ',')
+    #
+    #     # Sometimes (the first returned value I think) the baseline_trace
+    #     # has no elements, and therefore doesn't contain the metadata x
+    #     if length(baseline_trace) > 1
+    #         for j=2:length(baseline_trace)
+    #             push!(trace_base[e], baseline_trace[j].metadata["x"])
+    #         end
+    #     end
+    #     baseline_durations[e] = now()-time_start
+    # end
 
     @info "The mean optimal parameters for baseline are given by: $(mean(opt_pars_baseline, dims=2))"
 
@@ -554,7 +555,7 @@ function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::In
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8)
+            perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-6, maxiters=200)
             # perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
         avg_pars_proposed[:,e] = mean(trace_proposed[e][end-10:end])
 
@@ -1678,6 +1679,10 @@ function simplified_debug_minimization_full(expid::String, N_trans::Int = 0; par
     E = 1
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
+    # m_true = 0.344339654705459
+    # L_true = 5.563828034842836
+    # g_true = 8.603799024532677
+    # k_true = 7.924118847221097
 
     m_true = 0.3
     L_true = 6.25
@@ -1704,17 +1709,17 @@ function simplified_debug_minimization_full(expid::String, N_trans::Int = 0; par
     for (iL, Lpar) in enumerate(Lpars)
         pars = vcat(m_true, Lpar, true_pars_all[3:end])
         Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
-        cost_vals[1][iL] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+        cost_vals[2][iL] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
     end
     for (ig, gpar) in enumerate(gpars)
         pars = vcat(true_pars_all[1:2], gpar, k_true)
         Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
-        cost_vals[1][ig] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+        cost_vals[3][ig] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
     end
     for (ik, kpar) in enumerate(kpars)
         pars = vcat(true_pars_all[1:3], kpar)
         Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
-        cost_vals[1][ik] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+        cost_vals[4][ik] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
     end
 
 
@@ -1826,6 +1831,14 @@ function mock_delete()
     cost_vals[11] = 0.5
     cost_vals[16] = 0.5
     return all_pars, par_vecs, cost_vals
+end
+
+function find_index_allpar(all_pars, desired_pars)
+    minds = findall(all_pars[1,:].==desired_pars[1])
+    Linds = findall(all_pars[2,:].==desired_pars[2])
+    ginds = findall(all_pars[3,:].==desired_pars[3])
+    kinds = findall(all_pars[4,:].==desired_pars[4])
+    index = intersect(intersect(intersect(minds, Linds), ginds), kinds)
 end
 
 function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans::Int = 0)
