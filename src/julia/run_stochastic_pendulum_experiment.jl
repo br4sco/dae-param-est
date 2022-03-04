@@ -244,7 +244,7 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # sensitivity for all free dynamical variables
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
-const pars_true = [m, L, g, k] # True values of free parameters
+const pars_true = [m, L, g, k]#[m, L, g, k] # True values of free parameters
 get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], pars[3], pars[4]]#[pars[1], L, pars[2], k]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
@@ -266,7 +266,7 @@ model_to_use = pendulum_sensitivity_full
 # ]
 f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
 f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
-# f_sens(x::Array{Float64,1}) = [x[14], x[28], x[35]]
+# f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
 # NOTE: Has to be changed when number of free  parameters is changed.
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
 h(sol) = apply_outputfun(f, sol)                            # for our model
@@ -668,11 +668,11 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Each element represent whether the corresponding element in η is a free parameter
     free_pars = fill(false, size(η_true))       # Known disturbance model
     # free_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))       # First parameter of c-vector unknown
-    # free_pars = vcat(true, fill(false, nx-1), false, fill(false, n_tot*n_out-1))       # First parameter of a-vector and first parameter of c-vector unknown
+    # free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))       # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
     dist_par_bounds = Array{Float64}(undef, 0, 2)
-    # dist_par_bounds = [-Inf Inf]
+    # dist_par_bounds = [-Inf Inf]#; -Inf Inf]
     function get_all_ηs(pars::Array{Float64, 1})
         all_η = η_true
         all_η[free_par_inds] = pars[num_dyn_pars+1:end]
@@ -1217,7 +1217,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     opt_pars_proposed_LSQ = zeros(length(pars0), E)
     trace_proposed = [[Float64[]] for e=1:E]
     trace_costs = [Float64[] for e=1:E]
-    grad_norms  = [Float64[] for e=1:E]
+    grad_trace  = [[Float64[]] for e=1:E]
     for e=1:E
     # for e=4:4
         get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,e], δ, pars, isws, M_mean)
@@ -1226,7 +1226,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         # opt_pars_proposed[:,e], trace_proposed[e] =
         #     perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
 
-        opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_norms[e] =
+        opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_trace[e] =
             perform_SGD_adam_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=300, tol=1e-8)
             # perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=300, tol=1e-8)
         reset_isws!(isws)
@@ -1419,14 +1419,14 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     opt_pars_proposed_LSQ = zeros(length(pars0), E)
     trace_proposed = [[Float64[]] for e=1:E]
     trace_costs = [Float64[] for e=1:E]
-    grad_norms  = [Float64[] for e=1:E]
+    grad_trace  = [[Float64[]] for e=1:E]
     for e=1:E
         get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,e], δ, pars, isws, M_mean)
         get_gradient_estimate_p_debug(pars, M_mean) = get_gradient_estimate_debug(Y[:,e], δ, pars, isws, M_mean)
         jacobian_model(x, p) = get_proposed_jacobian(p, isws, M)
         # opt_pars_proposed[:,e], trace_proposed[e] =
         #     perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
-        opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_norms[e] =
+        opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_trace[e] =
             perform_SGD_adam_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=150, tol=1e-8)
             # perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=300, tol=1e-4)
         reset_isws!(isws)
@@ -1568,15 +1568,15 @@ function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{F
     opt_pars_proposed_LSQ = zeros(length(pars0), E)
     trace_proposed = [[Float64[]] for e=1:E]
     trace_costs = [Float64[] for e=1:E]
-    grad_norms  = [Float64[] for e=1:E]
+    grad_trace  = [[Float64[]] for e=1:E]
     for e=1:E
         get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,e], δ, pars, isws, M_mean)
         get_gradient_estimate_p_debug(pars, M_mean) = get_gradient_estimate_debug(Y[:,e], δ, pars, isws, M_mean)
         jacobian_model(x, p) = get_proposed_jacobian(p, isws, M)
         # opt_pars_proposed[:,e], trace_proposed[e] =
         #     perform_stochastic_gradient_descent(get_gradient_estimate_p, pars0, par_bounds, verbose=true)
-        opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_norms[e] =
-            perform_SGD_adam_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=200, tol=1e-8)
+        opt_pars_proposed[:,e], trace_proposed[e], trace_costs[e], grad_trace[e] =
+            perform_SGD_adam_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=500, tol=1e-8)
             # perform_stochastic_gradient_descent_debug(get_gradient_estimate_p_debug, pars0, par_bounds, verbose=true; maxiters=300, tol=1e-4)
         reset_isws!(isws)
         # proposed_result, proposed_trace = get_fit_sens(Y[:,e], pars0,
@@ -1597,10 +1597,26 @@ function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{F
     g_true = 9.81
     k_true = 6.25
 
-    mvals = min(m_true, opt_pars_proposed[1,1]):0.005:max(m_true, opt_pars_proposed[1,1])+0.005
-    Lvals = min(L_true, opt_pars_proposed[2,1]):0.1:max(L_true, opt_pars_proposed[2,1])+0.1
-    gvals = min(g_true, opt_pars_proposed[3,1]):0.1:max(g_true, opt_pars_proposed[3,1])+0.1
-    kvals = min(k_true, opt_pars_proposed[4,1]):0.1:max(k_true, opt_pars_proposed[4,1])+0.1
+    Δm = norm(m_true-opt_pars_proposed[1,1])
+    ΔL = norm(L_true-opt_pars_proposed[2,1])
+    Δg = norm(g_true-opt_pars_proposed[3,1])
+    Δk = norm(k_true-opt_pars_proposed[4,1])
+    δm = Δm/6.
+    δL = ΔL/6.
+    δg = Δg/6.
+    δk = Δk/6.
+
+    # Ensures 2401 possible combinations (7^4)
+    mvals = min(m_true, opt_pars_proposed[1,1]):δm:max(m_true, opt_pars_proposed[1,1])+δm
+    Lvals = min(L_true, opt_pars_proposed[2,1]):δL:max(L_true, opt_pars_proposed[2,1])+δL
+    gvals = min(g_true, opt_pars_proposed[3,1]):δg:max(g_true, opt_pars_proposed[3,1])+δg
+    kvals = min(k_true, opt_pars_proposed[4,1]):δk:max(k_true, opt_pars_proposed[4,1])+δk
+    par_vecs = [collect(mvals), collect(Lvals), collect(gvals), collect(kvals)]
+
+    # mvals = min(m_true, opt_pars_proposed[1,1]):0.01:max(m_true, opt_pars_proposed[1,1])+0.01
+    # Lvals = min(L_true, opt_pars_proposed[2,1]):0.1:max(L_true, opt_pars_proposed[2,1])
+    # gvals = min(g_true, opt_pars_proposed[3,1]):0.1:max(g_true, opt_pars_proposed[3,1])
+    # kvals = min(k_true, opt_pars_proposed[4,1]):0.1:max(k_true, opt_pars_proposed[4,1])
     mdiffs = mvals.-opt_pars_proposed[1,1]
     Ldiffs = Lvals.-opt_pars_proposed[2,1]
     gdiffs = gvals.-opt_pars_proposed[3,1]
@@ -1637,7 +1653,179 @@ function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{F
         end
     end
 
-    return all_pars, cost_vals, min_ind, opt_pars_proposed
+    return all_pars, cost_vals, par_vecs, min_ind, opt_pars_proposed, trace_proposed, grad_trace
+end
+
+function simplified_debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{Float64,1}=[0.5, 4.25, 11.0, 4.25])
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+
+    m_true = 0.3
+    L_true = 6.25
+    g_true = 9.81
+    k_true = 6.25
+    true_pars_all = [m_true, L_true, g_true, k_true]
+
+    mdiffs = [-0.03, -0.02, -0.01, 0.0, 0.01, 0.02, 0.03]
+    Ldiffs = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
+    gdiffs = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
+    kdiffs = [-0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3]
+    mpars = m_true.+mdiffs
+    Lpars = L_true.+Ldiffs
+    gpars = g_true.+gdiffs
+    kpars = k_true.+kdiffs
+
+    e = 1
+    cost_vals = [zeros(length(mdiffs)), zeros(length(Ldiffs)), zeros(length(gdiffs)), zeros(length(kdiffs))]
+    for (im, mpar) in enumerate(mpars)
+        pars = vcat(mpar, true_pars_all[2:end])
+        Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+        cost_vals[1][im] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+    end
+    for (iL, Lpar) in enumerate(Lpars)
+        pars = vcat(m_true, Lpar, true_pars_all[3:end])
+        Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+        cost_vals[1][iL] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+    end
+    for (ig, gpar) in enumerate(gpars)
+        pars = vcat(true_pars_all[1:2], gpar, k_true)
+        Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+        cost_vals[1][ig] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+    end
+    for (ik, kpar) in enumerate(kpars)
+        pars = vcat(true_pars_all[1:3], kpar)
+        Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+        cost_vals[1][ik] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+    end
+
+
+    return mpars, Lpars, gpars, kpars, cost_vals
+end
+
+function allpar_viz_1par(all_pars::Array{Float64,2}, cost_vals::Array{Float64,1}, par_vecs::Array{Array{Float64,1},1}, var_par_ind::Int, fixed_pars::Array{Float64,1})
+    num_pars = size(par_vecs, 1)
+    @assert length(fixed_pars) == num_pars-1 "All parameters except one have to be fixed"
+
+    perm = sortperm(all_pars[var_par_ind, :])
+    all_pars_sorted = all_pars[:, perm]
+    cost_vals_sorted = cost_vals[perm]
+    # all_pars[:,perm] is sorted according to var_par_ind
+
+    # Find elements corresponding to indices in fixed pars
+    # fixed_pars is assumed to contain indices of desired fixed values of parameters (indices in par_vecs)
+    fixed_inds = setdiff(1:num_pars, var_par_ind)
+    indices_to_keep = collect(1:size(all_pars,2))
+    for i=1:length(fixed_inds)
+        ind = fixed_inds[i]
+        indices_to_remove = findall(all_pars_sorted[ind,:].!=fixed_pars[i])
+        setdiff!(indices_to_keep, indices_to_remove)
+    end
+    return perm, all_pars_sorted, cost_vals_sorted, indices_to_keep
+end
+
+function allpar_viz_2par(all_pars::Array{Float64,2}, cost_vals::Array{Float64,1}, par_vecs::Array{Array{Float64,1},1}, var_par_inds::Array{Int,1}, fixed_pars::Array{Float64,1})
+    num_pars = size(par_vecs, 1)
+    @assert length(fixed_pars) == num_pars-2 "All parameters except two have to be fixed"
+
+    perm = sortperm(all_pars[var_par_inds[1], :])
+    all_pars_sorted = all_pars[:, perm]
+    cost_vals_sorted = cost_vals[perm]
+    # all_pars[:,perm] is sorted according to var_par_ind
+
+    # Find elements corresponding to indices in fixed pars
+    # fixed_pars is assumed to contain indices of desired fixed values of parameters (indices in par_vecs)
+    fixed_inds = setdiff(1:num_pars, var_par_inds)
+    indices_to_keep = collect(1:size(all_pars,2))
+    for i=1:length(fixed_inds)
+        ind = fixed_inds[i]
+        indices_to_remove = findall(all_pars_sorted[ind,:].!=fixed_pars[i])
+        setdiff!(indices_to_keep, indices_to_remove)
+    end
+
+    # Generating cost matrix
+    num_cols = length(par_vecs[var_par_inds[1]])
+    num_rows = length(par_vecs[var_par_inds[2]])
+    cost_mat = zeros(num_rows, num_cols)
+    pars_to_keep = all_pars[:,indices_to_keep]
+    costs_to_keep = cost_vals_sorted[indices_to_keep]
+    for col_ind = 1:length(indices_to_keep)÷num_rows
+        cost_mat[:, col_ind] = costs_to_keep[ (col_ind-1)*num_rows+1:col_ind*num_cols]
+    end
+    return perm, all_pars_sorted, cost_vals_sorted, indices_to_keep, cost_mat
+end
+
+function alt_viz_2par(all_pars::Array{Float64,2}, cost_vals::Array{Float64,1}, par_vecs::Array{Array{Float64,1},1}, plot_par_inds::Array{Int,1})
+    @assert length(plot_par_inds) == 2 "Can only plot with respect to two parameters at a time (length(plot_par_inds) must be 2)"
+    num_pars = size(par_vecs, 1)
+    non_plot_inds = setdiff(1:num_pars, plot_par_inds)
+
+    par1_vec = par_vecs[plot_par_inds[1]]
+    par2_vec = par_vecs[plot_par_inds[2]]
+    opt_pars_mat = fill(zeros(num_pars-2), (length(par1_vec), length(par2_vec)))
+    for par1_ind in 1:length(par1_vec)
+        for par2_ind in 1:length(par2_vec)
+            par1 = par1_vec[par1_ind]
+            par2 = par2_vec[par2_ind]
+            temp = setdiff(1:length(cost_vals), findall(all_pars[plot_par_inds[1],:].==par1))
+            inds_to_search_among = setdiff(setdiff(1:length(cost_vals), findall(all_pars[plot_par_inds[1],:].!=par1)), findall(all_pars[plot_par_inds[2],:].!=par2))
+            cost_min = Inf
+            min_ind = 0
+            for ind in inds_to_search_among
+                if cost_min > cost_vals[ind]
+                    cost_min = cost_vals[ind]
+                    min_ind = ind
+                end
+            end
+            opt_pars_mat[par1_ind, par2_ind] = all_pars[non_plot_inds,min_ind]
+        end
+    end
+    plot_par_vecs = [par1_vec, par2_vec]
+    return plot_par_vecs, opt_pars_mat
+end
+
+function mock_delete()
+    pars1 = [1.,2.0]
+    pars2 = [1.,2.0]
+    pars3 = [1.,2.0]
+    pars4 = [1.,2.0]
+    all_pars = zeros(4, length(pars1)*length(pars2)*length(pars3)*length(pars4))
+    i=1
+    for par1 in pars1
+        for par2 in pars2
+            for par3 in pars3
+                for par4 in pars4
+                    all_pars[:,i] = [par1, par2, par3, par4]
+                    i += 1
+                end
+            end
+        end
+    end
+    par_vecs = [pars1, pars2, pars3, pars4]
+    cost_vals = ones(size(all_pars,2))
+    cost_vals[1] = 0.5
+    cost_vals[6] = 0.5
+    cost_vals[11] = 0.5
+    cost_vals[16] = 0.5
+    return all_pars, par_vecs, cost_vals
 end
 
 function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans::Int = 0)
@@ -2096,6 +2284,7 @@ function perform_SGD_adam_debug(
     cost_vals = Float64[]
     trace = [pars]
     grad_norms = Float64[]
+    grad_trace = []
     while t <= maxiters
         grad_est, cost_val = get_grad_estimate_debug(pars, M_rate(t))
         push!(cost_vals, cost_val)
@@ -2115,11 +2304,12 @@ function perform_SGD_adam_debug(
         pars = pars + step
         project_on_bounds!(pars, bounds)
         push!(trace, pars)
+        push!(grad_trace, grad_est)
         # (t-1)%10+1 maps t to a number between 1 and 10 (inclusive)
         last_q_norms[(t-1)%q+1] = norm(grad_est)
         t += 1
     end
-    return pars, trace, cost_vals, grad_norms
+    return pars, trace, cost_vals, grad_trace
 end
 
 function test_SGD_on_known_cost()
