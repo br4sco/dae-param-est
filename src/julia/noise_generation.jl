@@ -282,11 +282,11 @@ end
 # to create a custom struct???
 
 # Used for disturbance
-function disturbance_model_1(Ts::Float64; bias::Float64=0.0)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_1(Ts::Float64; bias::Float64=0.0, scale::Float64=0.6)::Tuple{DT_SS_Model, DataFrame}
     nx = 2        # model order
     n_out = 2     # number of outputs
     n_in = 2      # number of inputs
-    w_scale = 0.6*ones(n_out)             # noise scale
+    w_scale = scale*ones(n_out)             # noise scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [0.8, 4^2]
@@ -303,11 +303,11 @@ function disturbance_model_1(Ts::Float64; bias::Float64=0.0)::Tuple{DT_SS_Model,
 end
 
 # Used for input
-function disturbance_model_2(Ts::Float64; bias::Float64=0.0)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_2(Ts::Float64; bias::Float64=0.0, scale::Float64=0.2)::Tuple{DT_SS_Model, DataFrame}
     nx = 2        # model order
     n_out = 1     # number of outputs
     n_in = 2      # number of inputs
-    u_scale = 0.2 # input scale
+    u_scale = scale # input scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [0.8, 4^2]
@@ -322,13 +322,13 @@ function disturbance_model_2(Ts::Float64; bias::Float64=0.0)::Tuple{DT_SS_Model,
 end
 
 # Used for scalar disturbance and input
-function disturbance_model_3(Ts::Float64; bias::Float64=0.0)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_3(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)::Tuple{DT_SS_Model, DataFrame}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
     nx = 2        # model order
     n_out = 1     # number of outputs
     n_in = 1      # number of inputs
-    w_scale = 0.2*ones(n_out)             # noise scale
+    w_scale = scale*ones(n_out)             # noise scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [2*ω*ζ, ω^2]
@@ -355,9 +355,9 @@ end
 # end
 
 function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
-    bias::Float64=0.0)::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
+    bias::Float64=0.0, scale::Float64=1.0)::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
 
-    mdl, metadata = gen(Ts, bias=bias)
+    mdl, metadata = gen(Ts, bias=bias, scale=scale)
     n_tot = size(mdl.Cd,2)
 
     ZS = [randn(Nw, n_tot) for m = 1:M]
