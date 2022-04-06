@@ -1,6 +1,6 @@
 # dae-param-est
 This repository contains the code to the numerical experiment discussed in
-(TODO: insert paper link here), which proposes a method for consistent parameter
+[this paper published at CDC2021](https://www.diva-portal.org/smash/get/diva2:1539989/FULLTEXT01.pdf), which proposes a method for consistent parameter
 estimation for Differential Algebraic Equations (DAEs) subject to process
 disturbances.
 
