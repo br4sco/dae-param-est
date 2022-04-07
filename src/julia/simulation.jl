@@ -1034,6 +1034,44 @@ function pendulum_sensitivity2_with_dist_sens_2(Φ::Float64, u::Function, w_comp
     end
 end
 
+function fast_heat_transfer_reactor(V0::Float64, T0::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+    let k0 = θ[1], k1 = θ[2], k2 = θ[3], k3 = θ[4], k4 = θ[5]
+
+        # the residual function
+        function f!(res, xp, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = xp[1] - ut[1] + ut[4]
+            res[2] = xp[2] - ut[1]*(ut[2]-x[2])/x[1] + k0*exp(-k1/x[4])x[2]
+            res[3] = xp[3] + ut[1]x[3]/x[1] - k0*exp(-k1/x[4])x[2]
+            res[4] = x[6] - k3*x[5]/x[1] - ut[1]*(ut[3]-x[4])/x[1] + k0*k2*exp(-k1/x[4])*x[2]
+            res[5] = xp[4] + k3*x[5]/k4 - ut[5]*(ut[6]-x[4])/k4# - 0.001*wt[1]
+            res[6] = x[6] - xp[4]
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, with starting volume V0 and starting temperature T0
+        u0 = u(0.0)
+        w0 = w(0.0)
+        x5_0 = (V0*u0[5]*(u0[6]-T0) - k4*u0[1]*(u0[3]-T0))/((V0+k4)k3)
+        xp4_0 = -k3*x5_0/k4 + u0[5]*(u0[6]-T0)/k4
+        xp6_0 = -k3*x5_0/V0^2 - u0[1]*xp4_0/V0 - u0[1]*(u0[3]-T0)/V0^2 + k0*k2*u0[1]*u0[2]exp(-k1/T0)/V0
+
+        x0 = [V0; 0.; 0.; T0; x5_0; xp4_0]
+        xp0 = [u0[1]-u0[4]; u0[1]u0[2]/V0; 0.; xp4_0; 0.; xp6_0]
+
+        dvars = vcat(fill(true, 4), [false, false])
+
+        r0 = zeros(length(x0))
+        f!(r0, xp0, x0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, xp0, dvars, r0)
+    end
+end
+
 function pendulum_ode(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model_ode
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         # Similarly to the DAE-implementation, we don't use the ability of passing
@@ -1194,6 +1232,23 @@ function solve_in_parallel(solve, is)
       next!(p)
   end
   Y
+end
+
+# Handles multivariate outputs
+function solve_in_parallel_multivar(solve, is)
+  M = length(is)
+  p = Progress(M, 1, "Running $(M) simulations...", 50)
+  y1 = solve(is[1])
+  ny = length(y1[1])
+  Y = zeros(ny*length(y1), M)
+  Y[:,1] += vcat(y1...) # Flattens the array
+  next!(p)
+  Threads.@threads for m = 2:M
+      y = vcat(solve(is[m])...) # Flattens the array of arrays returned by solve()
+      Y[:,m] .+= y[:]
+      next!(p)
+  end
+  Y, ny
 end
 
 function solve_in_parallel_sens(solve, is)

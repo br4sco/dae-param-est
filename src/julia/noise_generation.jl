@@ -365,6 +365,24 @@ function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     XW, get_system_output_mangled(mdl, XW).+ metadata.bias[1], metadata
 end
 
+# TODO: Is this even used? Remove?
+function get_reactor_debug_input(Ts::Float64, Nw::Int)
+    u1(t) = 0.3 + 0.05*sin(t);        # FA
+    u2(t) = 3.2;                      # CA0
+    u3(t) = 293.15;                   # TA
+    u4(t) = 0.3 + 0.02*sin(0.5*t);    # F
+    u5(t) = 0.1 + 0.01*sin(2*t);      # Fh
+    u6(t) = 313.30;                   # Th
+    u(t) = [u1(t), u2(t), u3(t), u4(t), u5(t), u6(t)]
+
+    U = zeros(Nw, 6)
+    ts = 0.0:Ts:(Nw-1)*Ts
+    for ind = 1:length(ts)
+        U[ind,:] = u(ts[ind])
+    end
+    return U
+end
+
 # function get_filtered_noise_scalar(gen::Function, Ts::Float64, M::Int, Nw::Int
 #     )::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
 #

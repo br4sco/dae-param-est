@@ -31,13 +31,13 @@ the functions defined in
 save four files in total:
 
 1. A `Nw✕1` noise matrix serving as the input u(t).
-2. Metadata corresponding to the above noise matrix
+2. Meta-data corresponding to the above noise matrix
 3. A `Nw✕E` noise matrix representing the process disturbance, where `E` is the
    number of used data-sets
-4. Metadata corresponding to the above noise matrix
+4. Meta-data corresponding to the above noise matrix
 
 
-The parameter `Nw` defines the number of steps of the noise sequence, and which has to be long enough for running the simulation.  Specifically, `Nw✕δ > N✕Ts` must hold, where `δ` is the sampling time of the noise generation, `N` and `Ts` is the number of steps and sampling time of the simulation, respectively.
+The parameter `Nw` defines the number of steps of the noise sequence, and which has to be long enough for running the simulation.  Specifically, `Nw*δ > N*Ts` must hold, where `δ` is the sampling time of the noise generation, `N` and `Ts` is the number of steps and sampling time of the simulation, respectively.
 
 To use the same disturbance model as described in the paper, in a julia repl in [src/julia](src/julia) run:
 
@@ -67,11 +67,11 @@ Then, in the repl, include the experiment script
 ```{julia}
 include("run_experiment.jl")
 ```
-You will probably have to install a number of dependencies pointed out by Julia.
+You will probably have to install a number of dependencies pointed out by julia.
 After that, you can run the estimation experiment over the `E` data-sets found in the folder ```src/julia/experiments/expid```, by writing
 
 ```{julia}
 opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, durations = get_estimates("expid", [0.5, 4.25, 4.25], 500)
 ```
 
-The results can be interpreted as follows. ```{julia}opt_pars_baseline[i,e]``` is the optimal value of parameter `i` found by the output error method for the data-set `e`. Similarly, ```{julia}avg_pars_proposed[i,e]``` is the optimal value of parameter `i` found by the proposed method for the data-set `e`.
+The results can be interpreted as follows. ```opt_pars_baseline[i,e]``` is the optimal value of parameter `i` found by the output error method for the data-set `e`. Similarly, ```avg_pars_proposed[i,e]``` is the optimal value of parameter `i` found by the proposed method for the data-set `e`.
