@@ -16,19 +16,20 @@ multiple threads (recommended), start julia with the following command `julia
 --threads n`, where `n` is the number of threads you want to use.
 
 ## Run the experiment
-The main experiment is defined in
-[src/julia/run_experiment.jl](src/julia/run_experiment.jl). Additionally, the
-noise model and noise generation is defined in
+An simpler interface for running experiments is defined in [src/julia/example.jl](src/julia/example.jl).
+It is recommended to use this. Additionally, the noise model and noise generation is defined in
 [src/julia/noise_generation.jl](src/julia/noise_generation.jl). The simulation scripts and
 physical model is defined in [src/julia/simulation.jl](src/julia/simulation.jl).
+The main code can otherwise be found in
+[src/julia/run_experiment.jl](src/julia/run_experiment.jl).
+
 
 ### Download or generate noise
 You can either generate the data yourself or download the data used in our experiment from
 https://kth-my.sharepoint.com/:f:/g/personal/robbj_ug_kth_se/Eoy33BAr42JPnTzK1MGQ2qcBP2sjLWb-fs0cAFC2YrUK5Q?e=I5bAHp (This link is only valid for 180 days, if it doesn't work then please e-mail robbj@kth.se, since that means we have forgotten to update it). Place these files in
 [src/julia/data/experiments](src/julia/data/experiments) (Note that these files are quite large). You can also generate noise yourself using
 the functions defined in
-[src/julia/noise_generation.jl](src/julia/noise_generation.jl). You should generate and
-save four files in total:
+[src/julia/noise_generation.jl](src/julia/noise_generation.jl). In that case you should generate and save four files in total:
 
 1. A `Nw✕1` noise matrix serving as the input u(t).
 2. Metadata corresponding to the above noise matrix

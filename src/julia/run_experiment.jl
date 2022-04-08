@@ -340,10 +340,10 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    # E = size(Y, 2)
-    # DEBUG
-    E = 1
-    @warn "Using E = $E instead of default"
+    E = size(Y, 2)
+    # # DEBUG
+    # E = 1
+    # @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
@@ -391,7 +391,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
-        @warn "Only using maxiters=100 right now"
+        # @warn "Only using maxiters=100 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
             perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
             # perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
