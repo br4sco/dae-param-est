@@ -37,7 +37,7 @@ save four files in total:
 4. Metadata corresponding to the above noise matrix
 
 
-The parameter `Nw` defines the number of steps of the noise sequence, and which has to be long enough for running the simulation.  Specifically, `Nw✕δ > N✕Ts` must hold, where `δ` is the sampling time of the noise generation, `N` and `Ts` is the number of steps and sampling time of the simulation, respectively.
+The parameter `Nw` defines the number of steps of the noise sequence, and which has to be long enough for running the simulation.  Specifically, `Nw*δ > N*Ts` must hold, where `δ` is the sampling time of the noise generation, `N` and `Ts` is the number of steps and sampling time of the simulation, respectively.
 
 To use the same disturbance model as described in the paper, in a julia repl in [src/julia](src/julia) run:
 
@@ -74,4 +74,4 @@ After that, you can run the estimation experiment over the `E` data-sets found i
 opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, durations = get_estimates("expid", [0.5, 4.25, 4.25], 500)
 ```
 
-The results can be interpreted as follows. ```{julia}opt_pars_baseline[i,e]``` is the optimal value of parameter `i` found by the output error method for the data-set `e`. Similarly, ```{julia}avg_pars_proposed[i,e]``` is the optimal value of parameter `i` found by the proposed method for the data-set `e`.
+The results can be interpreted as follows. ```opt_pars_baseline[i,e]``` is the optimal value of parameter `i` found by the output error method for the data-set `e`. Similarly, ```avg_pars_proposed[i,e]``` is the optimal value of parameter `i` found by the proposed method for the data-set `e`.
