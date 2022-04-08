@@ -304,5 +304,4 @@ function noise_inter(t::Float64,
     # println("base5")
     # num_times_visited[5] += 1
     return x_new
-
 end

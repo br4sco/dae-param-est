@@ -5,7 +5,7 @@ function get_estimates(expid::String)
     # Computes optimal parameters for baseline (output error) method
     # and the proposed method, using data from the experiment given by expid,
     # initial parameter values [0.5, 4.25, 4.25] and a transient of 500 steps
-    opt_pars_oe, opt_pars_proposed, avg_pars_proposed, trace_oe,
+    opt_pars_oe, opt_pars_proposed, avg_pars_proposed,
         trace_proposed, trace_gradient, durations =
         get_estimates(expid, [0.5, 4.25, 4.25], 500);
 
@@ -22,10 +22,11 @@ end
 
 """
     `thetahat_boxplots(outputs, Ns, N_trans)`
-Produces two boxplots, comparing the baseline method to the proposed method from
-`outputs` at the different lengths in `Ns` and with transient `N_trans`. The
-first half of the boxlplots shows the baseline method, labeled bl, and the
-second part shows the proposed method, labeled m.
+Produces two boxplots, comparing the output error method to the proposed method
+for a single parameter. oe_pars and prop_pars should be arrays where
+oe_pars[iₑ,jₙ] and prop_pars[iₑ,jₙ] contain the iₑ:th estimate of the considered
+parameter for the jₙ:th value of N. By default, iₑ=1,...,100. Ns should be an
+array of all the values of N for which parameter estimates are provided
 """
 function thetahat_boxplots(oe_pars::AbstractArray{Float64}, prop_pars::AbstractArray{Float64}, Ns::Array{Int64,1})
   # θhatbs =
@@ -36,7 +37,7 @@ function thetahat_boxplots(oe_pars::AbstractArray{Float64}, prop_pars::AbstractA
   # labels = reshape([map(N -> "bl $(N)", Ns); map(N -> "m $(N)", Ns)], (1, :))
   # idxs = 1:(2length(Ns))
   θhats = hcat(oe_pars, prop_pars)
-  idxs = 1:2length(Ns)
+  idxs = 1:2size(oe_pars,2)
   labels = reshape([map(N -> "oe $(N)", Ns); map(N -> "prop $(N)", Ns)], (1, :))
   p = boxplot(
     θhats,

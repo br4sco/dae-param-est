@@ -54,24 +54,37 @@ CSV.write("data/experiments/expid/meta_U.csv", meta_U)
 ```
 This stores the necessary files in ```src/julia/experiments/expid```. For the experiments in the paper `δ = 0.01`, `E=100`, and `Nw=10*N` was used.
 
-### Run the experiment
-To run the experiment do
+### Run experiment
+The simples way to perform an experiment is to do
 ```
 julia --threads n
 ```
 
-in [src/julia](src/julia) to open the julia repl.
-
-Then, in the repl, include the experiment script
+in [src/julia](src/julia) to open the julia repl. Then run
 
 ```{julia}
-include("run_experiment.jl")
+include("example.jl")
+oe_out, prop_out = get_estimates(expid)
 ```
-You will probably have to install a number of dependencies pointed out by Julia.
-After that, you can run the estimation experiment over the `E` data-sets found in the folder ```src/julia/experiments/expid```, by writing
+
+where ```expid``` is the name (String) of the directory containing the experiment data. Note that this code might take some time because it performs 100 Monte-Carlo experiments to estimate the statistics of the different estimators. ```oe_out``` is a tuple containing three arrays, where the i:th array contains all 100 estimates of the i:th parameter obtained using the output error method neglecting process disturbances. ```prop_out``` similarly contains the corresponding estimates obtained from the proposed method. To visualize the results using box-plots, for the first parameters, you can call
 
 ```{julia}
-opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, durations = get_estimates("expid", [0.5, 4.25, 4.25], 500)
+thetahat_boxplots(oe_out[1], prop_out[1], Ns)
 ```
 
-The results can be interpreted as follows. ```opt_pars_baseline[i,e]``` is the optimal value of parameter `i` found by the output error method for the data-set `e`. Similarly, ```avg_pars_proposed[i,e]``` is the optimal value of parameter `i` found by the proposed method for the data-set `e`.
+where ```Ns``` is an array with the number of data-samples N used in the experiment ```expid``` (it's only used for labeling of the axes). If you want to compare the results for different values of N, you can visualize the results from several experiments as follows:
+
+```{julia}
+include("example.jl")
+oe_out1, prop_out1 = get_estimates(expid1)
+oe_out2, prop_out2 = get_estimates(expid2)
+oe_out3, prop_out3 = get_estimates(expid3)
+
+i = 1
+oe_pars = hcat(oe_out1[i], oe_out2[i], oe_out3[i])
+prop_pars = hcat(prop_out1[i], prop_out2[i], prop_out3[i])
+thetahat_boxplots(oe_pars, prop_pars)
+```
+
+where you can change the value of ```i``` to visualize the result for a different parameter.
