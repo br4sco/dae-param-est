@@ -260,6 +260,8 @@ function noise_inter(t::Float64,
 
     # σ_l = B2dl#(Bdl*(Bdl'))
     # σ_u = B2du#(Bdu*(Bdu'))
+    # TODO: I think it is superfluos to compute σ_u, and we could instead
+    # durectly compute σ_Δ from discretization
     σ_Δ = Adu*σ_l*(Adu') + σ_u
     σ_Δ_l = Adu*σ_l
     # Hermitian()-call might not be necessary, but it probably depends on the

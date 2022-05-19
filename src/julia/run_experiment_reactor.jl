@@ -277,8 +277,7 @@ const dθ = length(get_all_θs(pars_true))
 # === SOLVER PARAMETERS ===
 const abstol = 1e-9#1e-8
 const reltol = 1e-6#1e-5
-@warn "MAXITERS SUBSTANTIALLY REDUCED!"
-const maxiters = Int64(1e5)
+const maxiters = Int64(1e8)
 # const maxiters = Int64(1e8)
 
 solvew_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
@@ -554,16 +553,18 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     N = Int((Nw - N_margin)*δ÷Ts)     # Number of steps we can take
     W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds)
 
-    # Exact interpolation
-    mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
-        (m::Int) -> mk_newer_noise_interp(
-        a_vec::AbstractArray{Float64, 1}, C_true, XW, m, n_in, δ, isws)
+    # # Exact interpolation
+    # mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
+    #     (m::Int) -> mk_newer_noise_interp(
+    #     a_vec::AbstractArray{Float64, 1}, C_true, XW, m, n_in, δ, isws)
     # Linear interpolation. Not recommended DEBUG
-    # mk_we(XW::Array{Array{Float64,1},2}, isws::Array{InterSampleWindow, 1}) =
-    #     (m::Int) -> mk_noise_interp(C_true, mangle_XW(XW), m, δ)
+    @warn "Using linear interpolation to compute true output (default is exact interpolation)"
+    mk_we(XW::Array{Array{Float64,1},2}, isws::Array{InterSampleWindow, 1}) =
+        (m::Int) -> mk_noise_interp(C_true, mangle_XW(XW), m, δ)
 
     #TODO: WARN: This function (interpw) is not adapted to multidimensional input!
     # u(t::Float64) = interpw(input, 1, 1)(t)
+    @warn "Input function u(t) is hard-coded instead of being loaded from file" #DEBUG
     u1(t) = 0.3 + 0.05*sin(t);        # FA
     u2(t) = 3.2;                      # CA0
     u3(t) = 293.15;                   # TA
@@ -993,7 +994,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1
+    E = 100
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     trace_base = [[pars0] for e=1:E]
@@ -1015,19 +1016,23 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     # @info "The mean optimal parameters for baseline are given by: $(mean(opt_pars_baseline, dims=2))"
 
     # === Computing cost function of baseline model
-    base_par_vals = 5.3:0.1:7.8
+    base_par_vals = 0.7:0.05:1.3
     par_vector = [[el] for el in base_par_vals]
-    Ybs = [zeros(N+1) for j = 1:length(par_vector)]
+    Ybs = [zeros(ny*(N+1)) for j = 1:length(par_vector)]
     base_cost_vals = zeros(length(base_par_vals), E)
-    @warn "Not plotting baseline cost function"
-    # for (j, pars) in enumerate(par_vector)
-    #     Ybs[j] = solvew(exp_data.u, t -> zeros(n_out), pars, N) |> h
-    # end
-    # for ind = 1:length(base_par_vals)
-    #     # Y has columns indexed with 1:E because in case E is changed for debugging purposes,
-    #     # without the dimensions of Y changing, we can get a mismatch otherwise
-    #     base_cost_vals[ind,:] = mean((Y[N_trans+1:end, 1:E].-Ybs[ind][N_trans+1:end]).^2, dims=1)
-    # end
+    # @warn "Not plotting baseline cost function"
+    for (j, pars) in enumerate(par_vector)
+        temp = solvew(exp_data.u, t -> zeros(n_out), pars, N) |> h
+        # vcat(temp...) flattens temp from array of arrays into a 1D-array
+        # Inner array elements vary inner-most in resulting array
+        Ybs[j] = vcat(temp...)
+    end
+    for ind = 1:length(base_par_vals)
+        # Y has columns indexed with 1:E because in case E is changed for debugging purposes,
+        # without the dimensions of Y changing, we can get a mismatch otherwise
+        # base_cost_vals[ind,:] = mean((Y[N_trans+1:end, 1:E].-Ybs[ind][:,N_trans+1:end]).^2, dims=1)
+        base_cost_vals[ind,:] = ny*mean((Y[ny*N_trans+1:end, 1:E].-Ybs[ind][ny*N_trans+1:end]).^2, dims=1)
+    end
 
     # === Computing cost function for proposed model ===
     # TODO: Should we consider storing and loading white noise, to improve repeatability
@@ -1036,13 +1041,15 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
 
     # NOTE: CURRENTLY ONLY TREATS SCALAR PARAMETERS
     @info "Plotting proposed cost function..."
-    prop_par_vals = 0.1:0.1:2.0
+    # prop_par_vals = 0.7:0.05:1.3
+    prop_par_vals = 0.8:0.01:1.2
     prop_cost_vals = zeros(length(prop_par_vals), E)
     for ind = 1:length(prop_par_vals)
         # NOTE: If we don't pass Zm here, we will see that the cost function
         # looks very irregular even with M = 500. That's a bit suprising,
         # I would expect it to average out over that many iterations
-        Ym = simulate_system(exp_data, [prop_par_vals[ind]], M, dist_sens_inds, isws, Zm)
+        # Ym = simulate_system(exp_data, [prop_par_vals[ind]], M, dist_sens_inds, isws, Zm)
+        Ym = simulate_system(exp_data, [prop_par_vals[ind]], M, dist_sens_inds, isws, Zm) #DEBUG
         Y_mean = mean(Ym, dims=2)
         # Y has columns indexed with 1:E because in case E is changed for debugging purposes,
         # at which point Y will have more than E columns and we'll get a dimension mismatch

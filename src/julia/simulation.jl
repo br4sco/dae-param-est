@@ -1046,7 +1046,7 @@ function fast_heat_transfer_reactor(V0::Float64, T0::Float64, u::Function, w::Fu
             res[2] = xp[2] - ut[1]*(ut[2]-x[2])/x[1] + k0*exp(-k1/x[4])x[2]
             res[3] = xp[3] + ut[1]x[3]/x[1] - k0*exp(-k1/x[4])x[2]
             res[4] = x[6] - k3*x[5]/x[1] - ut[1]*(ut[3]-x[4])/x[1] + k0*k2*exp(-k1/x[4])*x[2]
-            res[5] = xp[4] + k3*x[5]/k4 - ut[5]*(ut[6]-x[4])/k4# - 0.001*wt[1]
+            res[5] = xp[4] + k3*x[5]/k4 - ut[5]*(ut[6]-x[4])/k4 - wt[1]^2
             res[6] = x[6] - xp[4]
             nothing
         end
