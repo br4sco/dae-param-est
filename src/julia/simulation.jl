@@ -1177,7 +1177,9 @@ function apply_outputfun(h, sol)
   if sol.retcode != :Success
     throw(ErrorException("Solution retcode: $(sol.retcode)"))
   end
-
+  # TODO: If this doesn't work when h returns scalar value instead of vector,
+  # then you should separate scalar case. Then this line would be only map(h, sol.u)
+  # vcat(map(h, sol.u)...)    # vcat(*...) makes it so that, if output is multivariate, it is all stacked in one big vector
   map(h, sol.u)
 end
 

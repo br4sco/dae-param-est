@@ -254,6 +254,7 @@ model_to_use = fast_heat_transfer_reactor
 f(x::Array{Float64,1}) = x#x[2]               # applied on the state at each step
 f_debug(x::Array{Float64,1}) = x
 f_sens(x::Array{Float64,1}) = []
+@warn "f_sens not defined right now!!! So SGD will, of course, not work"
 # NOTE: Has to be changed when number of free  parameters is changed.
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
 h(sol) = apply_outputfun(f, sol)                            # for our model
@@ -974,6 +975,10 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
+    ########################################################################
+    # TODO: CHECK THE README-FILE CORRESPONDING TO THIS FILE THAT DESCRIBES WHAT YOU HAVE TO DO
+    ########################################################################
+
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # === Optimizing parameters for the baseline model ===
@@ -981,39 +986,47 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         # NOTE: The true input is encoded in the solvew()-function, but this function
         # still needs to to take two input arguments, so dummy_input could just be
         # anything, it's not used anyway
-        Y_base = solvew(u, t -> zeros(n_out), pars, N ) |> h
-
-        # NOTE: SCALAR_OUTPUT of system assumed here
-        return reshape(Y_base[N_trans+1:end,:], :)   # Returns 1D-array
+        # Y_base = solvew(u, t -> zeros(n_out), pars, N ) |> h
+        # return reshape(Y_base[ny*N_trans+1:end,:], :)   # Returns 1D-array
+        temp = solvew(u, t -> zeros(n_out), pars, N ) |> h
+        Y_base = vcat(temp...)
+        return Y_base[ny*N_trans+1:end]
     end
 
     function jacobian_model_b(x, pars)
-        jac = solvew_sens(u, t -> 0.0, pars, N) |> h_sens
-        return jac[N_trans+1:end, :]
+        # jac = solvew_sens(u, t -> 0.0, pars, N) |> h_sens
+        # return jac[N_trans+1:end, :]
+        temp = solvew_sens(u, t -> 0.0, pars, N) |> h_sens
+        @info "typeof: $(typeof(temp)), size: $(size(temp))"
+        jac = vcat(temp...) # TODO: This won't give us the correct Jacobian when we have several parameters
+        return jac[ny*N_trans+1:end]
     end
 
     # E = size(Y, 2)
     # DEBUG
-    E = 100
+    E = 1
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     trace_base = [[pars0] for e=1:E]
-    @warn "Not running baseline parameter estimation"
-    # for e=1:E
-    # # for e=4:4
-    #     # HACK: Uses trace returned due to hacked LsqFit package
-    #     baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
-    #         (dummy_input, pars) -> baseline_model_parametrized(δ, dummy_input, pars),
-    #         jacobian_model_b, par_bounds[:,1], par_bounds[:,2])
-    #     opt_pars_baseline[:, e] = coef(baseline_result)
-    #     if length(baseline_trace) > 1
-    #         for j=2:length(baseline_trace)
-    #             push!(trace_base[e], baseline_trace[j].metadata["x"])
-    #         end
-    #     end
-    # end
-    #
-    # @info "The mean optimal parameters for baseline are given by: $(mean(opt_pars_baseline, dims=2))"
+    @warn "Not running baseline identification"
+    for e=[]#1:E
+    # for e=4:4
+        # HACK: Uses trace returned due to hacked LsqFit package
+        # TODO: Okay, so here convergence fails, while in proposed method below
+        # there are no convergence issues, despite disturbance??? Yeah, something
+        # is weird, fix that :)
+        baseline_result, baseline_trace = get_fit_sens(Y[ny*N_trans+1:end,e], pars0,
+            (dummy_input, pars) -> baseline_model_parametrized(δ, dummy_input, pars),
+            jacobian_model_b, par_bounds[:,1], par_bounds[:,2])
+        opt_pars_baseline[:, e] = coef(baseline_result)
+        if length(baseline_trace) > 1
+            for j=2:length(baseline_trace)
+                push!(trace_base[e], baseline_trace[j].metadata["x"])
+            end
+        end
+    end
+
+    @info "The mean optimal parameters for baseline are given by: $(mean(opt_pars_baseline, dims=2))"
 
     # === Computing cost function of baseline model
     base_par_vals = 0.7:0.05:1.3
@@ -1022,6 +1035,10 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     base_cost_vals = zeros(length(base_par_vals), E)
     # @warn "Not plotting baseline cost function"
     for (j, pars) in enumerate(par_vector)
+        ########################################################################
+        # TODO: DO WE REALLY NEED THE APPLY_OUTPUTFUN_MVAR DEFINED IN SIMULATION.JL??
+        # TODO: ISN'T THE MVAR APPROACH WE USE HERE ENOUGH??
+        ########################################################################
         temp = solvew(exp_data.u, t -> zeros(n_out), pars, N) |> h
         # vcat(temp...) flattens temp from array of arrays into a 1D-array
         # Inner array elements vary inner-most in resulting array
@@ -1034,6 +1051,8 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         base_cost_vals[ind,:] = ny*mean((Y[ny*N_trans+1:end, 1:E].-Ybs[ind][ny*N_trans+1:end]).^2, dims=1)
     end
 
+    @info "Finished with baseline plots???"
+
     # === Computing cost function for proposed model ===
     # TODO: Should we consider storing and loading white noise, to improve repeatability
     # of the results? Currently repeatability is based on fixed random seed
@@ -1041,10 +1060,11 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
 
     # NOTE: CURRENTLY ONLY TREATS SCALAR PARAMETERS
     @info "Plotting proposed cost function..."
-    # prop_par_vals = 0.7:0.05:1.3
+    prop_par_vals = 0.7:0.05:1.3
     prop_par_vals = 0.8:0.01:1.2
     prop_cost_vals = zeros(length(prop_par_vals), E)
-    for ind = 1:length(prop_par_vals)
+    @warn "Actually, not plotting proposed cost function"
+    for ind = []#1:length(prop_par_vals)
         # NOTE: If we don't pass Zm here, we will see that the cost function
         # looks very irregular even with M = 500. That's a bit suprising,
         # I would expect it to average out over that many iterations
