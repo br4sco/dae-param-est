@@ -33,6 +33,29 @@ end
 
 # =================== Helper Functions ==========================
 
+function Φ(mat_in::Array{Float64,2})
+    nx = minimum(size(mat_in))
+    Φ(mat_in, nx)
+end
+
+function Φ(mat_in::Array{Float64,2}, nx::Int)
+    mat = copy(mat_in)
+    for i=1:size(mat,1)
+        for j=1:size(mat,2)
+            i1 = (i-1)%nx+1
+            j1 = (j-1)%nx+1
+            if i1 > j1
+                continue
+            elseif i1 == j1
+                mat[i,j] = 0.5*mat[i,j]
+            else
+                mat[i,j] = 0
+            end
+        end
+    end
+    return mat
+end
+
 function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
     nx      = size(A,1)
     Mexp    = [-A B*(B'); zeros(size(A)) A']
@@ -72,64 +95,61 @@ function discretize_ct_noise_model_with_sensitivities(
 
     # Indices of free parameters corresponding to "a-vector" in disturbance model
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
-    q   = length(sens_inds)
-    q_a = length(sens_inds_a)
-    nx_sens = (1+q_a)*nx
-    A_mat = zeros(nx_sens, nx_sens)
-    A_mat[1:nx, 1:nx] = mdl.A
-    for i in 1:length(sens_inds_a)
-        Aη = zeros(nx, nx)
-        Aη[1, sens_inds_a[i]] = -1
-        A_mat[i*nx+1:(i+1)*nx, i*nx+1:(i+1)*nx] = mdl.A
-        A_mat[i*nx+1:(i+1)*nx, 1:nx] = Aη
+    nη   = length(sens_inds)
+    na = length(sens_inds_a)
+    nx_sens = (1+na)*nx
+
+    Aηa = zeros(na*nx, nx)
+    for i = 1:na
+        Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
     end
-    B_mat = vcat(mdl.B, zeros(q_a*nx, size(mdl.B, 2)) )
-    my_I = Matrix{Float64}(I, q_a*nx, q_a*nx)
-    C_mat = zeros((q+1)n_out, nx_sens*n_in)
-    for row_block = 1:q+1
+
+    M = [mdl.A             zeros(nx, na*nx)                mdl.B*(mdl.B');
+         Aηa         kron(Matrix(1.0I, na, na), mdl.A)   zeros(nx*na, nx);
+         zeros(nx, nx)     zeros(nx, nx*na)                -mdl.A' ]
+    Mexp = exp(M*Ts)
+    Ad   = Mexp[1:nx, 1:nx]
+    Dd   = Hermitian(Mexp[1:nx, (na+1)*nx+1:(na+2)*nx]*(Ad'))
+    Bd   = cholesky(Dd).L
+    Adηa = Mexp[nx+1:(na+1)*nx, 1:nx]
+    # temp = Mexp[nx+1:(nθ+1)*nx, (nθ+1)*nx+1:(nθ+2)*nx]*(Ad')
+    Ddηa = Mexp[nx+1:(na+1)*nx, (na+1)*nx+1:(na+2)*nx]*(Ad')
+    for i = 1:na
+        Ddηa[(i-1)*nx+1:i*nx, :] += (Ddηa[(i-1)*nx+1:i*nx, :])'
+    end
+    Φ_arg = ((kron(Matrix(I, na, na), Bd)) \ Ddηa ) / (Bd')
+    Bdηa = kron(Matrix(I, na, na), Bd)*Φ( Φ_arg )
+
+    A_mat = [Ad zeros(nx,na*nx); Adηa kron(Matrix(I,na,na), Ad)]
+    B_mat = [Bd; Bdηa]
+    C_mat = zeros((nη+1)n_out, nx_sens*n_in)
+    for row_block = 1:nη+1
         if row_block == 1
             for col_block = 1:n_in
                 C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    (col_block-1)*(q_a+1)*nx+1:(col_block-1)*(q_a+1)*nx+nx] =
+                    (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
                     mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-                # C_mat[:, (col_block-1)*(q_a+1)*nx+1:col_block*(q_a+1)*nx]
-                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, q_a*nx))
+                # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
+                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
             end
-        elseif row_block <= q_a+1
+        elseif row_block <= na+1
             ind = row_block-1
             for col_block = 1:n_in
                 C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    ind*nx+(col_block-1)*(q_a+1)*nx+1:ind*nx+(col_block-1)*(q_a+1)*nx+nx] =
+                    ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
                     mdl.C[:,(col_block-1)*nx+1:col_block*nx]
             end
         else
             k, j, i = get_k_j_i(sens_inds[row_block-1])
-            C_mat[(row_block-1)*n_out+i, (j-1)*(q_a+1)*nx+k] = 1
+            C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
         end
     end
 
-    # for col_block = 1:n_in
-    #     C_mat[1:n_out, (col_block-1)*(q_a+1)*nx+1:(col_block-1)*(q_a+1)*nx+nx] =
-    #         mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-    # end
-    # for row_block = 2:1+q_a
-    #     C_mat[n_out+(row_block-2)*nx*q_a+1:n_out+(row_block-1)*nx*q_a,
-    #         nx+(row_block-2)*(q_a+1)*nx+1:nx+(row_block-2)*(q_a+1)*nx+q_a*nx] =
-    #         my_I
-    # end
-
-    Mexp    = [-A_mat B_mat*(B_mat'); zeros(size(A_mat)) A_mat']
-    MTs     = exp(Mexp*Ts)
-    AdTs    = MTs[nx_sens+1:end, nx_sens+1:end]'
-    Bd2Ts   = Hermitian(AdTs*MTs[1:nx_sens, nx_sens+1:end])
-    CholTs  = cholesky(Bd2Ts)
-    BdTs    = CholTs.L
-    svd_Bd = svd(Bd2Ts)
-    return DT_SS_Model(AdTs, BdTs, C_mat, zeros(nx_sens*n_in), Ts)
+    return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
 end
 
-# Converts parameter values for C-matrix as entered into a single vector more
-# suitable to be used in the code
+# Parameter values for C-matrix as entered are converted into a single vector
+# more suitable to be used in the code
 function get_c_parameter_vector(c_vals, w_scale, nx::Int, n_out::Int, n_in::Int)
     c_vec = zeros(nx*n_out*n_in)
     for i = 1:n_out
@@ -253,6 +273,8 @@ function simulate_noise_process_mangled(
     M = length(data)
     N = size(data[1], 1)-1
     nx = size(mdl.Ad, 1)
+    # When sensitivities are included in disturbance model, nv != nx
+    nv = size(mdl.Bd, 2)
     n_in = size(mdl.Cd, 2)÷nx
     # We only care about the state, not the output, so we ignore the C-matrix
     C_placeholder = zeros(1, nx)
@@ -264,7 +286,7 @@ function simulate_noise_process_mangled(
     for ind = 1:n_in
         for m=1:M
             # x[i, j] is the j:th element of the state at sample i
-            y, t, x = lsim(sys, data[m][:, (ind-1)*nx+1:ind*nx], t, x0=mdl.x0)
+            y, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv], t, x0=mdl.x0)
             for i=1:N+1
                 x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[i,:]
             end
@@ -308,6 +330,7 @@ function disturbance_model_2(Ts::Float64; bias::Float64=0.0, scale::Float64=0.2)
     n_out = 1     # number of outputs
     n_in = 2      # number of inputs
     u_scale = scale # input scale
+    w_scale = scale*ones(n_out)             # noise scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [0.8, 4^2]

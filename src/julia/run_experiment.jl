@@ -514,15 +514,17 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
 
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
-    free_pars = fill(false, size(η_true))       # Known disturbance model
+    # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
+    # free_pars = fill(false, size(η_true))       # Known disturbance model
     # free_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))       # First parameter of c-vector unknown
-    # free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))       # First parameter of a-vector and first parameter of c-vector unknown
+    free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))       # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
-    dist_par_bounds = Array{Float64}(undef, 0, 2)
-    # dist_par_bounds = [-Inf Inf]#; -Inf Inf]
+    # dist_par_bounds = Array{Float64}(undef, 0, 2)
+    dist_par_bounds = [-Inf Inf; -Inf Inf]
     function get_all_ηs(pars::Array{Float64, 1})
         all_η = η_true
+        # Fetches user-provided values for free disturbance parameters only
         all_η[free_par_inds] = pars[num_dyn_pars+1:end]
         return all_η
      end
