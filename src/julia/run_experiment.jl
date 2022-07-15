@@ -123,6 +123,17 @@ function mk_noise_interp(C::Array{Float64, 2},
   end
 end
 
+# TODO: DELETE
+# This function relies on XW being mangled
+function mk_debug(a::Float64, c::Float64, m::Int, δ::Float64)
+
+  let
+    function w(t::Float64)
+        return [a*sin(c*t), sin(c*t), t*a*cos(c*t)]
+    end
+  end
+end
+
 # Function for using conditional interpolation
 function mk_newer_noise_interp(a_vec::AbstractArray{Float64, 1},
                                C::Array{Float64, 2},
@@ -222,17 +233,18 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # sensitivity for all free dynamical variables
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
-const pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters
-get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+const pars_true = [L, k]#[m, L, g, k] # True values of free parameters
+get_all_θs(pars::Array{Float64,1}) = [m, pars[1], g, pars[2]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4]#; 0.1 1e4; 0.1 1e4]
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
-dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
-const_learning_rate = [0.1, 1.0, 1.0]#, 1.0]
+dyn_par_bounds = [0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+@warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
+const_learning_rate = [1.0, 1.0, 0.1]#, 0.1]#[0.1, 1.0, 1.0]#, 1.0]
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
 learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
-model_to_use = pendulum_sensitivity_sans_g#_full
+model_to_use = pendulum_sensitivity_Lk_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
 # === OUTPUT FUNCTIONS ===
 # The state vector x from the solver is organized as follows:
 # x = [
@@ -246,9 +258,9 @@ model_to_use = pendulum_sensitivity_sans_g#_full
 # ]
 f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
 f_debug(x::Array{Float64,1}) = x
-# f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35]]   # NOTE: Hard-coded right now
+f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]#, x[35]]   # NOTE: Hard-coded right now
 # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
-f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
+# f_sens(x::Array{Float64,1}) = [x[14], x[21]]
 # NOTE: Has to be changed when number of free  parameters is changed.
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
 h(sol) = apply_outputfun(f, sol)                            # for our model
@@ -468,7 +480,6 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
             Z_sens[m][:, (i-1)*n_sens+nx+1:i*n_sens] = randn(Nw, q_a*nx)
         end
     end
-    # dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
     dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Z_sens)
@@ -485,6 +496,145 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
     Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
 
     return Y, Y_base, sens_base, Ym_prop, Y_mean_prop, sens_m_prop
+end
+
+# TODO: DELETE!
+function debug_dist_sens(expid::String, pars0::Array{Float64,1})
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    u = exp_data.u
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    @assert (length(pars0) == num_dyn_pars+length(W_meta.free_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    p = get_all_parameters(pars0)
+    θ = p[1:dθ]
+    η = p[dθ+1: dθ+dη]
+    # C = reshape(η[nx+1:end], (n_out, n_tot))
+
+    # === Computes output of the baseline model ===
+    Y_base, sens_base = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars0, N) |> h_comp
+
+    # === Computes outputs of the proposed model ===
+    # TODO: Should we consider storing and loading white noise, to improve repeatability
+    # of the results? Currently repeatability is based on fixed random seed
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+    q_a = length(dist_par_inds[findall(dist_par_inds .<= nx)])
+    n_sens = nx*(1+q_a)
+    # Creating Z_sens should ensure that the white noise that is fed into the
+    # nominal (non-sensitivity) part of the disturbance system is the same as
+    # the noise in Zm, so that the disturbance model state should always give
+    # the same realization given the same Zm, regardless of the number of free
+    # disturbance parameters corresponding to the "a-vector" in the disturbance model
+    Z_sens = [zeros(Nw, n_tot*(1+q_a)) for m = 1:M]
+    for m = 1:M
+        for i = 1:n_out
+            Z_sens[m][:, (i-1)*n_sens+1:(i-1)*n_sens+nx] = Zm[m][:, (i-1)*nx+1:i*nx]
+            Z_sens[m][:, (i-1)*n_sens+nx+1:i*n_sens] = randn(Nw, q_a*nx)
+        end
+    end
+
+    my_δ = 1e-6
+    @info "η: $η"
+    η1 = η+[my_δ, 0.0, 0.0, 0.0]
+    η2 = η+[0.0, 0.0, my_δ, 0.0]
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+    dmdl1 = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η1, nx, n_out), δ, dist_par_inds)
+    dmdl2 = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η2, nx, n_out), δ, dist_par_inds)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Z_sens)
+    XWm1 = simulate_noise_process_mangled(dmdl1, Z_sens)
+    XWm2 = simulate_noise_process_mangled(dmdl2, Z_sens)
+
+    # a = 0.8
+    # c = 1.0
+    # wmm(m::Int) = mk_debug(a, c, m, δ)
+    # wmm1(m::Int) = mk_debug(a+my_δ, c, m, δ)
+    # wmm2(m::Int) = mk_debug(a, c+my_δ, m, δ)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+    wmm1(m::Int) = mk_noise_interp(dmdl1.Cd, XWm1, m, δ)
+    wmm2(m::Int) = mk_noise_interp(dmdl2.Cd, XWm2, m, δ)
+
+    # # NOTE: OPTION 2: Use the rows below here for exact interpolation
+    # reset_isws!(isws)
+    # XWm = simulate_noise_process(dmdl, Zm)
+    # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, my_δ, isws)
+    winterests1 = zeros(50000)
+    winterests2 = zeros(50000)
+    wintersens1 = zeros(50000)
+    wintersens2 = zeros(50000)
+
+    for ind = 1:50000
+        time = 0.25*δ+(ind-1)*δ*0.5
+        temp = wmm(1)(time)#[1]
+        winterests1[ind] = (wmm1(1)(time)[1] - temp[1])/my_δ
+        winterests2[ind] = (wmm2(1)(time)[1] - temp[1])/my_δ
+        wintersens1[ind] = temp[2]
+        wintersens2[ind] = temp[3]
+    end
+
+
+    @warn "SET u(t) TO ZERO!"
+    u(t) = 0.0
+
+
+    # wests1 = -[(wmm(1)(0.01734)[1]-wmm1(1)(0.01734)[1])/my_δ, (wmm(1)(0.0252525)[1]-wmm1(1)(0.0252525)[1])/my_δ, (wmm(1)(0.0333333)[1]-wmm1(1)(0.0333333)[1])/my_δ]
+    # wests2 = -[(wmm(1)(0.01734)[1]-wmm2(1)(0.01734)[1])/my_δ, (wmm(1)(0.0252525)[1]-wmm2(1)(0.0252525)[1])/my_δ, (wmm(1)(0.0333333)[1]-wmm2(1)(0.0333333)[1])/my_δ]
+    # wsens1 = [wmm(1)(0.01734)[2], wmm(1)(0.0252525)[2], wmm(1)(0.0333333)[2]]
+    # wsens2 = [wmm(1)(0.01734)[3], wmm(1)(0.0252525)[3], wmm(1)(0.0333333)[3]]
+
+    calc_mean_y_N_prop(N::Int, pars::Array{Float64, 1}, m::Int) =
+        solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_comp
+    calc_mean_y_prop(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, pars, m)
+    Ym_prop, sens_m_prop = solve_in_parallel_sens(m -> calc_mean_y_prop(pars0, m), ms)
+    Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
+
+    calc_mean_y_N_prop1(N::Int, pars::Array{Float64, 1}, m::Int) =
+        solvew_sens(u, t -> wmm1(m)(t), pars, N) |> h_comp
+    calc_mean_y_prop1(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop1(N, pars, m)
+    Ym_prop1, sens_m_prop1 = solve_in_parallel_sens(m -> calc_mean_y_prop1(pars0, m), ms)
+    Y_mean_prop1 = reshape(mean(Ym_prop1, dims = 2), :)
+
+    calc_mean_y_N_prop2(N::Int, pars::Array{Float64, 1}, m::Int) =
+        solvew_sens(u, t -> wmm2(m)(t), pars, N) |> h_comp
+    calc_mean_y_prop2(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop2(N, pars, m)
+    Ym_prop2, sens_m_prop2 = solve_in_parallel_sens(m -> calc_mean_y_prop2(pars0, m), ms)
+    Y_mean_prop2 = reshape(mean(Ym_prop2, dims = 2), :)
+
+    yests1 = (Y_mean_prop1-Y_mean_prop)/my_δ
+    yests2 = (Y_mean_prop2-Y_mean_prop)/my_δ
+
+    # @warn "THIS INDEXING ONLY WORKS FOR TRIVIAL MODEL"
+    # sens1 = sens_m_prop[1][:,1]
+    # sens2 = sens_m_prop[1][:,2]
+    sens1 = sens_m_prop[1][:,3]
+    sens2 = sens_m_prop[1][:,4]
+    diff1 = yests1 - sens1
+    diff2 = yests2 - sens2
+
+    wvec = dmdl.Cd*reshape(XWm, 4, :)
+    wvec1 = dmdl1.Cd*reshape(XWm1, 4, :)
+    wvec2 = dmdl2.Cd*reshape(XWm2, 4, :)
+
+    w0 = wvec[1,:]
+    w1 = wvec1[1,:]
+    w2 = wvec2[1,:]
+    wsens1 = wvec[2,:]
+    wsens2 = wvec[3,:]
+
+    winterstuff = (winterests1, winterests2, wintersens1, wintersens2)
+    wstuff = ((w1-w0)/my_δ, (w2-w0)/my_δ, wsens1, wsens2)
+
+    return Y_mean_prop, Y_mean_prop1, Y_mean_prop2, sens1, sens2, yests1, yests2, diff1, diff2, winterstuff, wstuff, sens_m_prop[1]
 end
 
 function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSampleWindow, 1}}
@@ -515,9 +665,10 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_pars = fill(false, size(η_true))       # Known disturbance model
-    # free_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))       # First parameter of c-vector unknown
-    free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))       # First parameter of a-vector and first parameter of c-vector unknown
+    # free_pars = fill(false, size(η_true))                                         # Known disturbance model
+    # free_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
+    free_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
+    # free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
     # dist_par_bounds = Array{Float64}(undef, 0, 2)
@@ -581,7 +732,7 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # writedlm("data/experiments/pendulum_sensitivity/my_y.csv", my_y, ',')
 
     reset_isws!(isws)
-    return ExperimentData(Y, u, get_all_ηs, dist_par_bounds, W_meta, Nw), isws
+    return ExperimentData(Y, u, get_all_ηs, dist_par_bounds[1:length(free_par_inds),:], W_meta, Nw), isws
 end
 
 function perform_SGD_adam(
