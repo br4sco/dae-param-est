@@ -172,6 +172,7 @@ function get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
     # Use this line if you are using the modified LsqFit-package that also
     # returns trace
     # @warn "Using x_tol = 1e-12 instead of default 1e-8"
+    # fit_result, trace = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default inplace = false, x_tol = 1e-8
     fit_result, trace = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default inplace = false, x_tol = 1e-8
     return fit_result, trace
 end
@@ -222,18 +223,18 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # sensitivity for all free dynamical variables
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
-const pars_true = [L, k]#[m, L, g, k] # True values of free parameters
-get_all_θs(pars::Array{Float64,1}) = [m, pars[1], g, pars[2]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+const pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters
+get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4]#; 0.1 1e4; 0.1 1e4]
 # dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
-dyn_par_bounds = [0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
 @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-const_learning_rate = [1.0, 1.0, 0.1]#, 0.1]#[0.1, 1.0, 1.0]#, 1.0]
+const_learning_rate = [0.1, 1.0, 1.0, 0.1, 0.1]
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
 learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
-model_to_use = pendulum_sensitivity_Lk_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+model_to_use = pendulum_sensitivity_sans_g_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
 # === OUTPUT FUNCTIONS ===
 # The state vector x from the solver is organized as follows:
 # x = [
@@ -247,7 +248,7 @@ model_to_use = pendulum_sensitivity_Lk_with_dist_sens_1#pendulum_sensitivity_san
 # ]
 f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
 f_debug(x::Array{Float64,1}) = x
-f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]#, x[35]]   # NOTE: Hard-coded right now
+f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
 # f_sens(x::Array{Float64,1}) = [x[14], x[21]]
 # NOTE: Has to be changed when number of free  parameters is changed.
@@ -257,7 +258,7 @@ h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete 
 h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity
 h_debug(sol) = apply_outputfun(f_debug, sol)
 
-const num_dyn_pars = size(dyn_par_bounds, 1)
+const num_dyn_pars = length(pars_true)#size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
     model_to_use(φ0, u, w, get_all_θs(pars)),
     N,
@@ -311,6 +312,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     dist_par_inds = W_meta.free_par_inds
 
     @assert (length(pars0) == num_dyn_pars+length(dist_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
+    @assert (size(dyn_par_bounds, 1) == num_dyn_pars) "Please provide bounds for exactly all free dynamic parameters"
 
     if !isdir(joinpath(data_dir, "tmp/"))
         mkdir(joinpath(data_dir, "tmp/"))
@@ -517,8 +519,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
     # free_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
-    free_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
-    # free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
+    # free_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
+    free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
     # dist_par_bounds = Array{Float64}(undef, 0, 2)
