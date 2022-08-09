@@ -71,6 +71,58 @@ function pendulum_new(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 
     end
 end
 
+function Roberts_dns()::Model
+    # the residual function
+    function f!(res, xp, x, θ, t)
+        res[1] = -0.04 * x[1] + 1.0e4 * x[2] * x[3]
+        res[2] = -res[1] - 3.0e7 * x[2] * x[2] - xp[2]
+        res[1] -= xp[1]
+        res[3] = x[1] + x[2] + x[3] - 1.0
+        nothing
+    end
+
+    # Setting consistent initial conditions
+    x0 = [1.0, 0.0, 0.0]
+    xp0 = [-0.04, 0.04, 0.0]
+
+    dvars = [true, true, false]
+
+    r0 = zeros(length(x0))
+    f!(r0, xp0, x0, [], 0.0)
+
+    # t -> 0.0 is just a dummy function, not to be used
+    Model(f!, t -> 0.0, x0, xp0, dvars, r0)
+end
+
+function Roberts_dns_simple_pend()::Model
+    # the residual function
+    function f!(res, xp, x, θ, t)
+        res[1] = xp[1] - x[3]
+        res[2] = xp[2] - x[4]
+        res[3] = m*xp[3] + k*abs(x[3])*x[3]
+        res[4] = m*xp[4] + k*abs(x[4])*x[4]
+        nothing
+    end
+
+    L = 6.25
+    m = 0.3
+    k = 6.25
+    g = 9.81
+    Φ = pi/4
+
+    # Setting consistent initial conditions
+    x0 = [L*sin(Φ), -L*cos(Φ), 0, 0]
+    xp0 = [0, 0, 0, -g]
+
+    dvars = [true, true, true, true]
+
+    r0 = zeros(length(x0))
+    f!(r0, xp0, x0, [], 0.0)
+
+    # t -> 0.0 is just a dummy function, not to be used
+    Model(f!, t -> 0.0, x0, xp0, dvars, r0)
+end
+
 function pendulum_sensitivity(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 

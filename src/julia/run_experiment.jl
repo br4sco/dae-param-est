@@ -929,9 +929,9 @@ function read_from_backup(dir::String, E::Int)
     opt_pars_proposed = zeros(k, E)
     avg_pars_proposed = zeros(k, E)
     for e=1:E
-        # opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
-        opt_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_proposed_e$e.csv"), ',')
-        avg_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_average_e$e.csv"), ',')
+        opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
+        # opt_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_proposed_e$e.csv"), ',')
+        # avg_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_average_e$e.csv"), ',')
     end
     return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed
 end
