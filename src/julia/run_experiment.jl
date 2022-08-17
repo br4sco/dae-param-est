@@ -223,18 +223,27 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # sensitivity for all free dynamical variables
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
+
+# For pendulum:
 const pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters
 get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-# dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
-# dyn_par_bounds = [0.01 1e4; 0.1 1e4]#; 0.1 1e4; 0.1 1e4]
-# dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.1 1e4]
-dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+dyn_par_bounds = [0.01 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
 @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-const_learning_rate = [0.1, 1.0, 1.0, 0.1, 0.1]
+const_learning_rate = [0.1, 1.0, 1.0]#, 0.1, 0.1]
+
+# # For Mohamed's model:
+# const pars_true = [0.8]
+# get_all_θs(pars::Array{Float64,1}) = pars_true
+# # Each row corresponds to lower and upper bounds of a free dynamic parameter.
+# dyn_par_bounds = [0.01 1e4]
+# @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
+# const_learning_rate = [0.1]
+
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
 learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
-model_to_use = pendulum_sensitivity_sans_g_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
+model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
+model_to_use = pendulum_new#model_mohamed
 # === OUTPUT FUNCTIONS ===
 # The state vector x from the solver is organized as follows:
 # x = [
@@ -260,12 +269,12 @@ h_debug(sol) = apply_outputfun(f_debug, sol)
 
 const num_dyn_pars = length(pars_true)#size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-    model_to_use(φ0, u, w, get_all_θs(pars)),
+    model_sens_to_use(φ0, u, w, get_all_θs(pars)),
     N,
     Ts,
 )
 realize_model(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-    pendulum_new(φ0, u, w, get_all_θs(pars)),
+    model_to_use(φ0, u, w, get_all_θs(pars)),
     N,
     Ts,
 )
@@ -517,10 +526,10 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_pars = fill(false, size(η_true))                                         # Known disturbance model
+    free_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
     # free_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
-    free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
+    # free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
     # dist_par_bounds = Array{Float64}(undef, 0, 2)
@@ -840,6 +849,118 @@ function compute_forward_difference_derivative(x_vals::Array{Float64,1}, y_vals:
     end
     diff[end] = diff[end-1]
     return diff
+end
+
+function test_adjoint_method(exp_id::String)
+    exp_data, isws = get_experiment_data(exp_id)
+    W_meta = exp_data.W_meta
+    η = W_meta.η
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+    C = reshape(η[nx+1:end], (n_out, n_tot))
+    Zm = [randn(Nw, n_tot) for m=1:M]
+    Y = exp_data.Y
+    @warn "Using custom N"
+    N = Int(20/Ts)#size(exp_data.Y,1)-1
+    # N = size(Y,1)-1
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    p = get_all_parameters(pars_true)
+
+    # TODO: Do they have to be independent between iterations? Yup, 99% sure, so need to generate new white noise
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Zm)
+    wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+    # NOTE: OPTION 2: Use the rows below here for exact interpolation
+    # reset_isws!(isws)
+    # XWm = simulate_noise_process(dmdl, Zm)
+    # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
+
+    u = exp_data.u
+    w1  = wmm(1)
+    w2  = wmm(2)
+    # @warn "Using sin(t) instead of real w"
+    # u(t)  = sin(t)
+    # w1(t) = sin(t)
+    # w2(t) = cos(t)
+    # wtrue(t) = sin(t)
+    # sol_true = solvew(u, wtrue, p, N)
+    # @warn "Using custom Y"
+    # Y = [sol_true.u[i][2] for i=1:length(sol_true.u)]
+
+    # These solutions are not computed in parallel, even though they could be
+    sol1 = solvew(u, w1, p, N)
+    sol2 = solvew(u, w2, p, N)
+
+    # exp_data, sol1, sol2, sol_true = get_M_solutions("5k_u2w6_from_Alsvin", pars, 2, u, w1, w2, wtrue)
+    # NOTE: OKAY, BUILT-IN INTERPOLATION IS ZEROTH ORDER (AT LEAST FOR DERIVATIVE)
+    # AND ABSOLUTELY SUCKS, BUT LET'S JUST STICK WITH IT FOR NOW, EASY TO USE AT LEAST
+    # But, TODO: You should probably not use 0th order interpolation in simulation.jl
+    y_func = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+
+    # mdl_adj = mohamed_adjoint(u, w1, p, N*Ts, sol1, sol2, y_func, 1)
+    mdl_adj = pendulum_adjoint(u, w1, p, N*Ts, sol1, sol2, y_func, 3)
+    adj_prob = problem(mdl_adj, N, Ts)
+    @info "Got this far!"
+    adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+        maxiters = maxiters)
+
+    # # SUPER DEBUG
+    # my_y = [y_func(t) for t=0:Ts:N*Ts]
+    # # NOTE: It's probably these input definitions that cause the bug
+    # u(t) = sin(t)
+    # w(t) = sin(t)
+    # my_p = p[1]
+    # x  = t -> sol1(t)
+    # x2 = t -> sol2(t)
+    # xp = t -> sol1(t, Val{1})  # TODO: Does this give same results as sol.up???? NOTE: Nope, sol.up is Nothing, and this just uses finite differences. Or was it zero-order hold?)
+    # x1_1 = t -> [x(ti)[1] for ti = t]
+    # x2_2 = t -> [x2(ti)[2] for ti = t]
+    # x2_true = t -> [sol_true(ti)[2] for ti = t]
+    # zeta(ts) = [(my_p*x(t)[1] + u(t)[1] + w(t)[1])^2 + 1 for t=ts]
+    # dzeta_dx1(ts) = [2my_p*(my_p*x(t)[1]+u(t)[1]+w(t)[1]) for t=ts]
+    # dzeta_dp(ts)  = [2x(t)[1]*(my_p*x(t)[1]+u(t)[1]+w(t)[1]) for t=ts]
+    # x1_1_vec = [sol1.u[i][1] for i=1:length(sol1.u)]
+    # x2_2_vec = [sol2.u[i][2] for i=1:length(sol2.u)]
+    # x2_true_vec = [sol_true.u[i][2] for i=1:length(sol1.u)]
+    # lam1_vec = [adj_sol.u[i][1] for i=1:length(adj_sol.u)]
+    # lam2_vec = [adj_sol.u[i][2] for i=1:length(adj_sol.u)]
+    # beta_vec = [adj_sol.u[i][3] for i=1:length(adj_sol.u)]
+    # return 0:Ts:N*Ts, reverse(lam1_vec), reverse(lam2_vec), reverse(beta_vec)
+    # # END OF SUPER DEBUG
+
+    # NOTE: Fxp hard coded to [1.0 0.0; 0.0 0.0] below, holds for Mohamed's model
+    # Oh, and xp0 also hard-coded to [0.0; 0.0]
+    Gp = -adj_sol.u[end][3] - ((adj_sol.u[end][1:end-1]')*[1.0 0.0; 0.0 0.0])*[0.0; 0.0]
+    return Gp
+
+end
+
+function interpolated_signal(out, times)
+    @assert (length(out) == length(times)) "out and times signals must have the same length (currently $(length(out)) vs $(length(times)))"
+    function func_to_return(t::Float64)::Float64
+        if t <= minimum(times)
+            return out[1]
+        elseif t >= maximum(times)
+            return out[end]
+        else
+            ind = 1
+            while !(times[ind] < t && times[ind+1] >= t)
+                ind += 1
+            end
+            return out[ind] + (t-times[ind])*(out[ind+1]-out[ind])/(times[ind+1]-times[ind])
+        end
+    end
+
+    return func_to_return
 end
 
 # NOTE: Works only for scalar parameter!!!

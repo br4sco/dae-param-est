@@ -1049,6 +1049,194 @@ function pendulum_sensitivity_Lk_with_dist_sens_2(Φ::Float64, u::Function, w_co
     end
 end
 
+function pendulum_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, np::Int)
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        x  = t -> sol(t)
+        x2 = t -> sol2(t)
+        xp = t -> sol(t, Val{1})  # TODO: Does this give same results as sol.up???? NOTE: Nope, sol.up is Nothing, and this just uses finite differences)
+        Fx = t -> [2xp(t)[6]        0               0   -1                  0           0   0
+                    0           2*xp(t)[6]          0   0                   -1          0   0
+                    -xp(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
+                    0          -xp(t)[3]            0   0               2k*abs(x(t)[5]) 0   0
+                    -2x(t)[1]     -2x(t)[2]         0   0                   0           0   0
+                    x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
+                    x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
+        Fxp = t -> vcat([1   0   0          0   0   2x(t)[1]    0
+                         0   1   0          0   0   2x(t)[2]    0
+                         0   0   -x(t)[1]   m   0   0           0
+                         0   0   -x(t)[2]   0   m   0           0], zeros(3,7))
+        Fxpp = t -> vcat([  0   0  0            0   0   2xp(t)[1]    0
+                            0   0  0            0   0   2xp(t)[2]    0
+                            0   0  -xp(t)[1]    0   0   0            0
+                            0   0  -xp(t)[2]    0   0   0            0], zeros(3,7))
+        Fp = t -> [0            0           0
+                   0            0           0
+                   xp(t)[4]     0       abs(x(t)[4])*x(t)[4]
+                   xp(t)[5]+g   0       abs(x(t)[5])*x(t)[5]
+                   0            2L          0
+                   0            0           0
+                   0            0           0]
+        gₓ = t -> [0    0    0    0    0    0    2(x(t)[7]-y(t))/T]'
+        λT  = -gₓ(T)
+        λpT = [-x(T)[2]*λT[7]/(L^2)   x(T)[1]*λT[7]/(L^2)  0   0   0   0   0]'
+
+        println("Adjoint residual: $((λpT')*Fxp(T) + (λT')*(Fx(T)-Fxpp(T)) + gₓ(T)')")
+        println("Terminal constraint: $((λT')*(Fxp(T)))")
+
+        # the residual function
+        function f!(res, xp, x, θ, t)
+            # Dynamic Equations
+            # res[1] = -λp⋅Fxp(T-t)[:,1] + λ⋅(Fx(T-t)[:,1].-Fxpp(T-t)[:,1]) + gₓ(T-t)[1]
+            # # res[2] = -λp⋅Fxp(T-t)[:,2] + λ⋅(Fx(T-t)[:,2].-Fxpp(T-t)[:,2]) + gₓ(T-t)[2]
+            # res[2] = λ⋅(Fx(T-t)[:,2].-Fxpp(T-t)[:,2]) + gₓ(T-t)[2]
+            len = length(x)
+            λ  = x[1:len-np]
+            λp = xp[1:len-np]
+            β  = x[len-np+1:end]
+            βp = xp[len-np+1:end]
+            for i=1:len-np
+                res[i] = -λp⋅Fxp(T-t)[:,i] + λ⋅(Fxpp(T-t)[:,i].-Fx(T-t)[:,i]) + gₓ(T-t)[i]
+            end
+            # Could be written simpler and less general, since np=1 for this model
+            for j = 1:np
+                res[len-np+j] = -βp[j] + (λ')*Fp(T-t)[:,j]
+            end
+            nothing
+        end
+
+        λ0  = λT[:]
+        λp0 = -λpT[:]
+        x0  = vcat(λ0, zeros(np))
+        xp0 = vcat(λp0, (-(Fp(T)')*λT)[:])
+
+        # dvars = [true, false]
+        dvars = vcat(fill(true, 4), fill(false, 3), fill(true, np))
+
+        r0 = zeros(length(x0))
+        # f!(r0, λp0, λ0, [], 0.0)
+        f!(r0, xp0, x0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, xp0, dvars, r0)
+    end
+end
+
+function model_mohamed(Φ::Float64, u::Function, w::Function, θ::Array{Float64,1})
+    # NOTE: Φ not used, just passed to have consistent interface
+    function f!(res, xp, x, θ, t)
+        wt = w(t)[1]
+        ut = u(t)[1]
+        # Dynamic Equations
+        res[1] = xp[1] + p*x[1] + ut + wt
+        res[2] = x[2] + 2/( (p*x[1]+ut+wt)^2 + 1 )
+        nothing
+    end
+
+    p = θ[1]
+    # Finding consistent initial conditions
+    # Initial values, the pendulum starts at rest
+    u0 = u(0.0)[1]
+    w0 = w(0.0)[1]
+    x10 = -(u0+w0)/p
+    x0 = [x10, -2/( (p*x10+u0+w0)^2 + 1 )]
+    xp0 = [0.0, 0.0]
+
+    dvars = [true, false]
+
+    r0 = zeros(length(x0))
+    f!(r0, xp0, x0, [], 0.0)
+
+    # t -> 0.0 is just a dummy function, not to be used
+    Model(f!, t -> 0.0, x0, xp0, dvars, r0)
+end
+
+function mohamed_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, np::Int)
+    p = θ[1]
+    x  = t -> sol(t)
+    x2 = t -> sol2(t)
+    xp = t -> sol(t, Val{1})  # TODO: Does this give same results as sol.up???? NOTE: Nope, sol.up is Nothing, and this just uses finite differences)
+    zeta(t) = (p*x(t)[1] + u(t)[1] + w(t)[1])^2 + 1
+    dzeta_dx1(t) = 2p*(p*x(t)[1]+u(t)[1]+w(t)[1])
+    dzeta_dp(t)  = 2x(t)[1]*(p*x(t)[1]+u(t)[1]+w(t)[1])
+
+    Fx(t)   = [p 0.0; -(2/(zeta(t)^2))*dzeta_dx1(t) 1.0]
+    Fxp(t)  = [1.0 0.0; 0.0 0.0]
+    Fxpp(t) = zeros(2,2)
+    Fp(t)   = [x(t)[1]; -(2/(zeta(t)^2))*dzeta_dp(t)]
+    gₓ(t)   = [0  2(x2(t)[2]-y(t))/T]'
+
+    # # the residual function
+    # function f!(res, λp, λ, θ, t)
+    #     # Dynamic Equations
+    #     # res[1] = -λp⋅Fxp(T-t)[:,1] + λ⋅(Fx(T-t)[:,1].-Fxpp(T-t)[:,1]) + gₓ(T-t)[1]
+    #     # # res[2] = -λp⋅Fxp(T-t)[:,2] + λ⋅(Fx(T-t)[:,2].-Fxpp(T-t)[:,2]) + gₓ(T-t)[2]
+    #     # res[2] = λ⋅(Fx(T-t)[:,2].-Fxpp(T-t)[:,2]) + gₓ(T-t)[2]
+    #
+    #     # SIGN?????
+    #     # res[1] = λp[1] + p*λ[1] - (2/(zeta(T-t)^2))*dzeta_dx1(T-t)*(2/T)*(x2(T-t)[2] - y(T-t));
+    #     # res[1] = -λp[1] + p*λ[1] - (2/(zeta(T-t)^2))*dzeta_dx1(T-t)*(2/T)*(x2(T-t)[2] - y(T-t));    # FROM MATLAB!
+    #
+    #     # res[1] = -λp[1] - p*λ[1] + (2/(zeta(T-t)^2))*dzeta_dx1(T-t)*λ[2]
+    #     res[1] = -λp[1] - p*λ[1] + (2/(zeta(T-t)^2))*dzeta_dx1(T-t)*(2/T)*(x2(T-t)[2]-y(T-t))
+    #     # res[2] = -λp⋅Fxp(T-t)[:,2] + λ⋅(Fxpp(T-t)[:,2].-Fx(T-t)[:,2]) + gₓ(T-t)[2]
+    #     res[2] = -λ[2] + (2/T)*(x2(T-t)[2]-y(T-t))
+    #     # for i=1:length(λ)
+    #     #     res[i] = -λp⋅Fxp(T-t)[:,i] + λ⋅(Fxpp(T-t)[:,i].-Fx(T-t)[:,i]) + gₓ(T-t)[i]
+    #     # end
+    #     nothing
+    # end
+
+    # the residual function
+    function f!(res, xp, x, θ, t)
+        # Dynamic Equations
+        # res[1] = -λp⋅Fxp(T-t)[:,1] + λ⋅(Fx(T-t)[:,1].-Fxpp(T-t)[:,1]) + gₓ(T-t)[1]
+        # # res[2] = -λp⋅Fxp(T-t)[:,2] + λ⋅(Fx(T-t)[:,2].-Fxpp(T-t)[:,2]) + gₓ(T-t)[2]
+        # res[2] = λ⋅(Fx(T-t)[:,2].-Fxpp(T-t)[:,2]) + gₓ(T-t)[2]
+        len = length(x)
+        λ  = x[1:len-np]
+        λp = xp[1:len-np]
+        β  = x[len-np+1:end]
+        βp = xp[len-np+1:end]
+        for i=1:len-np
+            res[i] = -λp⋅Fxp(T-t)[:,i] + λ⋅(Fxpp(T-t)[:,i].-Fx(T-t)[:,i]) + gₓ(T-t)[i]
+        end
+        # Could be written simpler and less general, since np=1 for this model
+        for j = 1:np
+            res[len-np+j] = -βp[j] + (λ')*Fp(T-t)[:,j]
+        end
+        nothing
+    end
+
+    λT  = gₓ(T)
+    # NOTE: Since λp[2] doesn't appear in the adjoint system (λ[2] is a algebraic
+    # variable) it seems that the terminal value for λp[2] doesn't matter, and
+    # can be set to anything, saving us the hassle of computing the derivative of
+    # the true output NOTE: This should be generalizable to all systems in our
+    # approach
+    λpT = [-(2/(zeta(T)^2))*dzeta_dx1(T)*(gₓ(T)[2]); 0.0]
+
+    println("Adjoint residual: $((λpT')*Fxp(T) + (λT')*(Fxpp(T)-Fx(T)) + gₓ(T)')")
+    println("Terminal constraint: $((λT')*(Fxp(T)))")
+
+    λ0  = λT[:]
+    λp0 = -λpT[:]
+    # x0  = λ0
+    # xp0 = λp0
+    x0  = vcat(λ0, zeros(np))
+    xp0 = vcat(λp0, (-(Fp(T)')*λT)[:])
+
+    # dvars = [true, false]
+    dvars = vcat([true, false], fill(true, np))
+
+    # r0 = zeros(length(λ0))
+    # f!(r0, λp0, λ0, [], 0.0)
+    r0 = zeros(length(x0))
+    f!(r0, xp0, x0, [], 0.0)
+
+    # t -> 0.0 is just a dummy function, not to be used
+    Model(f!, t -> 0.0, x0, xp0, dvars, r0)
+end
+
 # DEBUG, TODO: Delete
 function trivial_model(Φ::Float64, u::Function, w_comp::Function, θ::Array{Float64, 1})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -1229,6 +1417,8 @@ function apply_outputfun(h, sol)
   if sol.retcode != :Success
     throw(ErrorException("Solution retcode: $(sol.retcode)"))
   end
+  # NOTE: There are alternative, more recommended, ways of accessing solution
+  # than through sol.u: https://diffeq.sciml.ai/stable/basics/solution/
   # TODO: If this doesn't work when h returns scalar value instead of vector,
   # then you should separate scalar case. Then this line would be only map(h, sol.u)
   # vcat(map(h, sol.u)...)    # vcat(*...) makes it so that, if output is multivariate, it is all stacked in one big vector
@@ -1239,7 +1429,8 @@ function apply_two_outputfun(h1, h2, sol)
     if sol.retcode != :Success
       throw(ErrorException("Solution retcode: $(sol.retcode)"))
     end
-
+    # NOTE: There are alternative, more recommended, ways of accessing solution
+    # than through sol.u: https://diffeq.sciml.ai/stable/basics/solution/
     map(h1, sol.u), map(h2, sol.u)
 end
 
@@ -1270,6 +1461,8 @@ function apply_two_outputfun_mvar(h1, h2, sol)
         # out_mat1[ind,:] = h1(sol.u[ind])
         out_mat2[ind,:] = h2(sol.u[ind])
     end
+    # NOTE: There are alternative, more recommended, ways of accessing solution
+    # than through sol.u: https://diffeq.sciml.ai/stable/basics/solution/
     # map(h1, sol.u), map(h2, sol.u)
     # return out_mat1, out_mat2
     # NOTE: Currently supporting several parameters but only scalar output
