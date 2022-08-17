@@ -1050,9 +1050,9 @@ function read_from_backup(dir::String, E::Int)
     opt_pars_proposed = zeros(k, E)
     avg_pars_proposed = zeros(k, E)
     for e=1:E
-        # opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
-        opt_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_proposed_e$e.csv"), ',')
-        avg_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_average_e$e.csv"), ',')
+        opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
+        # opt_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_proposed_e$e.csv"), ',')
+        # avg_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_average_e$e.csv"), ',')
     end
     return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed
 end
@@ -2475,4 +2475,20 @@ function Roberts_gif_generator(par_vals::Array{Float64,1}, cost_vals::Array{Floa
     for i = 1:1
         visualize_SGD_search(par_vals, cost_vals[:,i], SGD_traces[i], opt_pars[i], file_name="newer_stopping_criterion_Mrate4_new$(i).gif")
     end
+end
+
+function plot_boxplots(θs, θ0)
+    # θs should be a matrix, each column corresponds to one box, containing
+    # all outcomes for that box. θ0 should correspond to the true parameter
+    # value, or some other value where one wants a horizontal line drawn
+
+    p = boxplot(
+    θs,
+    # xticks = (idxs, labels),
+    # label = "",
+    # ylabel = L"\hat{\theta}",
+    notch = false,
+    )
+
+    hline!(p, [θ0], label = L"\theta_0", linestyle = :dot, linecolor = :gray)
 end
