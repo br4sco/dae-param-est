@@ -1921,6 +1921,68 @@ function debug_minimization_full_along_curve(expid::String, N_trans::Int = 0; pa
     return base_pars, base_costs, prop_pars, prop_costs
 end
 
+function gridsearch_sans_g(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 100
+    # @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    mref = pars_true[1]
+    Lref = pars_true[2]
+    kref = pars_true[3]
+    δm = 0.01
+    δL = 0.1
+    δk = 0.1
+
+    mvals = [mref]
+    Lvals = [Lref]
+    kvals = kref-4*δk:δk:kref+5δk
+
+    cost_vals = [zeros(length(mvals)*length(Lvals)*length(kvals)) for e=1:E]
+    all_pars = zeros(length(pars_true), length(mvals)*length(Lvals)*length(kvals))
+    min_ind = fill(-1, (E,))
+    min_cost = fill(Inf, (E,))
+    ind = 1
+    time_start = now()
+    for my_m in mvals
+        for my_L in Lvals
+            for my_k in kvals
+                for e = 1:E
+                    pars = [my_m, my_L, my_k]
+                    all_pars[:,ind] = pars
+                    Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                    cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                    if cost_vals[e][ind] < min_cost[e]
+                        min_ind[e] = ind
+                        min_cost[e] = cost_vals[e][ind]
+                    end
+                end
+                ind += 1
+            end
+        end
+    end
+    duration = now()-time_start
+
+    return all_pars, cost_vals, min_ind, duration
+end
+
 # function plot_baseline_cost(expid::String, N_trans::Int=0)
 #     exp_data, isws = get_experiment_data(expid)
 #     Y = exp_data.Y
