@@ -231,6 +231,9 @@ get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[m, L, g, p
 dyn_par_bounds = [0.01 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
 @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
 const_learning_rate = [0.1, 1.0, 1.0]#, 0.1, 0.1]
+model_sens_to_use = pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
+model_to_use = pendulum_new
+model_adj_to_use = pendulum_adjoint
 
 # # For Mohamed's model:
 # const pars_true = [0.8]
@@ -239,11 +242,13 @@ const_learning_rate = [0.1, 1.0, 1.0]#, 0.1, 0.1]
 # dyn_par_bounds = [0.01 1e4]
 # @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
 # const_learning_rate = [0.1]
+# model_sens_to_use = mohamed_sens
+# model_to_use = model_mohamed
+# model_adj_to_use = mohamed_adjoint
 
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
 learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
-model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
-model_to_use = pendulum_new#model_mohamed
+
 # === OUTPUT FUNCTIONS ===
 # The state vector x from the solver is organized as follows:
 # x = [
@@ -257,7 +262,7 @@ model_to_use = pendulum_new#model_mohamed
 # ]
 f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
 f_debug(x::Array{Float64,1}) = x
-f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]#[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
 # f_sens(x::Array{Float64,1}) = [x[14], x[21]]
 # NOTE: Has to be changed when number of free  parameters is changed.
@@ -869,6 +874,7 @@ function test_adjoint_method(exp_id::String)
     Y = exp_data.Y
     @warn "Using custom N"
     N = Int(20/Ts)#size(exp_data.Y,1)-1
+    np = length(pars_true)
     # N = size(Y,1)-1
 
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
@@ -906,10 +912,13 @@ function test_adjoint_method(exp_id::String)
     # But, TODO: You should probably not use 0th order interpolation in simulation.jl
     y_func = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
 
-    # mdl_adj = mohamed_adjoint(u, w1, p, N*Ts, sol1, sol2, y_func, 1)
-    mdl_adj = pendulum_adjoint(u, w1, p, N*Ts, sol1, sol2, y_func, 3)
+    # Computing xp0, initial conditions of derivative of x wrt to p
+    mdl = model_to_use(φ0, u, w1, get_all_θs(p))
+    mdl_sens = model_sens_to_use(φ0, u, w1, get_all_θs(p))
+    n_mdl = length(mdl.x0)
+    xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
+    mdl_adj, get_Gp = model_adj_to_use(u, w1, p, N*Ts, sol1, sol2, y_func, xp0)
     adj_prob = problem(mdl_adj, N, Ts)
-    @info "Got this far!"
     adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
         maxiters = maxiters)
 
@@ -937,11 +946,7 @@ function test_adjoint_method(exp_id::String)
     # return 0:Ts:N*Ts, reverse(lam1_vec), reverse(lam2_vec), reverse(beta_vec)
     # # END OF SUPER DEBUG
 
-    # NOTE: Fxp hard coded to [1.0 0.0; 0.0 0.0] below, holds for Mohamed's model
-    # Oh, and xp0 also hard-coded to [0.0; 0.0]
-    Gp = -adj_sol.u[end][3] - ((adj_sol.u[end][1:end-1]')*[1.0 0.0; 0.0 0.0])*[0.0; 0.0]
-    return Gp
-
+    Gp = get_Gp(adj_sol)
 end
 
 function interpolated_signal(out, times)
@@ -2491,4 +2496,22 @@ function plot_boxplots(θs, θ0)
     )
 
     hline!(p, [θ0], label = L"\theta_0", linestyle = :dot, linecolor = :gray)
+end
+
+function plot_boxplots(θs, θ0, labels)
+    # θs should be a matrix, each column corresponds to one box, containing
+    # all outcomes for that box. θ0 should correspond to the true parameter
+    # value, or some other value where one wants a horizontal line drawn
+
+    idxs = collect(1:length(labels))
+    p = boxplot(
+    θs,
+    xticks = (idxs, labels),
+    # label = "",
+    # ylabel = L"\hat{\theta}",
+    notch = false,
+    )
+
+    hline!(p, [θ0], label = L"\theta_0", linestyle = :dot, linecolor = :gray)
+    savefig("C:/Users/robbj/OneDrive - KTH/Work/DLL/Files_from_Alsvin/correct_forward_sens_tiny_experiment/mexp.png")
 end
