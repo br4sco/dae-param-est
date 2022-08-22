@@ -181,8 +181,8 @@ function noise_inter(t::Float64,
                      # num_sampled_per_interval::AbstractArray,
                      # num_times_visited::AbstractArray,
                      ϵ::Float64=10e-8,
-                     rng::TaskLocalRNG=Random.default_rng())
-                     # rng::MersenneTwister=Random.default_rng())
+                     # rng::TaskLocalRNG=Random.default_rng())
+                     rng::MersenneTwister=Random.default_rng())   # VERSION
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
     # num_sampled_per_interval[n+1] += 1

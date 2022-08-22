@@ -1049,6 +1049,79 @@ function pendulum_sensitivity_Lk_with_dist_sens_2(Φ::Float64, u::Function, w_co
     end
 end
 
+function pendulum_sensitivity_k_with_dist_sens_1(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # the residual function
+        function f!(res, dx, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = dx[1] - x[4] + 2dx[6]*x[1]
+            res[2] = dx[2] - x[5] + 2dx[6]*x[2]
+            res[3] = m*dx[4] - dx[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*dx[5] - dx[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
+
+            # Sensitivity with respect to k
+            res[8]  = -x[11] + dx[8] + 2x[1]*dx[13] + 2x[8]*dx[6]
+            res[9]  = -x[12] + dx[9] + 2x[2]*dx[13] + 2x[9]*dx[6]
+            res[10] = 2k*x[11]*abs(x[4]) - x[1]*dx[10] + m*dx[11] - x[8]*dx[3] + abs(x[4])x[4]
+            res[11] = 2k*x[12]*abs(x[5]) - x[2]*dx[10] + m*dx[12] - x[9]*dx[3] + abs(x[5])x[5]
+            res[12] = -2x[8]*x[1] - 2x[9]*x[2]
+            res[13] = x[11]*x[1] + x[12]*x[2] + x[8]*x[4] + x[9]*x[5]
+            res[14] = x[14] - (x[1]*x[9] - x[2]*x[8])/(L^2)
+
+            # Sensitivty wrt first disturbance parameter
+            # (i.e. parameter corresponding to wt[2])
+            res[15] = 2dx[6]x[15] - x[18] + dx[15] + 2x[1]dx[20]
+            res[16] = 2dx[6]x[16] - x[19] + dx[16] + 2x[2]dx[20]
+            res[17] = -dx[3]x[15] + 2k*abs(x[4])*x[18] - x[1]*dx[17] + m*dx[18] - 2*wt[1]*wt[2]
+            res[18] = -dx[3]x[16] + 2k*abs(x[5])*x[19] - x[2]*dx[17] + m*dx[19]
+            res[19] = 2x[1]x[15] + 2x[2]x[16]
+            res[20] = x[4]x[15] + x[5]x[16] + x[1]x[18] + x[2]x[19]
+            # Sensitivity of angle of pendulum to disturbance parameter
+            # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
+            # L^2 (though they should be equal), is it fine to substitute L^2 here?
+            res[21] = x[21] - (x[1]*x[16] - x[2]*x[15])/(L^2)
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(Φ)
+        x2_0 = -L * cos(Φ)
+        dx3_0 = m*g/x2_0
+        dx4_0 = -g*tan(Φ) + (u0 + w0^2)/m
+
+        pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        pendp0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
+        sk0  = zeros(7)
+        skp0 = zeros(7)
+        r0 = zeros(7)
+        rp0 = zeros(7)
+
+        x0  = vcat(pend0, sk0, r0)
+        dx0 = vcat(pendp0, skp0, rp0)
+        # x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(14))
+        # dx0 = vcat([0., 0., dx3_0, dx4_0], zeros(17))
+
+        dvars = repeat(vcat(fill(true, 6), [false]), 3)
+
+        r0 = zeros(length(x0))
+        f!(r0, dx0, x0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, dx0, dvars, r0)
+    end
+end
+
 # TODO: I think we can change all occurences of Array{Float64,1} to Vector{Float64}, pretty sure they are the same type, one just looks nicer (introduced in Julia 1.7 I think)
 function pendulum_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, xp0::Array{Float64, 2})
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]

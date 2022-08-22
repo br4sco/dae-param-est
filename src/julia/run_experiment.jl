@@ -225,13 +225,13 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const pars_true = [m, L, g, k]                    # true value of all free parameters
 
 # For pendulum:
-const pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters
-get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+const pars_true = [k]#[m, L, k]#[m, L, g, k] # True values of free parameters
+get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
 # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-dyn_par_bounds = [0.01 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+dyn_par_bounds = [0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
 @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-const_learning_rate = [0.1, 1.0, 1.0]#, 0.1, 0.1]
-model_sens_to_use = pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
+const_learning_rate = [1.0]#, 0.1, 0.1]
+model_sens_to_use = pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
 model_to_use = pendulum_new
 model_adj_to_use = pendulum_adjoint
 
@@ -262,7 +262,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
 f_debug(x::Array{Float64,1}) = x
-f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]#[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+f_sens(x::Array{Float64,1}) = [x[14], x[21]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
 # f_sens(x::Array{Float64,1}) = [x[14], x[21]]
 # NOTE: Has to be changed when number of free  parameters is changed.
@@ -354,10 +354,10 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    E = size(Y, 2)
+    # E = size(Y, 2)
     # # DEBUG
-    # E = 1
-    # @warn "Using E = $E instead of default"
+    E = 1
+    @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
@@ -531,9 +531,9 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    free_pars = fill(false, size(η_true))                                         # Known disturbance model
+    # free_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
-    # free_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
+    free_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
     # free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
@@ -1976,6 +1976,65 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
                 end
                 ind += 1
             end
+        end
+    end
+    duration = now()-time_start
+
+    return all_pars, cost_vals, min_ind, duration
+end
+
+function gridsearch_debug(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    num_free_pars = length(pars_true) + length(dist_sens_inds)
+
+    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 100
+    # @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    kref = pars_true[1]
+    aref = 0.8
+    δk = 0.1
+    δa = 0.01
+
+    kvals = kref-10*δk:δk:kref+10δk
+    avals = aref-10*δa:δa:aref+10δa
+
+    cost_vals = [zeros(length(avals)*length(kvals)) for e=1:E]
+    all_pars = zeros(num_free_pars, length(avals)*length(kvals))
+    min_ind = fill(-1, (E,))
+    min_cost = fill(Inf, (E,))
+    ind = 1
+    time_start = now()
+    for my_a in avals
+        for my_k in kvals
+            for e = 1:E
+                pars = [my_k, my_a]
+                all_pars[:,ind] = pars
+                Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                if cost_vals[e][ind] < min_cost[e]
+                    min_ind[e] = ind
+                    min_cost[e] = cost_vals[e][ind]
+                end
+            end
+            ind += 1
         end
     end
     duration = now()-time_start
