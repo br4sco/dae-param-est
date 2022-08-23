@@ -1122,6 +1122,10 @@ function pendulum_sensitivity_k_with_dist_sens_1(Φ::Float64, u::Function, w::Fu
     end
 end
 
+# global debug_counter
+# debug_counter = 0
+
+# NOTE Assumes free dynamical parameters are m, L, and k
 # TODO: I think we can change all occurences of Array{Float64,1} to Vector{Float64}, pretty sure they are the same type, one just looks nicer (introduced in Julia 1.7 I think)
 function pendulum_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, xp0::Array{Float64, 2})
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -1161,10 +1165,17 @@ function pendulum_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Fl
 
         # the residual function
         function f!(res, dx, x, θ, t)
+            # global debug_counter
+            # debug_counter += 1
+            #
+            # if debug_counter % 10000 == 0
+            #     @info "counter: $debug_counter"
+            # end
             # Dynamic Equations
             # res[1] = -dλ⋅Fdx(T-t)[:,1] + λ⋅(Fx(T-t)[:,1].-Fddx(T-t)[:,1]) + gₓ(T-t)[1]
             # # res[2] = -dλ⋅Fdx(T-t)[:,2] + λ⋅(Fx(T-t)[:,2].-Fddx(T-t)[:,2]) + gₓ(T-t)[2]
             # res[2] = λ⋅(Fx(T-t)[:,2].-Fddx(T-t)[:,2]) + gₓ(T-t)[2]
+            # @info "Called this!"
             len = length(x)
             λ  = x[1:len-np]
             dλ = dx[1:len-np]
@@ -1565,6 +1576,7 @@ function solve_in_parallel(solve, is)
   M = length(is)
   p = Progress(M, 1, "Running $(M) simulations...", 50)
   y1 = solve(is[1])
+  @warn "sy1: $(size(y1)), M: $M"
   Y = zeros(length(y1), M)
   Y[:, 1] += y1
   next!(p)
@@ -1610,6 +1622,21 @@ function solve_in_parallel_sens(solve, is)
     end
     Y, Ysens
   end
+
+function get_sol_in_parallel(solve, is)
+    M = length(is)
+    p = Progress(M, 1, "Running $(M) simulations...", 50)
+    solutions = Array{DAESolution, 1}(undef, M)
+    # y1 = solve(is[1])
+    # Y = zeros(length(y1), M)
+    # Y[:, 1] += y1
+    next!(p)
+    Threads.@threads for m = 1:M
+        solutions[m] = solve(is[m])
+        next!(p)
+    end
+    solutions
+end
 # Old API
 
 function simulate(m::Model, N::Int, Ts::Float64; kwargs...)

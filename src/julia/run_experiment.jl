@@ -25,6 +25,12 @@ struct ExperimentData
     Nw::Int
 end
 
+const PENDULUM = 1
+const MOH_MDL  = 2
+
+# Selects which model to adapt code to
+model_id = PENDULUM
+
 # ==================
 # === PARAMETERS ===
 # ==================
@@ -208,12 +214,12 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # p: vcat(θ, η)
 # NOTE: If number and location of free parameters change, the sensitivity TODO: There must be a nicer solution to this
 # functions defined in the code must also be changed
-# const pars_true = [k]                    # true value of all free parameters
+# const free_dyn_pars_true = [k]                    # true value of all free parameters
 # get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]
 # dyn_par_bounds = [0.1 Inf]    # Lower and upper bounds of each free dynamic parameter
 # NOTE: Has to be changed when number of free dynamical parameters is changed.
 # Specifically:
-# 1. pars_true must contain the true values for all free dynamical parameters
+# 1. free_dyn_pars_true must contain the true values for all free dynamical parameters
 # 2. get_all_θs() must return all variables, where the free variables
 #       need to be replaced by the provided argument pars
 # 3. dyn_par_bounds must include bounds for all free dynamical paramters
@@ -221,30 +227,31 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 #       must refere to DAE-problem that includes sensitvity equations for all
 #       free dynamical parameters
 # sensitivity for all free dynamical variables
-# const pars_true = [m, L, g, k]                    # true value of all free parameters
-# const pars_true = [m, L, g, k]                    # true value of all free parameters
+# const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
+# const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
-# For pendulum:
-const pars_true = [k]#[m, L, k]#[m, L, g, k] # True values of free parameters
-get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
-# Each row corresponds to lower and upper bounds of a free dynamic parameter.
-dyn_par_bounds = [0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
-@warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-const_learning_rate = [1.0]#, 0.1, 0.1]
-model_sens_to_use = pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
-model_to_use = pendulum_new
-model_adj_to_use = pendulum_adjoint
-
-# # For Mohamed's model:
-# const pars_true = [0.8]
-# get_all_θs(pars::Array{Float64,1}) = pars_true
-# # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-# dyn_par_bounds = [0.01 1e4]
-# @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-# const_learning_rate = [0.1]
-# model_sens_to_use = mohamed_sens
-# model_to_use = model_mohamed
-# model_adj_to_use = mohamed_adjoint
+if model_id == PENDULUM
+    const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters
+    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    # Each row corresponds to lower and upper bounds of a free dynamic parameter.
+    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+    @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
+    const_learning_rate = [1.0, 0.1, 0.1]
+    model_sens_to_use = pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
+    model_to_use = pendulum_new
+    model_adj_to_use = pendulum_adjoint
+elseif model_id == MOH_MDL
+    # For Mohamed's model:
+    const free_dyn_pars_true = [0.8]
+    get_all_θs(pars::Array{Float64,1}) = free_dyn_pars_true
+    # Each row corresponds to lower and upper bounds of a free dynamic parameter.
+    dyn_par_bounds = [0.01 1e4]
+    @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
+    const_learning_rate = [0.1]
+    model_sens_to_use = mohamed_sens
+    model_to_use = model_mohamed
+    model_adj_to_use = mohamed_adjoint
+end
 
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
 learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
@@ -260,9 +267,14 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 #   int(dummy)      -- integral of dummy variable (due to stabilized formulation)
 #   y               -- the output y = atan(x1/-x2) is computed by the solver
 # ]
-f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
+if model_id == PENDULUM
+    f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
+    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+elseif model_id == MOH_MDL
+    f(x::Array{Float64,1}) = x[2]
+    f_sens(x::Array{Float64,1}) = [x[4]]
+end
 f_debug(x::Array{Float64,1}) = x
-f_sens(x::Array{Float64,1}) = [x[14], x[21]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
 # f_sens(x::Array{Float64,1}) = [x[14], x[21]]
 # NOTE: Has to be changed when number of free  parameters is changed.
@@ -272,34 +284,34 @@ h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete 
 h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity
 h_debug(sol) = apply_outputfun(f_debug, sol)
 
-const num_dyn_pars = length(pars_true)#size(dyn_par_bounds, 1)
+const num_dyn_pars = length(free_dyn_pars_true)#size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
     model_sens_to_use(φ0, u, w, get_all_θs(pars)),
     N,
     Ts,
 )
-realize_model(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-    model_to_use(φ0, u, w, get_all_θs(pars)),
+realize_model(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int) = problem(
+    model_to_use(φ0, u, w, get_all_θs(free_dyn_pars)),
     N,
     Ts,
 )
-const dθ = length(get_all_θs(pars_true))
+const dθ = length(get_all_θs(free_dyn_pars_true))
 
 # === SOLVER PARAMETERS ===
 const abstol = 1e-8#1e-9
 const reltol = 1e-5#1e-6
 const maxiters = Int64(1e8)
 
-solvew_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
-  realize_model_sens(u, w, pars, N),
+solvew_sens(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
+  realize_model_sens(u, w, free_dyn_pars, N),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
   kwargs...,
 )
-solvew(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
-  realize_model(u, w, pars, N),
+solvew(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
+  realize_model(u, w, free_dyn_pars, N),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
@@ -332,7 +344,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         mkdir(joinpath(data_dir, "tmp/"))
     end
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
 
     # === We then optimize parameters for the baseline model ===
@@ -346,8 +358,8 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         return reshape(Y_base[N_trans+1:end,:], :)   # Returns 1D-array
     end
 
-    function jacobian_model_b(dummy_input, pars)
-        jac = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N) |> h_sens
+    function jacobian_model_b(dummy_input, free_pars)
+        jac = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> h_sens
         return jac[N_trans+1:end, :]
     end
 
@@ -392,20 +404,20 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # Returns estimate of gradient of cost function
     # M_mean specifies over how many realizations the gradient estimate is computed
-    function get_gradient_estimate(y, pars, isws, M_mean::Int=1)
-        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M_mean, dist_par_inds, isws)
+    function get_gradient_estimate(y, free_pars, isws, M_mean::Int=1)
+        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean, dist_par_inds, isws)
 
         # Uses different noise realizations for estimate of output and estiamte of jacobian
         return get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
     end
 
     # Returns estimate of gradient of output
-    function get_proposed_jacobian(pars, isws, M_mean::Int=1)
-        jacYm = simulate_system_sens(exp_data, pars, M_mean, dist_par_inds, isws)[2]
+    function get_proposed_jacobian(free_pars, isws, M_mean::Int=1)
+        jacYm = simulate_system_sens(exp_data, free_pars, M_mean, dist_par_inds, isws)[2]
         return mean(jacYm, dims=2)
     end
 
-    get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,1], pars, isws, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
@@ -458,7 +470,7 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
 
     @assert (length(pars0) == num_dyn_pars+length(W_meta.free_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(pars0)
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
@@ -494,9 +506,9 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
     # XWm = simulate_noise_process(dmdl, Zm)
     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-    calc_mean_y_N_prop(N::Int, pars::Array{Float64, 1}, m::Int) =
-        solvew_sens(u, t -> wmm(m)(t), pars, N) |> h_comp
-    calc_mean_y_prop(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, pars, m)
+    calc_mean_y_N_prop(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+        solvew_sens(u, t -> wmm(m)(t), free_pars, N) |> h_comp
+    calc_mean_y_prop(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, free_pars, m)
     Ym_prop, sens_m_prop = solve_in_parallel_sens(m -> calc_mean_y_prop(pars0, m), ms)
     Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
 
@@ -531,18 +543,18 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_pars = fill(false, size(η_true))                                         # Known disturbance model
+    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
-    free_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
+    # free_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
     # free_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
-    free_par_inds = findall(free_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
+    free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
     # dist_par_bounds = Array{Float64}(undef, 0, 2)
     dist_par_bounds = [-Inf Inf; -Inf Inf]
-    function get_all_ηs(pars::Array{Float64, 1})
+    function get_all_ηs(free_pars::Array{Float64, 1})
         all_η = η_true
         # Fetches user-provided values for free disturbance parameters only
-        all_η[free_par_inds] = pars[num_dyn_pars+1:end]
+        all_η[free_par_inds] = free_pars[num_dyn_pars+1:end]
         return all_η
      end
 
@@ -574,8 +586,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
         # E = 1
         es = collect(1:E)
         we = mk_we(XW, isws)
-        # solve_in_parallel(e -> solvew(u, we(e), pars_true, N) |> h_data, es)
-        Y = solve_in_parallel(e -> solvew(u, we(e), pars_true, N) |> h_data, es)
+        # solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
+        Y = solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
         return Y
     end
 
@@ -594,7 +606,7 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # # in the same Y
     # @warn "Debugging sim. First 5 XW: $(XW[1:5])"
     # wdebug = mk_noise_interp(C_true, XW, 1, δ)
-    # my_y = solvew(u, wdebug, pars_true, N) |> h
+    # my_y = solvew(u, wdebug, free_dyn_pars_true, N) |> h
     # writedlm("data/experiments/pendulum_sensitivity/my_y.csv", my_y, ',')
 
     reset_isws!(isws)
@@ -724,7 +736,7 @@ end
 # Simulates system with specified white noise
 function simulate_system(
     exp_data::ExperimentData,
-    pars::Array{Float64,1},
+    free_pars::Array{Float64,1},
     M::Int,
     dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1},
@@ -738,7 +750,7 @@ function simulate_system(
     dη = length(W_meta.η)
     N = size(exp_data.Y, 1)-1
 
-    p = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    p = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
     C = reshape(η[nx+1:end], (n_out, n_tot))
@@ -753,16 +765,16 @@ function simulate_system(
     # XWm = simulate_noise_process(dmdl, Zm)
     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-    calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
-        solvew(exp_data.u, t -> wmm(m)(t), pars, N) |> h
-    calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
-    return solve_in_parallel(m -> calc_mean_y(pars, m), collect(1:M))   # Returns Ym
+    calc_mean_y_N(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+        solvew(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h
+    calc_mean_y(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, free_pars, m)
+    return solve_in_parallel(m -> calc_mean_y(free_pars, m), collect(1:M))   # Returns Ym
 end
 
 # Simulates system with newly generated white noise
 function simulate_system(
     exp_data::ExperimentData,
-    pars::Array{Float64,1},
+    free_pars::Array{Float64,1},
     M::Int,
     dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1})::Array{Float64,2}
@@ -773,13 +785,13 @@ function simulate_system(
     n_tot = nx*n_in
     Nw = exp_data.Nw
     Zm = [randn(Nw, n_tot) for m = 1:M]
-    simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm)
+    simulate_system(exp_data, free_pars, M, dist_sens_inds, isws, Zm)
 end
 
 # Simulates system with specified white noise
 function simulate_system_sens(
     exp_data::ExperimentData,
-    pars::Array{Float64,1},
+    free_pars::Array{Float64,1},
     M::Int,
     dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1},
@@ -794,7 +806,7 @@ function simulate_system_sens(
     N = size(exp_data.Y, 1)-1
     dist_par_inds = W_meta.free_par_inds
 
-    p = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    p = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
     # C = reshape(η[nx+1:end], (n_out, n_tot))
@@ -808,16 +820,16 @@ function simulate_system_sens(
     # XWm = simulate_noise_process(dmdl, Zm)
     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), dmdl.Cd, XWm, m, n_in, δ, isws)
 
-    calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
-        solvew_sens(exp_data.u, t -> wmm(m)(t), pars, N) |> h_comp
-    calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
-    return solve_in_parallel_sens(m -> calc_mean_y(pars, m), collect(1:M))  # Returns Ym and JacsYm
+    calc_mean_y_N(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+        solvew_sens(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h_comp
+    calc_mean_y(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, free_pars, m)
+    return solve_in_parallel_sens(m -> calc_mean_y(free_pars, m), collect(1:M))  # Returns Ym and JacsYm
 end
 
 # Simulates system with newly generated white noise
 function simulate_system_sens(
     exp_data::ExperimentData,
-    pars::Array{Float64,1},
+    free_pars::Array{Float64,1},
     M::Int,
     dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1})::Tuple{Array{Float64,2}, Array{Array{Float64,2},1}}
@@ -828,7 +840,7 @@ function simulate_system_sens(
     n_tot = nx*n_in
     Nw = exp_data.Nw
     Zm = [randn(Nw, n_tot) for m = 1:M]
-    simulate_system_sens(exp_data, pars, M, dist_sens_inds, isws, Zm)
+    simulate_system_sens(exp_data, free_pars, M, dist_sens_inds, isws, Zm)
 end
 
 function write_results_to_file(path::String, opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, durations)
@@ -869,22 +881,22 @@ function test_adjoint_method(exp_id::String)
     n_tot = nx*n_in
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
-    C = reshape(η[nx+1:end], (n_out, n_tot))
     Zm = [randn(Nw, n_tot) for m=1:M]
     Y = exp_data.Y
     @warn "Using custom N"
     N = Int(20/Ts)#size(exp_data.Y,1)-1
-    np = length(pars_true)
+    np = length(free_dyn_pars_true)
     # N = size(Y,1)-1
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
-    p = get_all_parameters(pars_true)
+    # This vector contains 𝑎𝑙𝑙 parameters, not only the free ones (i.e., also known parameters)
+    p = vcat(vcat(get_all_θs(free_dyn_pars_true), W_meta.η))
+    free_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])
 
     # TODO: Do they have to be independent between iterations? Yup, 99% sure, so need to generate new white noise
     dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
@@ -893,18 +905,25 @@ function test_adjoint_method(exp_id::String)
     u = exp_data.u
     w1  = wmm(1)
     w2  = wmm(2)
+    # # NOTE: TODO: Using sin(t) as input for pendulum doesn't work at all for some reason
     # @warn "Using sin(t) instead of real w"
-    # u(t)  = sin(t)
-    # w1(t) = sin(t)
-    # w2(t) = cos(t)
-    # wtrue(t) = sin(t)
-    # sol_true = solvew(u, wtrue, p, N)
+    # u(t)  = [sin(t)]
+    # w1(t) = [sin(t)]
+    # w2(t) = [cos(t)]
+    # wtrue(t) = [sin(t)]
     # @warn "Using custom Y"
+    # sol_true = solvew(u, wtrue, p, N)
     # Y = [sol_true.u[i][2] for i=1:length(sol_true.u)]
 
-    # These solutions are not computed in parallel, even though they could be
-    sol1 = solvew(u, w1, p, N)
-    sol2 = solvew(u, w2, p, N)
+    # ws = [w1, w2]
+    # forward_solve(m) = solvew(u, ws[m], p, N)   # Below row more general, this one just used to easier replace by sin()-input
+    forward_solve(m) = solvew(u, wmm(m), free_pars_true, N)
+    # forward_sens_solve(m) = solvew_sens(u, ws[m], p, N)
+    forward_sens_solve(m) = solvew_sens(u, wmm(m), free_pars_true, N) |> h_sens
+    sols = get_sol_in_parallel(forward_solve, 1:M)
+
+    # @warn "Using placeholder Y"
+    # Y = [sols[1].u[i][2] for i=1:length(sols[1].u)]
 
     # exp_data, sol1, sol2, sol_true = get_M_solutions("5k_u2w6_from_Alsvin", pars, 2, u, w1, w2, wtrue)
     # NOTE: OKAY, BUILT-IN INTERPOLATION IS ZEROTH ORDER (AT LEAST FOR DERIVATIVE)
@@ -913,38 +932,18 @@ function test_adjoint_method(exp_id::String)
     y_func = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
 
     # Computing xp0, initial conditions of derivative of x wrt to p
-    mdl = model_to_use(φ0, u, w1, get_all_θs(p))
-    mdl_sens = model_sens_to_use(φ0, u, w1, get_all_θs(p))
+    mdl = model_to_use(φ0, u, w1, p)
+    mdl_sens = model_sens_to_use(φ0, u, w1, p)
     n_mdl = length(mdl.x0)
     xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
-    mdl_adj, get_Gp = model_adj_to_use(u, w1, p, N*Ts, sol1, sol2, y_func, xp0)
+    mdl_adj, get_Gp = model_adj_to_use(u, w1, p, N*Ts, sols[1], sols[2], y_func, xp0)
     adj_prob = problem(mdl_adj, N, Ts)
     adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
         maxiters = maxiters)
 
-    # # SUPER DEBUG
-    # my_y = [y_func(t) for t=0:Ts:N*Ts]
-    # # NOTE: It's probably these input definitions that cause the bug
-    # u(t) = sin(t)
-    # w(t) = sin(t)
-    # my_p = p[1]
-    # x  = t -> sol1(t)
-    # x2 = t -> sol2(t)
-    # xp = t -> sol1(t, Val{1})  # TODO: Does this give same results as sol.up???? NOTE: Nope, sol.up is Nothing, and this just uses finite differences. Or was it zero-order hold?)
-    # x1_1 = t -> [x(ti)[1] for ti = t]
-    # x2_2 = t -> [x2(ti)[2] for ti = t]
-    # x2_true = t -> [sol_true(ti)[2] for ti = t]
-    # zeta(ts) = [(my_p*x(t)[1] + u(t)[1] + w(t)[1])^2 + 1 for t=ts]
-    # dzeta_dx1(ts) = [2my_p*(my_p*x(t)[1]+u(t)[1]+w(t)[1]) for t=ts]
-    # dzeta_dp(ts)  = [2x(t)[1]*(my_p*x(t)[1]+u(t)[1]+w(t)[1]) for t=ts]
-    # x1_1_vec = [sol1.u[i][1] for i=1:length(sol1.u)]
-    # x2_2_vec = [sol2.u[i][2] for i=1:length(sol2.u)]
-    # x2_true_vec = [sol_true.u[i][2] for i=1:length(sol1.u)]
-    # lam1_vec = [adj_sol.u[i][1] for i=1:length(adj_sol.u)]
-    # lam2_vec = [adj_sol.u[i][2] for i=1:length(adj_sol.u)]
-    # beta_vec = [adj_sol.u[i][3] for i=1:length(adj_sol.u)]
-    # return 0:Ts:N*Ts, reverse(lam1_vec), reverse(lam2_vec), reverse(beta_vec)
-    # # END OF SUPER DEBUG
+    # # COMPARING ADJOINT METHOD TO FORWARD SENSITIVITY ANALYSIS
+    # Ym, jacsYm = simulate_system_sens(exp_data, free_pars_true, M, dist_par_inds, isws, Zm)
+    # println("sss: $(size(jacsYm)), typeof: $(typeof(jacsYm)), $(size(jacsYm[1]))")
 
     Gp = get_Gp(adj_sol)
 end
@@ -991,7 +990,7 @@ function plot_parameter_boxplots(param_set_1::Array{Float64,2}, param_set_2::Arr
     notch = false,
     )
 
-    hline!(p, pars_true, label = L"\theta_0", linestyle = :dot, linecolor = :gray)
+    hline!(p, free_dyn_pars_true, label = L"\theta_0", linestyle = :dot, linecolor = :gray)
 end
 
 function simulate_experiment(expid::String, pars::Array{Float64, 1}, Zm::Array{Array{Float64,2},1})
@@ -1326,7 +1325,7 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     #         end
     #     end
     # end
-    # Yb_true = solvew(u, t -> zeros(n_out), pars_true, N) |> h
+    # Yb_true = solvew(u, t -> zeros(n_out), free_dyn_pars_true, N) |> h
     # for e = 1:E
     #     base_cost_true[e] = mean((Y[N_trans+1:end, e].-Yb_true[N_trans+1:end]).^2)
     # end
@@ -1437,7 +1436,7 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
             end
         end
     end
-    Ym_true = mean(simulate_system(exp_data, pars_true, M, dist_sens_inds, isws, Zm), dims=2)
+    Ym_true = mean(simulate_system(exp_data, free_dyn_pars_true, M, dist_sens_inds, isws, Zm), dims=2)
     for e=1:E
         prop_cost_true[e] = mean((Y[N_trans+1:end, e].-Ym_true[N_trans+1:end]).^2)
     end
@@ -1944,9 +1943,9 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
-    mref = pars_true[1]
-    Lref = pars_true[2]
-    kref = pars_true[3]
+    mref = free_dyn_pars_true[1]
+    Lref = free_dyn_pars_true[2]
+    kref = free_dyn_pars_true[3]
     δm = 0.01
     δL = 0.1
     δk = 0.1
@@ -1956,7 +1955,7 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
     kvals = kref-4*δk:δk:kref+5δk
 
     cost_vals = [zeros(length(mvals)*length(Lvals)*length(kvals)) for e=1:E]
-    all_pars = zeros(length(pars_true), length(mvals)*length(Lvals)*length(kvals))
+    all_pars = zeros(length(free_dyn_pars_true), length(mvals)*length(Lvals)*length(kvals))
     min_ind = fill(-1, (E,))
     min_cost = fill(Inf, (E,))
     ind = 1
@@ -1998,7 +1997,7 @@ function gridsearch_debug(expid::String, N_trans::Int = 0)
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    num_free_pars = length(pars_true) + length(dist_sens_inds)
+    num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
 
     # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
@@ -2008,7 +2007,7 @@ function gridsearch_debug(expid::String, N_trans::Int = 0)
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
-    kref = pars_true[1]
+    kref = free_dyn_pars_true[1]
     aref = 0.8
     δk = 0.1
     δa = 0.01
@@ -2022,8 +2021,8 @@ function gridsearch_debug(expid::String, N_trans::Int = 0)
     min_cost = fill(Inf, (E,))
     ind = 1
     time_start = now()
-    for my_a in avals
-        for my_k in kvals
+    for (ia, my_a) in enumerate(avals)
+        for (ik, my_k) in enumerate(kvals)
             for e = 1:E
                 pars = [my_k, my_a]
                 all_pars[:,ind] = pars
@@ -2033,6 +2032,7 @@ function gridsearch_debug(expid::String, N_trans::Int = 0)
                     min_ind[e] = ind
                     min_cost[e] = cost_vals[e][ind]
                 end
+                @info "Completed computing cost for e = $e, "
             end
             ind += 1
         end
@@ -2478,7 +2478,7 @@ function debug_input_effect(expid::String, N_trans::Int = 0)
 
 
     # NOTE: Assumes disturbance model isn't parametrized, so just uses true pars
-    p = vcat(get_all_θs(pars_true), exp_data.get_all_ηs(pars_true))
+    p = vcat(get_all_θs(free_dyn_pars_true), exp_data.get_all_ηs(free_dyn_pars_true))
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
 
