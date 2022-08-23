@@ -67,3 +67,6 @@ testing_conditional_distributions.m
 src/julia/test_randjump_deleteme.jl
 *.gif
 *.csv
+
+
+src/julia/data/*
