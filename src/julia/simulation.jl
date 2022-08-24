@@ -1576,7 +1576,6 @@ function solve_in_parallel(solve, is)
   M = length(is)
   p = Progress(M, 1, "Running $(M) simulations...", 50)
   y1 = solve(is[1])
-  @warn "sy1: $(size(y1)), M: $M"
   Y = zeros(length(y1), M)
   Y[:, 1] += y1
   next!(p)
