@@ -286,15 +286,15 @@ function simulate_noise_process_mangled(
     for ind = 1:n_in
         for m=1:M
             # x[i, j] is the j:th element of the state at sample i
-            y, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv]', t, x0=mdl.x0)
+            # y, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv]', t, x0=mdl.x0)
             # NOTE: VERSION: The line above here used to be:
-            # y, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv], t, x0=mdl.x0)    # Input signal wasn't transposed
+            y, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv], t, x0=mdl.x0)    # Input signal wasn't transposed
             # Changed on 09-08-2022 after it not being used for a long time,
             # because suddently transpose was needed. Not sure why
             for i=1:N+1
-                x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[:,i]
+                # x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[:,i]
                 # NOTE: VERSION: The line above here used to be:
-                # x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[i,:]     # Elements of x changed around
+                x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[i,:]     # Elements of x changed around
                 # Changed on 09-08-2022 after it not being used for a long time,
                 # because suddently transpose was needed. Not sure why
             end

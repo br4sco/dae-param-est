@@ -366,17 +366,17 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    # E = size(Y, 2)
+    E = size(Y, 2)
     # # DEBUG
-    E = 1
-    @warn "Using E = $E instead of default"
+    # E = 1
+    # @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
     trace_base = [[pars0] for e=1:E]
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
-    # @warn "Not running baseline identification"
+    # @warn "Not running baseline identification now"
     for e=1:E
         time_start = now()
         # HACK: Uses trace returned due to hacked LsqFit package
@@ -418,19 +418,21 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     end
 
     get_gradient_estimate_p(free_pars, M_mean) = get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
+    get_adjoint_estimate_p(free_pars, M_mean) = get_adjoint_sensitivity(exp_data, free_pars, M_mean, dist_par_inds, isws)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
     trace_proposed = [ [Float64[]] for e=1:E]
     trace_gradient = [ [Float64[]] for e=1:E]
     proposed_durations = Array{Millisecond, 1}(undef, E)
-    # @warn "Not running proposed identification now" # DEBUG
+    # @warn "Not running proposed identification now"
     for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
             perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
+            # perform_SGD_adam_new(get_adjoint_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
             # perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
         avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
 
@@ -788,6 +790,73 @@ function simulate_system(
     simulate_system(exp_data, free_pars, M, dist_sens_inds, isws, Zm)
 end
 
+# Computes adjoint sensitivity with specified white noise
+function get_adjoint_sensitivity(
+    exp_data::ExperimentData,
+    free_pars::Array{Float64,1},
+    M::Int,
+    dist_sens_inds::Array{Int64, 1},
+    isws::Array{InterSampleWindow,1},
+    Zm::Array{Array{Float64,2},1})::Array{Float64,1}
+
+    W_meta = exp_data.W_meta
+    nx = W_meta.nx
+    n_out = W_meta.n_out
+    N = size(exp_data.Y, 1)-1
+    u = exp_data.u
+    η = exp_data.get_all_ηs(free_pars)
+    Y = exp_data.Y
+    p = vcat(vcat(get_all_θs(free_dyn_pars_true), W_meta.η))
+
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+    # NOTE: OPTION 2: Use the rows below here for exact interpolation
+    # reset_isws!(isws)
+    # XWm = simulate_noise_process(dmdl, Zm)
+    # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), dmdl.Cd, XWm, m, n_in, δ, isws)
+
+    # exp_data, sol1, sol2, sol_true = get_M_solutions("5k_u2w6_from_Alsvin", pars, 2, u, w1, w2, wtrue)
+    # NOTE: OKAY, BUILT-IN INTERPOLATION IS ZEROTH ORDER (AT LEAST FOR DERIVATIVE)
+    # AND ABSOLUTELY SUCKS, BUT LET'S JUST STICK WITH IT FOR NOW, EASY TO USE AT LEAST
+    # But, TODO: You should probably not use 0th order interpolation in simulation.jl
+    y_func = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+
+    forward_solve(m) = solvew(u, wmm(m), free_pars, N)
+    sols = get_sol_in_parallel(forward_solve, 1:2)#M)
+
+    # Computing xp0, initial conditions of derivative of x wrt to p
+    mdl = model_to_use(φ0, u, wmm(1), p)
+    mdl_sens = model_sens_to_use(φ0, u, wmm(1), p)
+    n_mdl = length(mdl.x0)
+    xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
+    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sols[1], sols[2], y_func, xp0)
+    adj_prob = problem(mdl_adj, N, Ts)
+
+    adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+        maxiters = maxiters)
+
+    return get_Gp(adj_sol)
+end
+
+# Computes adjoint sensitivity with newly generated white noise
+function get_adjoint_sensitivity(
+    exp_data::ExperimentData,
+    free_pars::Array{Float64,1},
+    M::Int,
+    dist_sens_inds::Array{Int64, 1},
+    isws::Array{InterSampleWindow,1})::Array{Float64,1}
+
+    W_meta = exp_data.W_meta
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_tot = nx*n_in
+    Nw = exp_data.Nw
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+    get_adjoint_sensitivity(exp_data, free_pars, M, dist_sens_inds, isws, Zm)
+end
+
 # Simulates system with specified white noise
 function simulate_system_sens(
     exp_data::ExperimentData,
@@ -799,17 +868,18 @@ function simulate_system_sens(
 
     W_meta = exp_data.W_meta
     nx = W_meta.nx
-    n_in = W_meta.n_in
+    # n_in = W_meta.n_in
     n_out = W_meta.n_out
-    n_tot = nx*n_in
-    dη = length(W_meta.η)
+    # n_tot = nx*n_in
+    # dη = length(W_meta.η)
     N = size(exp_data.Y, 1)-1
-    dist_par_inds = W_meta.free_par_inds
+    # dist_par_inds = W_meta.free_par_inds
 
-    p = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
-    θ = p[1:dθ]
-    η = p[dθ+1: dθ+dη]
-    # C = reshape(η[nx+1:end], (n_out, n_tot))
+    η = exp_data.get_all_ηs(free_pars)
+    # p = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    # θ = p[1:dθ]
+    # η = p[dθ+1: dθ+dη]
+    # # C = reshape(η[nx+1:end], (n_out, n_tot))
 
     dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
@@ -883,8 +953,8 @@ function test_adjoint_method(exp_id::String)
     dist_par_inds = W_meta.free_par_inds
     Zm = [randn(Nw, n_tot) for m=1:M]
     Y = exp_data.Y
-    @warn "Using custom N"
-    N = Int(20/Ts)#size(exp_data.Y,1)-1
+    # @warn "Using custom N"
+    # N = Int(20/Ts)#size(exp_data.Y,1)-1
     np = length(free_dyn_pars_true)
     # N = size(Y,1)-1
 
@@ -915,6 +985,28 @@ function test_adjoint_method(exp_id::String)
     # sol_true = solvew(u, wtrue, p, N)
     # Y = [sol_true.u[i][2] for i=1:length(sol_true.u)]
 
+    # exp_data, sol1, sol2, sol_true = get_M_solutions("5k_u2w6_from_Alsvin", pars, 2, u, w1, w2, wtrue)
+    # NOTE: OKAY, BUILT-IN INTERPOLATION IS ZEROTH ORDER (AT LEAST FOR DERIVATIVE)
+    # AND ABSOLUTELY SUCKS, BUT LET'S JUST STICK WITH IT FOR NOW, EASY TO USE AT LEAST
+    # But, TODO: You should probably not use 0th order interpolation in simulation.jl
+    y_func = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+
+    # DEBUG
+    @warn "Doing some debug-plotting"
+    times_debug = 0:0.01:N*Ts
+    y_vals = [y_func(t) for t = times_debug]
+    w1vals = [first(wmm(1)(t)) for t = times_debug]
+    w2vals = [first(wmm(2)(t)) for t = times_debug]
+
+    p1 = plot(times_debug, y_vals)
+    savefig(p1, "p1t.png")
+    p2 = plot(times_debug, w1vals)
+    savefig(p2, "p2t.png")
+    p3 = plot(times_debug, w2vals)
+    savefig(p3, "p3t.png")
+    # END DEBUG
+
+
     # ws = [w1, w2]
     # forward_solve(m) = solvew(u, ws[m], p, N)   # Below row more general, this one just used to easier replace by sin()-input
     forward_solve(m) = solvew(u, wmm(m), free_pars_true, N)
@@ -925,12 +1017,6 @@ function test_adjoint_method(exp_id::String)
     # @warn "Using placeholder Y"
     # Y = [sols[1].u[i][2] for i=1:length(sols[1].u)]
 
-    # exp_data, sol1, sol2, sol_true = get_M_solutions("5k_u2w6_from_Alsvin", pars, 2, u, w1, w2, wtrue)
-    # NOTE: OKAY, BUILT-IN INTERPOLATION IS ZEROTH ORDER (AT LEAST FOR DERIVATIVE)
-    # AND ABSOLUTELY SUCKS, BUT LET'S JUST STICK WITH IT FOR NOW, EASY TO USE AT LEAST
-    # But, TODO: You should probably not use 0th order interpolation in simulation.jl
-    y_func = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
-
     # Computing xp0, initial conditions of derivative of x wrt to p
     mdl = model_to_use(φ0, u, w1, p)
     mdl_sens = model_sens_to_use(φ0, u, w1, p)
@@ -938,14 +1024,13 @@ function test_adjoint_method(exp_id::String)
     xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
     mdl_adj, get_Gp = model_adj_to_use(u, w1, p, N*Ts, sols[1], sols[2], y_func, xp0)
     adj_prob = problem(mdl_adj, N, Ts)
+    adj_start = now()
     adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
         maxiters = maxiters)
-
-    # # COMPARING ADJOINT METHOD TO FORWARD SENSITIVITY ANALYSIS
-    # Ym, jacsYm = simulate_system_sens(exp_data, free_pars_true, M, dist_par_inds, isws, Zm)
-    # println("sss: $(size(jacsYm)), typeof: $(typeof(jacsYm)), $(size(jacsYm[1]))")
+    dur = now() - adj_start
 
     Gp = get_Gp(adj_sol)
+    return Gp, dur
 end
 
 function interpolated_signal(out, times)
