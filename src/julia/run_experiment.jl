@@ -340,15 +340,15 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    E = size(Y, 2)
-    # # DEBUG
-    # E = 1
-    # @warn "Using E = $E instead of default"
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
-    # @warn "Not running baseline identification"
-    for e=1:E
+    @warn "Not running baseline identification"
+    for e=[]#1:E
         time_start = now()
         baseline_result = get_fit_sens(Y[N_trans+1:end,e], pars0,
             baseline_model_parametrized, jacobian_model_b,
@@ -412,9 +412,10 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
 
+    tot_duration = now()-start_datetime
     # Call Dates.value[setup_duration] or e.g. Dates.value.(baseline_durations) to convert Millisecond to Int
     durations = (setup_duration, baseline_durations, proposed_durations)
-    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_proposed, trace_gradient, durations
+    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_proposed, trace_gradient, durations, tot_duration
 end
 
 function get_outputs(expid::String, pars0::Array{Float64,1})
@@ -821,6 +822,70 @@ function write_results_to_file(path::String, opt_pars_baseline, opt_pars_propose
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
+function gridsearch_sans_g(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    mref = 0.3#free_dyn_pars_true[1]
+    Lref = 6.25#free_dyn_pars_true[2]
+    kref = 6.25#free_dyn_pars_true[3]
+    δm = 0.01
+    δL = 0.1
+    δk = 0.1
+
+    mvals = [mref]
+    Lvals = [Lref]
+    kvals = [kref]
+    # kvals = kref-4*δk:δk:kref+5δk
+
+    cost_vals = [zeros(length(mvals)*length(Lvals)*length(kvals)) for e=1:E]
+    all_pars = zeros(3, length(mvals)*length(Lvals)*length(kvals))
+    min_ind = fill(-1, (E,))
+    min_cost = fill(Inf, (E,))
+    ind = 1
+    time_start = now()
+    for (im, my_m) in enumerate(mvals)
+        for (iL, my_L) in enumerate(Lvals)
+            for (ik, my_k) in enumerate(kvals)
+                for e = 1:E
+                    pars = [my_m, my_L, my_k]
+                    all_pars[:,ind] = pars
+                    Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                    cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                    if cost_vals[e][ind] < min_cost[e]
+                        min_ind[e] = ind
+                        min_cost[e] = cost_vals[e][ind]
+                    end
+                    @info "Completed computing cost for e = $e, im=$im, iL=$iL, ik = $ik"
+                end
+                ind += 1
+            end
+        end
+    end
+    duration = now()-time_start
+
+    return all_pars, cost_vals, min_ind, duration
+end
+
 function compute_forward_difference_derivative(x_vals::Array{Float64,1}, y_vals::Array{Float64,1})
     @assert (length(x_vals) == length(y_vals)) "x_vals and y_vals must contain the same number of elements"
     diff = zeros(size(y_vals))
