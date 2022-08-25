@@ -1127,12 +1127,12 @@ end
 
 # NOTE Assumes free dynamical parameters are m, L, and k
 # TODO: I think we can change all occurences of Array{Float64,1} to Vector{Float64}, pretty sure they are the same type, one just looks nicer (introduced in Julia 1.7 I think)
-function pendulum_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, xp0::Array{Float64, 2})
+function pendulum_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, xp0::Array{Float64, 2}, dx::Function)
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
         x  = t -> sol(t)
         x2 = t -> sol2(t)
-        dx = t -> sol(t, Val{1})  # TODO: Does this give same results as sol.up???? NOTE: Nope, sol.up is Nothing, and this just uses finite differences)
+        # dx = t -> sol(t, Val{1})  # TODO: Does this give same results as sol.up???? NOTE: Nope, sol.up is Nothing, and this just uses finite differences)
         Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
                     0           2*dx(t)[6]          0   0                   -1          0   0
                     -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
@@ -1160,8 +1160,8 @@ function pendulum_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Fl
         λT  = -gₓ(T)
         dλT = [-x(T)[2]*λT[7]/(L^2)   x(T)[1]*λT[7]/(L^2)  0   0   0   0   0]'
 
-        println("Adjoint residual: $((dλT')*Fdx(T) + (λT')*(Fx(T)-Fddx(T)) + gₓ(T)')")
-        println("Terminal constraint: $((λT')*(Fdx(T)))")
+        # println("Adjoint residual: $((dλT')*Fdx(T) + (λT')*(Fx(T)-Fddx(T)) + gₓ(T)')")
+        # println("Terminal constraint: $((λT')*(Fdx(T)))")
 
         # the residual function
         function f!(res, dx, x, θ, t)
@@ -1314,8 +1314,8 @@ function mohamed_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Flo
     # approach
     dλT = [-(2/(zeta(T)^2))*dzeta_dx1(T)*(gₓ(T)[2]); 0.0]
 
-    println("Adjoint residual: $((dλT')*Fdx(T) + (λT')*(Fddx(T)-Fx(T)) + gₓ(T)')")
-    println("Terminal constraint: $((λT')*(Fdx(T)))")
+    # println("Adjoint residual: $((dλT')*Fdx(T) + (λT')*(Fddx(T)-Fx(T)) + gₓ(T)')")
+    # println("Terminal constraint: $((λT')*(Fdx(T)))")
 
     λ0  = λT[:]
     dλ0 = -dλT[:]

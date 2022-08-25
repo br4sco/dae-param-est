@@ -1,4 +1,4 @@
-using LsqFit, StatsPlots, LaTeXStrings, Dates
+using LsqFit, StatsPlots, LaTeXStrings, Dates, Interpolations
 include("simulation.jl")
 include("noise_interpolation_multivar.jl")
 include("noise_generation.jl")
@@ -23,6 +23,18 @@ struct ExperimentData
     # Nw is a lower bound on the number of available samples of the disturbance and input
     # N, the number of data samples, have been computed based on this number
     Nw::Int
+end
+
+# DEBUG Only used for quicker testing of Adjoint Method
+struct AdjointData
+    wmm::Function
+    y_func::Function
+    u::Function
+    sols::Array{DAESolution,1}
+    N::Int
+    Ts::Float64
+    p::Array{Float64,1}
+    xp0::Matrix{Float64}
 end
 
 const PENDULUM = 1
@@ -231,13 +243,13 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [k]#[m, L, k]#[m, L, g, k] # True values of free parameters
-    get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters
+    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [1.0]#[1.0, 0.1, 0.1]
-    model_sens_to_use = pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [1.0, 0.1, 0.1]
+    model_sens_to_use = pendulum_sensitivity_sans_g#pendulum_sensitivity_k_with_dist_sens_1#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = pendulum_adjoint
 elseif model_id == MOH_MDL
@@ -269,7 +281,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14], x[21]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 elseif model_id == MOH_MDL
     f(x::Array{Float64,1}) = x[2]
     f_sens(x::Array{Float64,1}) = [x[4]]
@@ -366,10 +378,10 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # jacobian_model_b(dummy_input, pars) =
     #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
 
-    E = size(Y, 2)
-    # # DEBUG
-    # E = 1
-    # @warn "Using E = $E instead of default"
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
@@ -435,6 +447,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
             # perform_SGD_adam_new(get_adjoint_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
             # perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
         avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
+        @warn "Only used maxiters=100 right now"
 
         writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
         writedlm(joinpath(data_dir, "tmp/backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
@@ -545,9 +558,9 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
-    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
+    # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
@@ -954,6 +967,7 @@ function test_adjoint_method(exp_id::String)
     Zm = [randn(Nw, n_tot) for m=1:M]
     Y = exp_data.Y
     # @warn "Using custom N"
+    # N = 500
     # N = Int(20/Ts)#size(exp_data.Y,1)-1
     np = length(free_dyn_pars_true)
     # N = size(Y,1)-1
@@ -985,26 +999,25 @@ function test_adjoint_method(exp_id::String)
     # sol_true = solvew(u, wtrue, p, N)
     # Y = [sol_true.u[i][2] for i=1:length(sol_true.u)]
 
-    # exp_data, sol1, sol2, sol_true = get_M_solutions("5k_u2w6_from_Alsvin", pars, 2, u, w1, w2, wtrue)
     # NOTE: OKAY, BUILT-IN INTERPOLATION IS ZEROTH ORDER (AT LEAST FOR DERIVATIVE)
     # AND ABSOLUTELY SUCKS, BUT LET'S JUST STICK WITH IT FOR NOW, EASY TO USE AT LEAST
     # But, TODO: You should probably not use 0th order interpolation in simulation.jl
     y_func = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
 
-    # DEBUG
-    @warn "Doing some debug-plotting"
-    times_debug = 0:0.01:N*Ts
-    y_vals = [y_func(t) for t = times_debug]
-    w1vals = [first(wmm(1)(t)) for t = times_debug]
-    w2vals = [first(wmm(2)(t)) for t = times_debug]
-
-    p1 = plot(times_debug, y_vals)
-    savefig(p1, "p1t.png")
-    p2 = plot(times_debug, w1vals)
-    savefig(p2, "p2t.png")
-    p3 = plot(times_debug, w2vals)
-    savefig(p3, "p3t.png")
-    # END DEBUG
+    # # DEBUG
+    # @warn "Doing some debug-plotting"
+    # times_debug = 0:0.01:N*Ts
+    # y_vals = [y_func(t) for t = times_debug]
+    # w1vals = [first(wmm(1)(t)) for t = times_debug]
+    # w2vals = [first(wmm(2)(t)) for t = times_debug]
+    #
+    # p1 = plot(times_debug, y_vals)
+    # savefig(p1, "p1t.png")
+    # p2 = plot(times_debug, w1vals)
+    # savefig(p2, "p2t.png")
+    # p3 = plot(times_debug, w2vals)
+    # savefig(p3, "p3t.png")
+    # # END DEBUG
 
 
     # ws = [w1, w2]
@@ -1014,22 +1027,133 @@ function test_adjoint_method(exp_id::String)
     forward_sens_solve(m) = solvew_sens(u, wmm(m), free_pars_true, N) |> h_sens
     sols = get_sol_in_parallel(forward_solve, 1:M)
 
-    # @warn "Using placeholder Y"
-    # Y = [sols[1].u[i][2] for i=1:length(sols[1].u)]
+    function get_der_est(sol)
+        der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
+        # ts = sol.t[1:end-1]
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+    end
+    function get_mvar_cubic(ts, der_est)
+        temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
+        t -> [temp[i](t) for i=1:length(temp)]
+        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    end
+    function get_mvar_linear(ts, der_est)
+        temp = [linear_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
+        t -> [temp[i](t) for i=1:length(temp)]
+        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    end
+    ts, der_est = get_der_est(sols[1])
+    dx = t -> sols[1](t, Val{1})
+    dx2 = get_mvar_cubic(ts, der_est)
+    dx3 = get_mvar_linear(ts, der_est)
 
     # Computing xp0, initial conditions of derivative of x wrt to p
     mdl = model_to_use(φ0, u, w1, p)
     mdl_sens = model_sens_to_use(φ0, u, w1, p)
     n_mdl = length(mdl.x0)
     xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
-    mdl_adj, get_Gp = model_adj_to_use(u, w1, p, N*Ts, sols[1], sols[2], y_func, xp0)
+    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sols[1], sols[2], y_func, xp0, dx2)
+    adj_prob = problem(mdl_adj, N, Ts)
+    adj_start = now()
+    # adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+    #     maxiters = maxiters)
+    dur = now() - adj_start
+
+    # DEBUG: Can be used for quicker testing of adjoint method:
+    ad = AdjointData(wmm, y_func, u, sols, N, Ts, p, xp0)
+    Gp = 0.3#get_Gp(adj_sol)
+    return Gp, ad
+
+    # Gp = get_Gp(adj_sol)
+    # return Gp, dur
+end
+
+function test_adjoint_method_fast(ad::AdjointData)
+    u = ad.u
+    wmm = ad.wmm
+    p = ad.p
+    N = ad.N
+    Ts = ad.Ts
+    sols = ad.sols
+    y_func = ad.y_func
+    xp0 = ad.xp0
+
+    function get_der_est(sol)
+        der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
+        # ts = sol.t[1:end-1]
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+    end
+    function get_mvar_cubic(ts, der_est)
+        temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
+        t -> [temp[i](t) for i=1:length(temp)]
+        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    end
+    function get_mvar_linear(ts, der_est)
+        temp = [linear_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
+        t -> [temp[i](t) for i=1:length(temp)]
+        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    end
+    ts, der_est = get_der_est(sols[1])
+    dx = t -> sols[1](t, Val{1})
+    dx2 = get_mvar_cubic(ts, der_est)
+    dx3 = get_mvar_linear(ts, der_est)
+
+    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sols[1], sols[2], y_func, xp0, dx3)
     adj_prob = problem(mdl_adj, N, Ts)
     adj_start = now()
     adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
         maxiters = maxiters)
     dur = now() - adj_start
 
+    # TODO: This doesn't work. Consider fixing? Or just use interpolation package?
+    function lin_interp(ys, ts, t)
+        @warn "This doesn't seem to inteprolate correctly, figure out why"
+        k = Int(floor(t/Ts) + 1) # Just floor(t/Ts) gives index if indices start at 0
+        t1 = k*Ts
+        t2 = (k+1)*Ts
+        if k < 1
+            @warn "Requesting sample before t=0"
+            y = ys[1]
+        elseif k > length(ys)
+            @warn "Requesting sample after t=T"
+            y = ys[end]
+        else
+            # y1 = sol.u[k]
+            # y2 = sol.u[k+1]
+            # t1 = sol.t[k]
+            # t2 = sol.t[k+1]
+            # y = ((t-t1)*y2 + (t2-t)*y1)/Ts
+            y = ((t-t1)*ys[k+1] .+ (t2-t)*ys[k])./Ts
+        end
+        return y
+    end
+    # function lin_interp(sol, t)
+    #     k = Int(floor(t/Ts) + 1) # Just floor(t/Ts) gives index if indices start at 0
+    #     if k < 0
+    #         @warn "Requesting sample before t=0"
+    #         y = sol.u[1]
+    #     elseif k > length(sol.t)
+    #         @warn "Requesting sample after t=T"
+    #         y = sol.u[end]
+    #     else
+    #         # y1 = sol.u[k]
+    #         # y2 = sol.u[k+1]
+    #         # t1 = sol.t[k]
+    #         # t2 = sol.t[k+1]
+    #         # y = ((t-t1)*y2 + (t2-t)*y1)/Ts
+    #         y = ((t-sol.t[k])*sol.u[k+1] .+ (sol.t[k+1]-t)*sol.u[k])./Ts
+    #     end
+    #     return y
+    # end
+    # function der_est(sol, t)
+    #     h = 1e-6
+    #     return (lin_interp(sol, t+h).-lin_interp(sol, t))./h
+    # end
+
     Gp = get_Gp(adj_sol)
+    # Gp = 0.3
     return Gp, dur
 end
 
@@ -2024,7 +2148,7 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 100
+    E = 1
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
@@ -2045,9 +2169,9 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
     min_cost = fill(Inf, (E,))
     ind = 1
     time_start = now()
-    for my_m in mvals
-        for my_L in Lvals
-            for my_k in kvals
+    for (im, my_m) in enumerate(mvals)
+        for (iL, my_L) in enumerate(Lvals)
+            for (ik, my_k) in enumerate(kvals)
                 for e = 1:E
                     pars = [my_m, my_L, my_k]
                     all_pars[:,ind] = pars
@@ -2057,6 +2181,7 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
                         min_ind[e] = ind
                         min_cost[e] = cost_vals[e][ind]
                     end
+                    @info "Completed computing cost for e = $e, im=$im, iL=$iL, ik = $ik"
                 end
                 ind += 1
             end
@@ -2117,7 +2242,7 @@ function gridsearch_debug(expid::String, N_trans::Int = 0)
                     min_ind[e] = ind
                     min_cost[e] = cost_vals[e][ind]
                 end
-                @info "Completed computing cost for e = $e, "
+                @info "Completed computing cost for e = $e, ia=$ia, ik=$ik "
             end
             ind += 1
         end
