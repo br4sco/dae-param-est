@@ -2277,26 +2277,49 @@ function gridsearch_k_1distsens(expid::String, N_trans::Int = 0)
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
+    # # For identifying k and L
+    # Lref = free_dyn_pars_true[1]
+    # kref = free_dyn_pars_true[2]
+    # δk = 0.1
+    # δL = 0.1
+    # For identifying k and a
     kref = free_dyn_pars_true[1]
     aref = 0.8
     δk = 0.1
     δa = 0.01
 
-    kvals = kref-10*δk:δk:kref+10δk
-    avals = aref-10*δa:δa:aref+10δa
+    # # For identifying k and L
+    # kvals = kref-3*δk:δk:kref+3δk
+    # avals = Lref-3*δL:δL:Lref+3δL
+    # For identifying k and a
+    kvals = kref-3*δk:δk:kref+3δk
+    avals = aref-3*δa:δa:aref+3δa
 
-    cost_vals = [zeros(length(avals), length(kvals)) for e=1:E]
+    # cost_vals = [zeros(length(avals), length(kvals)) for e=1:E]
+    cost_vals = [fill(NaN, (length(avals), length(kvals))) for e=1:E]
     ind = 1
     time_start = now()
-    for (ia, my_a) in enumerate(avals)
-        for (ik, my_k) in enumerate(kvals)
-            for e = 1:E
-                pars = [my_k, my_a]
-                Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
-                cost_vals[e][ia, ik] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-                @info "Completed computing cost for e = $e, ia=$ia, ik=$ik "
+    try
+        for (ia, my_a) in enumerate(avals)
+            for (ik, my_k) in enumerate(kvals)
+                for e = 1:E
+                    # # For identifying k and L
+                    # pars = [my_L, my_k]
+                    # For identifying k and a
+                    pars = [my_k, my_a]
+
+                    Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                    cost_vals[e][ia, ik] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                    @info "Completed computing cost for e = $e, ia=$ia, ik=$ik "
+                end
+                ind += 1
             end
-            ind += 1
+        end
+    finally
+        writedlm(joinpath(data_dir, "tmp/backup_avals.csv"), avals, ',')
+        writedlm(joinpath(data_dir, "tmp/backup_kvals.csv"), avals, ',')
+        for e=1:E
+            writedlm(joinpath(data_dir, "tmp/cost_vals_$e.csv"), cost_vals[e], ',')
         end
     end
     duration = now()-time_start
