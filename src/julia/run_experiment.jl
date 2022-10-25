@@ -1,4 +1,5 @@
-using LsqFit, StatsPlots, LaTeXStrings, Dates, Interpolations
+using LsqFit, LaTeXStrings, Dates, Interpolations
+# using StatsPlots # Commented out since it breaks 3d-plotting in Julia 1.5.3
 include("simulation.jl")
 include("noise_interpolation_multivar.jl")
 include("noise_generation.jl")
@@ -243,10 +244,10 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [k]#[m, L, g, k] # True values of free parameters
-    get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    const free_dyn_pars_true = [m]#[m, L, g, k] # True values of free parameters
+    get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+    dyn_par_bounds = [0.01 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [1.0]#, 0.1, 0.1]
     model_sens_to_use = pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
@@ -281,7 +282,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14], x[21]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Array{Float64,1}) = [x[14], x[35]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 elseif model_id == MOH_MDL
     f(x::Array{Float64,1}) = x[2]
     f_sens(x::Array{Float64,1}) = [x[4]]
@@ -938,6 +939,55 @@ function write_results_to_file(path::String, opt_pars_baseline, opt_pars_propose
     writedlm(path*"setup_duration.csv", Dates.value(durations[1]), ',')
     writedlm(path*"baseline_durations.csv", Dates.value.(durations[2]), ',')
     writedlm(path*"proposed_durations.csv", Dates.value.(durations[3]), ',')
+end
+
+function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::Array{Float64,1}, step_num::Int, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # === Computing cost function of baseline model
+    nθ = length(pars0)
+    @assert (nθ > 0 && nθ <= 2) "Current code only supports number of free parameters up 2 (and more than 0)"
+    base_par_vals = zeros(2*step_num+1, nθ)
+    for (i, par) in enumerate(pars0)
+        h = step_sizes[i]
+        base_par_vals[:,i] = par-step_num*h:h:par+step_num*h
+    end
+
+    if nθ == 1
+        base_cost_vals = zeros(2*step_num+1,1)
+    elseif nθ == 2
+        base_cost_vals = zeros(2*step_num+1,2*step_num+1)
+    end
+
+    if nθ == 1
+        for (i,par) in enumerate(base_par_vals)
+            Ys = solvew(exp_data.u, t -> zeros(n_out), [par], N) |> h
+            base_cost_vals[i] = first(mean((Y[N_trans+1:end, 1].-Ys[N_trans+1:end]).^2, dims=1))
+        end
+    elseif nθ == 2
+        for (i1, par1) in enumerate(base_par_vals[:,1])
+            for (i2, par2) in enumerate(base_par_vals[:,2])
+                Ys = solvew(exp_data.u, t -> zeros(n_out), [par1, par2], N) |> h
+                base_cost_vals[i1,i2] = first(mean((Y[N_trans+1:end, 1].-Ys[N_trans+1:end]).^2, dims=1))
+            end
+        end
+    end
+
+    return base_par_vals, base_cost_vals
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
