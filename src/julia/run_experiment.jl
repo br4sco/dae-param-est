@@ -197,15 +197,21 @@ function get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
 end
 
 # === MODEL (AND DATA) PARAMETERS ===
-const σ = 0.002                 # measurement noise variance
+# const σ = 0.002                 # measurement noise variance
+@warn "Generating true output without any measurement noise"
+const σ = 0;
 
 const m = 0.3                   # [kg]
 const L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not
 # accounting for friction.
 const g = 9.81                  # [m/s^2]
-const k = 6.25                  # [1/s^2]
+# const k = 6.25                  # [1/s^2]
+const k = 0
+@warn "Setting true k to zero"
 
-const φ0 = 0.0                   # Initial angle of pendulum from negative y-axis
+# const φ0 = 0.0                   # Initial angle of pendulum from negative y-axis
+@warn "Initial state not set to zero!"
+const φ0 = -pi/2
 
 # === HELPER FUNCTIONS TO READ AND WRITE DATA
 const data_dir = joinpath("data", "experiments")
@@ -244,10 +250,10 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m]#[m, L, g, k] # True values of free parameters
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    const free_dyn_pars_true = [L, g]#[m, L, g, k] # True values of free parameters
+    get_all_θs(pars::Array{Float64,1}) = [m, pars[1], pars[2], k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+    dyn_par_bounds = [0.01 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [1.0]#, 0.1, 0.1]
     model_sens_to_use = pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
@@ -282,7 +288,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14], x[35]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Array{Float64,1}) = [x[21], x[28]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 elseif model_id == MOH_MDL
     f(x::Array{Float64,1}) = x[2]
     f_sens(x::Array{Float64,1}) = [x[4]]
@@ -591,7 +597,9 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # mk_we(XW::Array{Array{Float64,1},2}, isws::Array{InterSampleWindow, 1}) =
     #     (m::Int) -> mk_noise_interp(C_true, mangle_XW(XW), m, δ)
 
-    u(t::Float64) = interpw(input, 1, 1)(t)
+    # u(t::Float64) = interpw(input, 1, 1)(t)
+    @warn "Putting input to zero!!!"
+    u(t::Float64) = 0.0
 
     # === We first generate the output of the true system ===
     function calc_Y(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1})
@@ -599,11 +607,13 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
         @assert (Nw <= size(XW, 1)) "Disturbance data size mismatch ($(Nw) > $(size(XW, 1)))"
         # @warn "Using E=1 instead of size of XW when generating Y!"
         E = size(XW, 2)
-        # E = 1
+        @warn "E SET TO 1"
+        E = 1
         es = collect(1:E)
         we = mk_we(XW, isws)
-        # solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
-        Y = solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
+        # Y = solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
+        @warn "Generating true output without process disturbance"
+        Y = solve_in_parallel(e -> solvew(u, t -> 0.0, free_dyn_pars_true, N) |> h_data, es)
         return Y
     end
 
@@ -945,7 +955,9 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = 200
+    @warn "Using N=200 instead of default!!!!!!!!!!"
+    # N = size(Y,1)-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -958,13 +970,15 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
 
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
+    debug_store = fill(NaN, N+1, 2*step_num+1)
+
     # === Computing cost function of baseline model
     nθ = length(pars0)
     @assert (nθ > 0 && nθ <= 2) "Current code only supports number of free parameters up 2 (and more than 0)"
     base_par_vals = zeros(2*step_num+1, nθ)
     for (i, par) in enumerate(pars0)
         h = step_sizes[i]
-        base_par_vals[:,i] = par-step_num*h:h:par+step_num*h
+        base_par_vals[:,i] = par-step_num*h:h:par+step_num*h+0.5*h
     end
 
     if nθ == 1
@@ -976,18 +990,36 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
     if nθ == 1
         for (i,par) in enumerate(base_par_vals)
             Ys = solvew(exp_data.u, t -> zeros(n_out), [par], N) |> h
-            base_cost_vals[i] = first(mean((Y[N_trans+1:end, 1].-Ys[N_trans+1:end]).^2, dims=1))
+            base_cost_vals[i] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
+            debug_store[:,i] = Ys
+            println("par value: $par, i: $i")
+            # p = plot(Ys)
+            # display(p)
         end
     elseif nθ == 2
         for (i1, par1) in enumerate(base_par_vals[:,1])
             for (i2, par2) in enumerate(base_par_vals[:,2])
+
+                # DEBUG
+                if mod(i1+i2,50) == 0
+                    @info "Running iteration iwth i1=$i1, i2=$i2"
+                end
+
                 Ys = solvew(exp_data.u, t -> zeros(n_out), [par1, par2], N) |> h
-                base_cost_vals[i1,i2] = first(mean((Y[N_trans+1:end, 1].-Ys[N_trans+1:end]).^2, dims=1))
+                # NOTE: Different rows of base_cost_vals should correspond to
+                # different values of parameter 2, while different columns should
+                # correspond to different values of parameter 1. This makes it
+                # so that if we make a surface plot by calling
+                # plot(params1, params2, base_cost_vals)
+                # then we will get the correct surface plot
+                # One can view this as: x-param1, y-param2
+                base_cost_vals[i2,i1] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
             end
         end
     end
 
-    return base_par_vals, base_cost_vals
+    # In base_cost_vals, columns (x-axis) correspond to different values of the second parameter
+    return base_par_vals, base_cost_vals, debug_store
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
