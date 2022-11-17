@@ -244,12 +244,12 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m]#[m, L, g, k] # True values of free parameters
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    const free_dyn_pars_true = [k]#[m, L, g, k] # True values of free parameters
+    get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+    dyn_par_bounds = [0.1 1e4; 0.01 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [1.0]#, 0.1, 0.1]
+    const_learning_rate = [1.0, 0.1]#, 0.1, 0.1]
     model_sens_to_use = pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = pendulum_adjoint
@@ -352,6 +352,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     @assert (length(pars0) == num_dyn_pars+length(dist_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
     @assert (size(dyn_par_bounds, 1) == num_dyn_pars) "Please provide bounds for exactly all free dynamic parameters"
+    @assert (length(const_learning_rate) == length(pars0)) "The learning rate must have the same number of components as the number of parameters to be identified"
 
     if !isdir(joinpath(data_dir, "tmp/"))
         mkdir(joinpath(data_dir, "tmp/"))
@@ -561,7 +562,7 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
     # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
-    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
+    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
@@ -769,13 +770,13 @@ function simulate_system(
     p = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
-    C = reshape(η[nx+1:end], (n_out, n_tot))
+    # C = reshape(η[nx+1:end], (n_out, n_tot))  # Not correct when disturbance model is parametrized, use dmdl.Cd instead
 
     # dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
     dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
     # NOTE: OPTION 2: Use the rows below here for exact interpolation
     # reset_isws!(isws)
     # XWm = simulate_noise_process(dmdl, Zm)
@@ -945,6 +946,8 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
+    # N = 200
+    # @warn "Using N=200 instead of default!!!!!!!!!!"
     N = size(Y,1)-1
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -958,13 +961,15 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
 
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
+    debug_store = fill(NaN, N+1, 2*step_num+1)
+
     # === Computing cost function of baseline model
     nθ = length(pars0)
     @assert (nθ > 0 && nθ <= 2) "Current code only supports number of free parameters up 2 (and more than 0)"
     base_par_vals = zeros(2*step_num+1, nθ)
     for (i, par) in enumerate(pars0)
         h = step_sizes[i]
-        base_par_vals[:,i] = par-step_num*h:h:par+step_num*h
+        base_par_vals[:,i] = par-step_num*h:h:par+step_num*h+0.5*h
     end
 
     if nθ == 1
@@ -976,18 +981,36 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
     if nθ == 1
         for (i,par) in enumerate(base_par_vals)
             Ys = solvew(exp_data.u, t -> zeros(n_out), [par], N) |> h
-            base_cost_vals[i] = first(mean((Y[N_trans+1:end, 1].-Ys[N_trans+1:end]).^2, dims=1))
+            base_cost_vals[i] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
+            debug_store[:,i] = Ys
+            println("par value: $par, i: $i")
+            # p = plot(Ys)
+            # display(p)
         end
     elseif nθ == 2
         for (i1, par1) in enumerate(base_par_vals[:,1])
             for (i2, par2) in enumerate(base_par_vals[:,2])
+
+                # DEBUG
+                if mod(i1+i2,50) == 0
+                    @info "Running iteration iwth i1=$i1, i2=$i2"
+                end
+
                 Ys = solvew(exp_data.u, t -> zeros(n_out), [par1, par2], N) |> h
-                base_cost_vals[i1,i2] = first(mean((Y[N_trans+1:end, 1].-Ys[N_trans+1:end]).^2, dims=1))
+                # NOTE: Different rows of base_cost_vals should correspond to
+                # different values of parameter 2, while different columns should
+                # correspond to different values of parameter 1. This makes it
+                # so that if we make a surface plot by calling
+                # plot(params1, params2, base_cost_vals, st=:surface)
+                # then we will get the correct surface plot
+                # One can view this as: x-param1, y-param2
+                base_cost_vals[i2,i1] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
             end
         end
     end
 
-    return base_par_vals, base_cost_vals
+    # In base_cost_vals, columns (x-axis) correspond to different values of the second parameter
+    return base_par_vals, base_cost_vals, debug_store
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
@@ -1422,12 +1445,12 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         p = get_all_parameters(pars)
         θ = p[1:dθ]
         η = p[dθ+1: dθ+dη]
-        C = reshape(η[nx+1:end], (n_out, n_tot))
+        # C = reshape(η[nx+1:end], (n_out, n_tot))  # Not correct when disturbance model is parametrized, use dmdl.Cd instead
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ) # TODO: Use new discretizations
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
         XWm = simulate_noise_process_mangled(dmdl, Zm)
-        wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+        wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
         # NOTE: OPTION 2: Use the rows below here for exact interpolation
         # reset_isws!(isws)
         # XWm = simulate_noise_process(dmdl, Zm)
@@ -1602,12 +1625,12 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
         p = get_all_parameters(pars)
         θ = p[1:dθ]
         η = p[dθ+1: dθ+dη]
-        C = reshape(η[nx+1:end], (n_out, n_tot))
+        # C = reshape(η[nx+1:end], (n_out, n_tot))  # Not correct when disturbance model is parametrized, use dmdl.Cd instead
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
         XWm = simulate_noise_process_mangled(dmdl, Zm)
-        wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+        wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
         # NOTE: OPTION 2: Use the rows below here for exact interpolation
         # reset_isws!(isws)
         # XWm = simulate_noise_process(dmdl, Zm)
@@ -1748,12 +1771,12 @@ function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{F
         p = get_all_parameters(pars)
         θ = p[1:dθ]
         η = p[dθ+1: dθ+dη]
-        C = reshape(η[nx+1:end], (n_out, n_tot))
+        # C = reshape(η[nx+1:end], (n_out, n_tot))  # Not correct when disturbance model is parametrized, use dmdl.Cd instead
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
         XWm = simulate_noise_process_mangled(dmdl, Zm)
-        wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+        wmm(m::Int) = mk_noise_interp(dmdl.C, XWm, m, δ)
         # NOTE: OPTION 2: Use the rows below here for exact interpolation
         # reset_isws!(isws)
         # XWm = simulate_noise_process(dmdl, Zm)
@@ -2074,12 +2097,12 @@ function debug_minimization_full_along_curve(expid::String, N_trans::Int = 0; pa
         p = get_all_parameters(pars)
         θ = p[1:dθ]
         η = p[dθ+1: dθ+dη]
-        C = reshape(η[nx+1:end], (n_out, n_tot))
+        # C = reshape(η[nx+1:end], (n_out, n_tot))  # Not correct when disturbance model is parametrized, use dmdl.Cd instead
 
         dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
         XWm = simulate_noise_process_mangled(dmdl, Zm)
-        wmm(m::Int) = mk_noise_interp(C, XWm, m, δ)
+        wmm(m::Int) = mk_noise_interp(dmdl.C, XWm, m, δ)
         # NOTE: OPTION 2: Use the rows below here for exact interpolation
         # reset_isws!(isws)
         # XWm = simulate_noise_process(dmdl, Zm)
@@ -2327,23 +2350,29 @@ function gridsearch_k_1distsens(expid::String, N_trans::Int = 0)
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
-    # # For identifying k and L
-    # Lref = free_dyn_pars_true[1]
-    # kref = free_dyn_pars_true[2]
-    # δk = 0.1
-    # δL = 0.1
-    # For identifying k and a
-    kref = free_dyn_pars_true[1]
-    aref = 0.8
-    δk = 0.1
-    δa = 0.01
+    ida = true
 
-    # # For identifying k and L
-    # kvals = kref-3*δk:δk:kref+3δk
-    # avals = Lref-3*δL:δL:Lref+3δL
-    # For identifying k and a
-    kvals = kref-3*δk:δk:kref+3δk
-    avals = aref-3*δa:δa:aref+3δa
+    if ida
+        # For identifying k and a
+        kref = free_dyn_pars_true[1]
+        aref = 0.8
+        δk = 0.1
+        δa = 0.01
+        # kvals = kref-3*δk:δk:kref+3δk
+        # avals = aref-3*δa:δa:aref+3δa
+        kvals = kref
+        avals = aref
+    else
+        # For identifying k and L
+        Lref = free_dyn_pars_true[1]
+        kref = free_dyn_pars_true[2]
+        δk = 0.1
+        δL = 0.1
+        # kvals = kref-3*δk:δk:kref+3δk
+        # avals = Lref-3*δL:δL:Lref+3δL
+        kvals = kref
+        avals = Lref
+    end
 
     # cost_vals = [zeros(length(avals), length(kvals)) for e=1:E]
     cost_vals = [fill(NaN, (length(avals), length(kvals))) for e=1:E]
@@ -2353,10 +2382,13 @@ function gridsearch_k_1distsens(expid::String, N_trans::Int = 0)
         for (ia, my_a) in enumerate(avals)
             for (ik, my_k) in enumerate(kvals)
                 for e = 1:E
-                    # # For identifying k and L
-                    # pars = [my_L, my_k]
-                    # For identifying k and a
-                    pars = [my_k, my_a]
+                    if ida
+                        # For identifying k and a
+                        pars = [my_k, my_a]
+                    else
+                        # For identifying k and L
+                        pars = [my_a, my_k]
+                    end
 
                     Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
                     cost_vals[e][ia, ik] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
@@ -2741,6 +2773,7 @@ function debug_output_jacobian_disturbance(expid::String, pars::Array{Float64,1}
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
     C = reshape(η[nx+1:end], (n_out, n_tot))
+    @warn "WARNING: This way of defining C is incorrect whenever disturbance model is parametrized. Should use dmdl.Cd instead, but not obvisous how to do that in this code, since no dmdl2 is defined"
 
     dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
     XWm = simulate_noise_process_mangled(dmdl, Zm)
