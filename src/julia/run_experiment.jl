@@ -2357,21 +2357,23 @@ function gridsearch_k_1distsens(expid::String, N_trans::Int = 0)
         kref = free_dyn_pars_true[1]
         aref = 0.8
         δk = 0.1
-        δa = 0.01
-        # kvals = kref-3*δk:δk:kref+3δk
-        # avals = aref-3*δa:δa:aref+3δa
-        kvals = kref
-        avals = aref
+        δa = 0.05
+        # kvals = kref-10*δk:δk:kref+10δk
+        # avals = aref-10*δa:δa:aref+10δa
+        kvals = kref-10*δk:δk:kref+10δk
+        avals = aref-10*δa:δa:aref+10δa
+        # kvals = kref
+        # avals = aref
     else
         # For identifying k and L
         Lref = free_dyn_pars_true[1]
         kref = free_dyn_pars_true[2]
         δk = 0.1
         δL = 0.1
-        # kvals = kref-3*δk:δk:kref+3δk
-        # avals = Lref-3*δL:δL:Lref+3δL
-        kvals = kref
-        avals = Lref
+        kvals = kref-3*δk:δk:kref+3δk
+        avals = Lref-3*δL:δL:Lref+3δL
+        # kvals = kref
+        # avals = Lref
     end
 
     # cost_vals = [zeros(length(avals), length(kvals)) for e=1:E]
