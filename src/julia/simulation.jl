@@ -585,6 +585,135 @@ function pendulum_sensitivity_sans_g_with_dist_sens_2(Φ::Float64, u::Function, 
     end
 end
 
+function pendulum_sensitivity_sans_g_with_dist_sens_3(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # the residual function
+        function f!(res, dx, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = dx[1] - x[4] + 2dx[6]*x[1]
+            res[2] = dx[2] - x[5] + 2dx[6]*x[2]
+            res[3] = m*dx[4] - dx[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*dx[5] - dx[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
+            # Sensitivity with respect to m
+            res[8]  = -x[11] + dx[8] + 2x[1]*dx[13] + 2x[8]*dx[6]
+            res[9]  = -x[12] + dx[9] + 2x[2]*dx[13] + 2x[9]*dx[6]
+            res[10] = 2k*x[11]*abs(x[4]) - x[1]*dx[10] + m*dx[11] - x[8]*dx[3] + dx[4]
+            res[11] = 2k*x[12]*abs(x[5]) - x[2]*dx[10] + m*dx[12] - x[9]*dx[3] + g + dx[5]
+            res[12] = -2x[8]*x[1] - 2x[9]*x[2]
+            res[13] = x[11]*x[1] + x[12]*x[2] + x[8]*x[4] + x[9]*x[5]
+            res[14] = x[14] - (x[1]*x[9] - x[2]*x[8])/(L^2)
+
+            # Sensitivity with respect to L
+            res[15]  = -x[18] + dx[15] + 2x[1]*dx[20] + 2x[15]*dx[6]
+            res[16]  = -x[19] + dx[16] + 2x[2]*dx[20] + 2x[16]*dx[6]
+            res[17] = 2k*x[18]*abs(x[4]) - x[1]*dx[17] + m*dx[18] - x[15]*dx[3]
+            res[18] = 2k*x[19]*abs(x[5]) - x[2]*dx[17] + m*dx[19] - x[16]*dx[3]
+            res[19] = -2x[15]*x[1] - 2x[16]*x[2] + 2L
+            res[20] = x[18]*x[1] + x[19]*x[2] + x[15]*x[4] + x[16]*x[5]
+            res[21] = x[21] - (x[1]*x[16] - x[2]*x[15])/(L^2)
+
+            # Sensitivity with respect to k
+            res[22]  = -x[25] + dx[22] + 2x[1]*dx[27] + 2x[22]*dx[6]
+            res[23]  = -x[26] + dx[23] + 2x[2]*dx[27] + 2x[23]*dx[6]
+            res[24] = 2k*x[25]*abs(x[4]) - x[1]*dx[24] + m*dx[25] - x[22]*dx[3] + abs(x[4])x[4]
+            res[25] = 2k*x[26]*abs(x[5]) - x[2]*dx[24] + m*dx[26] - x[23]*dx[3] + abs(x[5])x[5]
+            res[26] = -2x[22]*x[1] - 2x[23]*x[2]
+            res[27] = x[25]*x[1] + x[26]*x[2] + x[22]*x[4] + x[23]*x[5]
+            res[28] = x[28] - (x[1]*x[23] - x[2]*x[22])/(L^2)
+
+            # Sensitivty wrt first disturbance parameter
+            # (i.e. parameter corresponding to wt[2])
+            res[29] = 2dx[6]x[29] - x[32] + dx[29] + 2x[1]dx[34]
+            res[30] = 2dx[6]x[30] - x[33] + dx[30] + 2x[2]dx[34]
+            res[31] = -dx[3]x[29] + 2k*abs(x[4])*x[32] - x[1]*dx[31] + m*dx[32] - 2*wt[1]*wt[2]
+            res[32] = -dx[3]x[30] + 2k*abs(x[5])*x[33] - x[2]*dx[31] + m*dx[33]
+            res[33] = 2x[1]x[29] + 2x[2]x[30]
+            res[34] = x[4]x[29] + x[5]x[30] + x[1]x[32] + x[2]x[33]
+            # Sensitivity of angle of pendulum to disturbance parameter
+            # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
+            # L^2 (though they should be equal), is it fine to substitute L^2 here?
+            res[35] = x[35] - (x[1]*x[30] - x[2]*x[29])/(L^2)
+
+            # Sensitivty wrt second disturbance parameter
+            # (i.e. parameter corresponding to wt[3])
+            res[36] = 2dx[6]x[36] - x[39] + dx[36] + 2x[1]dx[41]
+            res[37] = 2dx[6]x[37] - x[40] + dx[37] + 2x[2]dx[41]
+            res[38] = -dx[3]x[36] + 2k*abs(x[4])*x[39] - x[1]*dx[38] + m*dx[39] - 2*wt[1]*wt[3]
+            res[39] = -dx[3]x[37] + 2k*abs(x[5])*x[40] - x[2]*dx[38] + m*dx[40]
+            res[40] = 2x[1]x[36] + 2x[2]x[37]
+            res[41] = x[4]x[36] + x[5]x[37] + x[1]x[39] + x[2]x[40]
+            # Sensitivity of angle of pendulum to disturbance parameter
+            # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
+            # L^2 (though they should be equal), is it fine to substitute L^2 here?
+            res[42] = x[42] - (x[1]*x[37] - x[2]*x[36])/(L^2)
+
+            # Sensitivty wrt third disturbance parameter
+            # (i.e. parameter corresponding to wt[4])
+            res[43] = 2dx[6]x[43] - x[46] + dx[43] + 2x[1]dx[48]
+            res[44] = 2dx[6]x[44] - x[47] + dx[44] + 2x[2]dx[48]
+            res[45] = -dx[3]x[43] + 2k*abs(x[4])*x[46] - x[1]*dx[45] + m*dx[46] - 2*wt[1]*wt[4]
+            res[46] = -dx[3]x[44] + 2k*abs(x[5])*x[47] - x[2]*dx[45] + m*dx[47]
+            res[47] = 2x[1]x[43] + 2x[2]x[44]
+            res[48] = x[4]x[43] + x[5]x[44] + x[1]x[46] + x[2]x[47]
+            # Sensitivity of angle of pendulum to disturbance parameter
+            # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
+            # L^2 (though they should be equal), is it fine to substitute L^2 here?
+            res[49] = x[49] - (x[1]*x[44] - x[2]*x[43])/(L^2)
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(Φ)
+        x2_0 = -L * cos(Φ)
+        dx3_0 = m*g/x2_0
+        dx4_0 = -g*tan(Φ) + (u0 + w0^2)/m
+
+        pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        pendp0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
+        sm0  = zeros(7)
+        smp0 = vcat(zeros(3), [-dx4_0/m, -g/m, 0., 0.])
+        sL0  = vcat([x1_0/L, x2_0/L], zeros(5))
+        sLp0 = vcat([0.,0., -dx3_0/L], zeros(4))
+        sk0  = zeros(7)
+        skp0 = zeros(7)
+        r0 = zeros(7)
+        rp0 = zeros(7)
+        # t0 = vcat([sin(Φ), -cos(Φ)], zeros(5))
+        # tp0 = vcat([0.,0.], [-dx3_0/L], zeros(4))
+        # if x1_0 != 0.0
+        #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(2x1_0*x2_0)], zeros(4))
+        # else
+        #     t0  = vcat([0.0, L/x2_0], zeros(5))
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(x2_0^2)], zeros(4))
+        # end
+
+        x0  = vcat(pend0, sm0, sL0, sk0, r0, r0, r0)
+        dx0 = vcat(pendp0, smp0, sLp0, skp0, rp0, rp0, rp0)
+        # x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(14))
+        # dx0 = vcat([0., 0., dx3_0, dx4_0], zeros(17))
+
+        dvars = repeat(vcat(fill(true, 6), [false]), 7)
+
+        r0 = zeros(length(x0))
+        f!(r0, dx0, x0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, dx0, dvars, r0)
+    end
+end
+
 function pendulum_sensitivity_sans_g_with_dist_sens_1(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
