@@ -1,5 +1,5 @@
 using LsqFit, LaTeXStrings, Dates, Interpolations
-# using StatsPlots # Commented out since it breaks 3d-plotting in Julia 1.5.3
+using StatsPlots # Commented out since it breaks 3d-plotting in Julia 1.5.3
 include("simulation.jl")
 include("noise_interpolation_multivar.jl")
 include("noise_generation.jl")
@@ -382,7 +382,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 100
+    E = 1
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -425,12 +425,6 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         return get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
     end
 
-    # Returns estimate of gradient of output
-    function get_proposed_jacobian(free_pars, isws, M_mean::Int=1)
-        jacYm = simulate_system_sens(exp_data, free_pars, M_mean, dist_par_inds, isws)[2]
-        return mean(jacYm, dims=2)
-    end
-
     get_gradient_estimate_p(free_pars, M_mean) = get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
     get_adjoint_estimate_p(free_pars, M_mean) = get_adjoint_sensitivity(exp_data, free_pars, M_mean, dist_par_inds, isws)
 
@@ -443,13 +437,12 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
-        @warn "Only using maxiters=100 right now"
+        @warn "Only using maxiters=200 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
+            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
             # perform_SGD_adam_new(get_adjoint_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
             # perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
         avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
-        @warn "Only used maxiters=100 right now"
 
         writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
         writedlm(joinpath(data_dir, "tmp/backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
@@ -1016,6 +1009,71 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
+function estimate_gradient_directions(expid::String, N_trans::Int = 0)
+    start_datetime = now()
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    u = exp_data.u
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    pars_true = [0.3, 6.25, 6.25, 0.8, 16, 1]
+    pars_to_try = [pars_true, 1.1*pars_true, 1.2*pars_true, 1.3*pars_true]
+    num_tests = length(pars_to_try)
+
+    if !isdir(joinpath(data_dir, "tmp/"))
+        mkdir(joinpath(data_dir, "tmp/"))
+    end
+
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+
+    function get_gradient_estimate_base(y, dummy_input, free_pars)
+        Yb, jacB = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> h_comp
+        # Doesn't need to use different noise realizations for estimate of output and estiamte of jacobian since output is deterministic
+
+        return get_cost_gradient(y, Yb[:,1:1], [jacB], N_trans)
+    end
+    # Returns estimate of gradient of cost function
+    # M_mean specifies over how many realizations the gradient estimate is computed
+    function get_gradient_estimate(y, free_pars, isws, M_mean::Int=1)
+        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean, dist_par_inds, isws)
+
+        # Uses different noise realizations for estimate of output and estiamte of jacobian
+        return get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
+    end
+    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
+
+    writedlm(joinpath("data/results/gradient_dirs/pars_tried.csv"), transpose(hcat(pars_to_try...)), ',')
+    writedlm(joinpath("data/results/gradient_dirs/$(expid).csv"), ["Name of this file is the experiment ID that was used"], ',')
+
+    gradPs = zeros(length(pars_to_try), length(pars_true))
+    gradBs = zeros(length(pars_to_try), length(pars_true))
+    # gradB = Array{Float64}(undef, 3,1)
+    # gradP = Array{Float64}(undef, 3,1)
+
+    for (ind, pars) in enumerate(pars_to_try)
+        # gradB = zeros(3,1)
+        gradBs[ind,:] = get_gradient_estimate_base(Y[:,1], zeros(3,1), pars)
+        gradPs[ind,:] = get_gradient_estimate_p(pars, 1)#100)
+        # writedlm(joinpath(data_dir, "tmp/grad_dir_backup_b_$(Dates.format(now(), "yymdHMS")).csv"), gradB, ',')
+        # writedlm(joinpath(data_dir, "tmp/grad_dir_backup_p_$(Dates.format(now(), "yymdHMS")).csv"), gradP, ',')
+        writedlm(joinpath(data_dir, "tmp/grad_dir_backup_b_$(ind).csv"), gradBs[ind,:], ',')
+        writedlm(joinpath(data_dir, "tmp/grad_dir_backup_p_$(ind).csv"), gradPs[ind,:], ',')
+    end
+
+    writedlm(joinpath("data/results/gradient_dirs/gradBs.csv"), gradBs, ',')
+    writedlm(joinpath("data/results/gradient_dirs/gradPs.csv"), gradPs, ',')
+
+    return pars_to_try, gradBs, gradPs
+end
+
 function compute_forward_difference_derivative(x_vals::Array{Float64,1}, y_vals::Array{Float64,1})
     @assert (length(x_vals) == length(y_vals)) "x_vals and y_vals must contain the same number of elements"
     diff = zeros(size(y_vals))
@@ -2990,5 +3048,5 @@ function plot_boxplots(θs, θ0, labels)
     )
 
     hline!(p, [θ0], label = L"\theta_0", linestyle = :dot, linecolor = :gray)
-    savefig("C:/Users/robbj/OneDrive - KTH/Work/DLL/Files_from_Alsvin/correct_forward_sens_tiny_experiment/mexp.png")
+    savefig("C:\\Programming\\dae-param-est\\src\\julia\\data\\results\\50k_hugest\\boxplot.png")
 end
