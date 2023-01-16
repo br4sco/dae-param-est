@@ -249,8 +249,8 @@ if model_id == PENDULUM
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0, 0.1]
-    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0]#, 0.1]
+    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_2#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = pendulum_adjoint
 elseif model_id == MOH_MDL
@@ -282,7 +282,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42]]#, x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 elseif model_id == MOH_MDL
     f(x::Array{Float64,1}) = x[2]
     f_sens(x::Array{Float64,1}) = [x[4]]
@@ -554,8 +554,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
     # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
-    free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))             # Whole a-vector and all but first element of c-vector unknown
-    # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))             # Whole a-vector unknown
+    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))             # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS)
+    free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))             # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
@@ -564,7 +564,10 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # dist_par_bounds = Array{Float64}(undef, 0, 2)
     dist_par_bounds = [0 Inf; 0 Inf; -Inf Inf]
     function get_all_ηs(free_pars::Array{Float64, 1})
-        all_η = η_true
+        # If copy() is not used here, some funky stuff that I don't fully understand happens.
+        # I think essentially η_true stops being defined after function returns, so
+        # setting all_η to its value doesn't behave quite as I expected
+        all_η = copy(η_true)
         # Fetches user-provided values for free disturbance parameters only
         all_η[free_par_inds] = free_pars[num_dyn_pars+1:end]
         return all_η
@@ -1010,7 +1013,6 @@ end
 
 # ======================= DEBUGGING FUNCTIONS ========================
 function estimate_gradient_directions(expid::String, N_trans::Int = 0)
-    start_datetime = now()
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     u = exp_data.u
@@ -1025,7 +1027,7 @@ function estimate_gradient_directions(expid::String, N_trans::Int = 0)
     dist_par_inds = W_meta.free_par_inds
 
     pars_true = [0.3, 6.25, 6.25, 0.8, 16, 1]
-    pars_to_try = [pars_true, 1.1*pars_true, 1.2*pars_true, 1.3*pars_true]
+    pars_to_try = [0.7*pars_true, 0.8*pars_true, 0.9*pars_true, pars_true, 1.1*pars_true, 1.2*pars_true, 1.3*pars_true]
     num_tests = length(pars_to_try)
 
     if !isdir(joinpath(data_dir, "tmp/"))
@@ -1061,7 +1063,7 @@ function estimate_gradient_directions(expid::String, N_trans::Int = 0)
     for (ind, pars) in enumerate(pars_to_try)
         # gradB = zeros(3,1)
         gradBs[ind,:] = get_gradient_estimate_base(Y[:,1], zeros(3,1), pars)
-        gradPs[ind,:] = get_gradient_estimate_p(pars, 1)#100)
+        gradPs[ind,:] = get_gradient_estimate_p(pars, 100)
         # writedlm(joinpath(data_dir, "tmp/grad_dir_backup_b_$(Dates.format(now(), "yymdHMS")).csv"), gradB, ',')
         # writedlm(joinpath(data_dir, "tmp/grad_dir_backup_p_$(Dates.format(now(), "yymdHMS")).csv"), gradP, ',')
         writedlm(joinpath(data_dir, "tmp/grad_dir_backup_b_$(ind).csv"), gradBs[ind,:], ',')
@@ -1082,6 +1084,49 @@ function compute_forward_difference_derivative(x_vals::Array{Float64,1}, y_vals:
     end
     diff[end] = diff[end-1]
     return diff
+end
+
+# Checks if analytical sensitivity of w wrt to disturbance parameter matches
+# the numerically obtained approximations
+function test_disturbance_sensitivities(expid::String)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    u = exp_data.u
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    # For full pendulum model with one unknown disturbance parameter
+    my_δ = 0.0001
+    free_pars1 = [0.3, 6.25, 6.25, 1.0]
+    free_pars2 = [0.3, 6.25, 6.25, 1.0+my_δ]
+
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+    η1 = exp_data.get_all_ηs(free_pars1)
+    η2 = exp_data.get_all_ηs(free_pars2)
+
+    dmdl1 = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η1, nx, n_out), δ, dist_par_inds)
+    dmdl2 = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η2, nx, n_out), δ, dist_par_inds)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm1 = simulate_noise_process_mangled(dmdl1, Zm)
+    XWm2 = simulate_noise_process_mangled(dmdl2, Zm)
+    wmm1(m::Int) = mk_noise_interp(dmdl1.Cd, XWm1, m, δ)
+    wmm2(m::Int) = mk_noise_interp(dmdl2.Cd, XWm2, m, δ)
+
+    times = 0.0:0.1:N*δ
+    w1s = [wmm1(1)(t)[1] for t=times]
+    w2s = [wmm2(1)(t)[1] for t=times]
+    wdiffs_analytical = [wmm1(1)(t)[2] for t=times]
+    wdiffs = (w2s-w1s)./my_δ
+
+    p = plot(wdiffs)
+    plot!(p, wdiffs_analytical)
 end
 
 function test_adjoint_method(exp_id::String)
