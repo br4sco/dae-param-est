@@ -253,10 +253,10 @@ if model_id == PENDULUM
     const free_dyn_pars_true = [L, g]#[m, L, g, k] # True values of free parameters
     get_all_θs(pars::Array{Float64,1}) = [m, pars[1], pars[2], k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+    dyn_par_bounds = [0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [1.0]#, 0.1, 0.1]
-    model_sens_to_use = pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
+    model_sens_to_use = pendulum_sensitivity_full#pendulum_sensitivity_sans_g#_with_dist_sens_2#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = pendulum_adjoint
 elseif model_id == MOH_MDL
@@ -565,9 +565,9 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
-    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
+    # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector aunknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
@@ -1017,6 +1017,35 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
             end
         end
     end
+
+    # range1 = -step_num*step_sizes[1]:step_sizes[1]:step_num*step_sizes[1]
+    # range2 = -step_num*step_sizes[2]:step_sizes[2]:step_num*step_sizes[2]
+    # base_par_vals[:, 1] = range1
+    # base_par_vals[:, 2] = range2
+    # vec1 = [1,1]
+    # vec2 = [1,-1]
+
+    # if nθ == 2
+    #     for (i1, diff1) = enumerate(range1)
+    #         for (i2, diff2) = enumerate(range2)
+    #             pars = pars0 + diff1*vec1 + diff2*vec2
+    #             # DEBUG
+    #             if mod(i1+i2,50) == 0
+    #                 @info "Running iteration iwth i1=$i1, i2=$i2"
+    #             end
+
+    #             Ys = solvew(exp_data.u, t -> zeros(n_out), pars, N) |> h
+    #             # NOTE: Different rows of base_cost_vals should correspond to
+    #             # different values of parameter 2, while different columns should
+    #             # correspond to different values of parameter 1. This makes it
+    #             # so that if we make a surface plot by calling
+    #             # plot(params1, params2, base_cost_vals)
+    #             # then we will get the correct surface plot
+    #             # One can view this as: x-param1, y-param2
+    #             base_cost_vals[i2,i1] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
+    #         end
+    #     end
+    # end
 
     # In base_cost_vals, columns (x-axis) correspond to different values of the second parameter
     return base_par_vals, base_cost_vals, debug_store
@@ -1684,7 +1713,7 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     trace_proposed = [[Float64[]] for e=1:E]
     trace_costs = [Float64[] for e=1:E]
     grad_trace  = [[Float64[]] for e=1:E]
-    for e=1:E
+    for e=[]#1:E
         get_gradient_estimate_p(pars, M_mean) = get_gradient_estimate(Y[:,e], δ, pars, isws, M_mean)
         get_gradient_estimate_p_debug(pars, M_mean) = get_gradient_estimate_debug(Y[:,e], δ, pars, isws, M_mean)
         jacobian_model(x, p) = get_proposed_jacobian(p, isws, M)
@@ -1712,8 +1741,9 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     # prop_par_vals1 = 0.1:0.2:opt_pars_proposed[1,1]+0.4   # For m_true = 0.3
     # prop_par_vals2 = (4.25-0.6):0.2:opt_pars_proposed[2,1]+0.4
     prop_par_vals1 = 0.2:0.05:0.6   # For m_true = 0.3
+    prop_par_vals2 = 9.41:0.1:10.21
     # prop_par_vals2 = (4.25-0.6):0.2:(9.81+0.4)
-    prop_par_vals2 = 6.0:0.05:6.40
+    # prop_par_vals2 = 6.0:0.05:6.40
     # prop_par_vals1 = 0.1:0.1:5.0
     # prop_par_vals2 = [4.25]
     prop_cost_vals = [zeros(length(prop_par_vals1), length(prop_par_vals2)) for e=1:E]
