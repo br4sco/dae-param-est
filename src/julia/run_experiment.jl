@@ -987,54 +987,27 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
         base_cost_vals = zeros(2*step_num+1,2*step_num+1)
     end
 
-    if nθ == 1
-        for (i,par) in enumerate(base_par_vals)
-            Ys = solvew(exp_data.u, t -> zeros(n_out), [par], N) |> h
-            base_cost_vals[i] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
-            debug_store[:,i] = Ys
-            println("par value: $par, i: $i")
-            # p = plot(Ys)
-            # display(p)
-        end
-    elseif nθ == 2
-        for (i1, par1) in enumerate(base_par_vals[:,1])
-            for (i2, par2) in enumerate(base_par_vals[:,2])
+    # # ------------- Plotting with parameter-aligned axes -------------------
 
-                # DEBUG
-                if mod(i1+i2,50) == 0
-                    @info "Running iteration iwth i1=$i1, i2=$i2"
-                end
+    # if nθ == 1
+    #     for (i,par) in enumerate(base_par_vals)
+    #         Ys = solvew(exp_data.u, t -> zeros(n_out), [par], N) |> h
+    #         base_cost_vals[i] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
+    #         debug_store[:,i] = Ys
+    #         println("par value: $par, i: $i")
+    #         # p = plot(Ys)
+    #         # display(p)
+    #     end
+    # elseif nθ == 2
+    #     for (i1, par1) in enumerate(base_par_vals[:,1])
+    #         for (i2, par2) in enumerate(base_par_vals[:,2])
 
-                Ys = solvew(exp_data.u, t -> zeros(n_out), [par1, par2], N) |> h
-                # NOTE: Different rows of base_cost_vals should correspond to
-                # different values of parameter 2, while different columns should
-                # correspond to different values of parameter 1. This makes it
-                # so that if we make a surface plot by calling
-                # plot(params1, params2, base_cost_vals)
-                # then we will get the correct surface plot
-                # One can view this as: x-param1, y-param2
-                base_cost_vals[i2,i1] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
-            end
-        end
-    end
-
-    # range1 = -step_num*step_sizes[1]:step_sizes[1]:step_num*step_sizes[1]
-    # range2 = -step_num*step_sizes[2]:step_sizes[2]:step_num*step_sizes[2]
-    # base_par_vals[:, 1] = range1
-    # base_par_vals[:, 2] = range2
-    # vec1 = [1,1]
-    # vec2 = [1,-1]
-
-    # if nθ == 2
-    #     for (i1, diff1) = enumerate(range1)
-    #         for (i2, diff2) = enumerate(range2)
-    #             pars = pars0 + diff1*vec1 + diff2*vec2
     #             # DEBUG
     #             if mod(i1+i2,50) == 0
     #                 @info "Running iteration iwth i1=$i1, i2=$i2"
     #             end
 
-    #             Ys = solvew(exp_data.u, t -> zeros(n_out), pars, N) |> h
+    #             Ys = solvew(exp_data.u, t -> zeros(n_out), [par1, par2], N) |> h
     #             # NOTE: Different rows of base_cost_vals should correspond to
     #             # different values of parameter 2, while different columns should
     #             # correspond to different values of parameter 1. This makes it
@@ -1047,8 +1020,66 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
     #     end
     # end
 
+
+    # ------------- Plotting with custom aligned axes -------------------
+
+    range1 = -step_num*step_sizes[1]:step_sizes[1]:step_num*step_sizes[1]
+    range2 = -step_num*step_sizes[2]:step_sizes[2]:step_num*step_sizes[2]
+    base_par_vals[:, 1] = range1
+    base_par_vals[:, 2] = range2
+    # vec1 = [1,1]./norm([1,1])
+    # vec2 = [1,-1]./norm([1,-1])
+    # vec1 = [190, 261]./norm([190, 261])
+    # vec2 = [-vec1[1], vec1[2]]
+    vec1 = [6.25, 9.81]./norm([6.25, 9.81])
+    vec2 = [-vec1[1], vec1[2]]
+    my_len = 0
+    if nθ == 2
+        for (i1, diff1) = enumerate(range1)
+            for (i2, diff2) = enumerate(range2)
+                pars = pars0 + diff1*vec1 + diff2*vec2
+                # DEBUG
+                if mod(i1+i2,50) == 0
+                    @info "Running iteration iwth i1=$i1, i2=$i2"
+                end
+                Ys = solvew(exp_data.u, t -> zeros(n_out), pars, N) |> h
+                my_len = length(Ys)
+                # NOTE: Different rows of base_cost_vals should correspond to
+                # different values of parameter 2, while different columns should
+                # correspond to different values of parameter 1. This makes it
+                # so that if we make a surface plot by calling
+                # plot(params1, params2, base_cost_vals)
+                # then we will get the correct surface plot
+                # One can view this as: x-param1, y-param2
+                base_cost_vals[i2,i1] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
+            end
+        end
+        # Plotting the outputs instead
+        Ys_log1 = fill(NaN, my_len, length(range1))
+        Ys_log2 = fill(NaN, my_len, length(range1))
+        
+        vec3 = [1,1]./norm([1,1])
+        vec4 = [1,-1]./norm([1,-1])
+        for (i1, diff1) = enumerate(range1)
+                diff2 = range2[11]
+                pars = pars0 + diff1*vec1 + diff2*vec2
+                pars2 = pars0 + diff1*vec3 + diff2*vec4
+                # DEBUG
+                if mod(i1,50) == 0
+                    @info "Running iteration iwth i1=$i1, i2=$i2"
+                end
+
+                Ys = solvew(exp_data.u, t -> zeros(n_out), pars, N) |> h
+                Ys2 = solvew(exp_data.u, t -> zeros(n_out), pars2, N) |> h
+                Ys_log1[:,i1] = Ys
+                Ys_log2[:,i1] = Ys2
+            end
+    end
+    # Use: plot(base_par_vals[:,1], base_par_vals[:,2], base_cost_vals, st=:surface)
+
     # In base_cost_vals, columns (x-axis) correspond to different values of the second parameter
-    return base_par_vals, base_cost_vals, debug_store
+    # return base_par_vals, base_cost_vals, debug_store
+    return base_par_vals, base_cost_vals, debug_store, Ys_log1, Ys_log2, Y[1:N+1]
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
