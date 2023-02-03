@@ -59,7 +59,6 @@ const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
 const Q = 1000          # Number of conditional samples stored per interval
 
-# @warn "Running with M = 100 instead of default"
 M_rate_max = 4#100#8#4#16
 # max_allowed_step = 1.0  # Maximum magnitude of step that SGD is allowed to take
 # M_rate(t) specifies over how many realizations the output jacobian estimate
@@ -245,12 +244,12 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 
 if model_id == PENDULUM
     const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0]#, 0.1]
-    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_2#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 0.1]
+    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = pendulum_adjoint
 elseif model_id == MOH_MDL
@@ -282,7 +281,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42]]#, x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 elseif model_id == MOH_MDL
     f(x::Array{Float64,1}) = x[2]
     f_sens(x::Array{Float64,1}) = [x[4]]
@@ -382,7 +381,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1
+    E = 100
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -437,9 +436,9 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
-        @warn "Only using maxiters=200 right now"
+        @warn "Only using maxiters=100 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
+            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
             # perform_SGD_adam_new(get_adjoint_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
             # perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
         avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
@@ -554,15 +553,17 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
     # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
-    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))             # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS)
-    free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))             # Whole a-vector unknown
+    free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
+    # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
+    # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
+    # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
     # dist_par_bounds = Array{Float64}(undef, 0, 2)
-    dist_par_bounds = [0 Inf; 0 Inf; -Inf Inf]
+    dist_par_bounds = [-Inf Inf; -Inf Inf; -Inf Inf]#[0 Inf; 0 Inf; -Inf Inf]
     function get_all_ηs(free_pars::Array{Float64, 1})
         # If copy() is not used here, some funky stuff that I don't fully understand happens.
         # I think essentially η_true stops being defined after function returns, so
@@ -940,6 +941,7 @@ function write_results_to_file(path::String, opt_pars_baseline, opt_pars_propose
     writedlm(path*"proposed_durations.csv", Dates.value.(durations[3]), ',')
 end
 
+# NOTE: Only generate baseline cost function
 function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::Array{Float64,1}, step_num::Int, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
@@ -1009,6 +1011,42 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
 
     # In base_cost_vals, columns (x-axis) correspond to different values of the second parameter
     return base_par_vals, base_cost_vals, debug_store
+end
+
+# NOTE: Only genererates proposed cost function
+function sample_cost_func(expid::String, par_vec::Array{Array{Float64,1},1}, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    # N = 200
+    # @warn "Using N=200 instead of default!!!!!!!!!!"
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # === Computing cost function of baseline model
+    base_cost_vals = zeros(length(par_vec))
+    prop_cost_vals = zeros(length(par_vec))
+    for (i,pars) in enumerate(par_vec)
+        Ys = solvew(exp_data.u, t -> zeros(n_out), pars, N) |> h
+        base_cost_vals[i] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
+        Yms = simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm)
+        prop_cost_vals[i] = first(mean((Y[N_trans+1:N+1, 1].-mean(Yms, dims=2)[N_trans+1:end]).^2, dims=1))
+    end
+
+    # In base_cost_vals, columns (x-axis) correspond to different values of the second parameter
+    return par_vec, base_cost_vals, prop_cost_vals
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
@@ -1434,8 +1472,8 @@ function simulate_experiment_debug(expid::String, pars::Array{Float64, 1})
 end
 
 function read_from_backup(dir::String, E::Int)
-    # sample = readdlm(joinpath(dir, "backup_baseline_e1.csv"), ',')
-    sample = readdlm(joinpath(dir, "backup_proposed_e1.csv"), ',')
+    sample = readdlm(joinpath(dir, "backup_baseline_e1.csv"), ',')
+    # sample = readdlm(joinpath(dir, "backup_proposed_e1.csv"), ',')
     k = length(sample)
     opt_pars_baseline = zeros(k, E)
     opt_pars_proposed = zeros(k, E)
@@ -2395,39 +2433,56 @@ function gridsearch_debug(expid::String, N_trans::Int = 0)
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
-    kref = free_dyn_pars_true[1]
-    aref = 0.8
-    δk = 0.1
-    δa = 0.01
+    num = 10
 
-    kvals = kref-1*δk:δk:kref+1δk
-    avals = aref-1*δa:δa:aref+1δa
+    cref = 0.6
+    δc   = 0.05
+    cvals = cref-num*δc:δc:cref+num*δc
+    # cvals = 0.0:0.1:cref-(num-1)*δc
+    # cvals = 0.0:0.2:1.0
 
-    cost_vals = [zeros(length(avals)*length(kvals)) for e=1:E]
-    all_pars = zeros(num_free_pars, length(avals)*length(kvals))
+    # @warn "Not using default M here"
+    # my_M = 100
+
+    Ym_log = [zeros(5000, M) for i=1:length(cvals)]
+    cost_vals = [zeros(length(cvals)) for e=1:E]
+    alt_cost_vals = [zeros(length(cvals)) for e=1:E]
     min_ind = fill(-1, (E,))
     min_cost = fill(Inf, (E,))
-    ind = 1
     time_start = now()
-    for (ia, my_a) in enumerate(avals)
-        for (ik, my_k) in enumerate(kvals)
-            for e = 1:E
-                pars = [my_k, my_a]
-                all_pars[:,ind] = pars
-                Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
-                cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-                if cost_vals[e][ind] < min_cost[e]
-                    min_ind[e] = ind
-                    min_cost[e] = cost_vals[e][ind]
-                end
-                @info "Completed computing cost for e = $e, ia=$ia, ik=$ik "
+    # for (cind, my_c) in enumerate(cvals)
+    #     # Ym = mean(simulate_system(exp_data, [my_c], M, dist_sens_inds, isws, Zm), dims=2)
+    #     Ym_log[cind] = simulate_system(exp_data, [my_c], M, dist_sens_inds, isws, Zm)
+    #     Ym = mean(Ym_log[cind], dims=2)
+    #     for e = 1:E
+    #         cost_vals[e][cind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+    #         if cost_vals[e][cind] < min_cost[e]
+    #             min_ind[e] = cind
+    #             min_cost[e] = cost_vals[e][cind]
+    #         end
+    #     end
+    #     @info "Completed computing cost for cind=$cind, c=$my_c "
+    # end
+
+    new_Y = simulate_system(exp_data, [1.0], 1, dist_sens_inds, isws, Zm)
+    for (cind, my_c) in enumerate(cvals)
+        # Ym = mean(simulate_system(exp_data, [my_c], M, dist_sens_inds, isws, Zm), dims=2)
+        Ym_log[cind] = simulate_system(exp_data, [my_c], M, dist_sens_inds, isws, Zm)
+        Ym = mean(Ym_log[cind], dims=2)
+        for e = 1:E
+            cost_vals[e][cind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+            alt_cost_vals[e][cind] = mean((new_Y[N_trans+1:end].-Ym[N_trans+1:end]).^2)
+            if cost_vals[e][cind] < min_cost[e]
+                min_ind[e] = cind
+                min_cost[e] = cost_vals[e][cind]
             end
-            ind += 1
         end
+        @info "Completed computing cost for cind=$cind, c=$my_c "
     end
+
     duration = now()-time_start
 
-    return all_pars, cost_vals, min_ind, duration
+    return cvals, cost_vals, min_ind, duration, Ym_log, alt_cost_vals
 end
 
 function gridsearch_k_1distsens(expid::String, N_trans::Int = 0)

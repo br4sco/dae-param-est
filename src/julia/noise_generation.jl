@@ -290,7 +290,7 @@ function simulate_noise_process_mangled(
             # # NOTE: VERSION: The line above here used to be:
             # y, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv], t, x0=mdl.x0)    # Input signal wasn't transposed
             # # Changed on 09-08-2022 after it not being used for a long time,
-            # # because suddently transpose was needed. Not sure why (edit: because new version of Julia, but don't know more)
+            # # because suddenly transpose was needed. Not sure why (edit: because new version of Julia, but don't know more)
             for i=1:N+1
                 x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[:,i]
                 # # NOTE: VERSION: The line above here used to be:
