@@ -243,13 +243,13 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    const free_dyn_pars_true = Array{Float64}(undef, 0)#[m, L, k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    get_all_θs(pars::Array{Float64,1}) = [m, L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]
+    dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 0.1]
-    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [0.1, 1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 0.1]
+    model_sens_to_use = pendulum_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = pendulum_adjoint
 elseif model_id == MOH_MDL
@@ -281,7 +281,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]#, x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 elseif model_id == MOH_MDL
     f(x::Array{Float64,1}) = x[2]
     f_sens(x::Array{Float64,1}) = [x[4]]
@@ -381,7 +381,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 100
+    E = 1
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -389,8 +389,8 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     trace_base = [[pars0] for e=1:E]
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
-    # @warn "Not running baseline identification now"
-    for e=1:E
+    @warn "Not running baseline identification now"
+    for e=[]#1:E
         time_start = now()
         # HACK: Uses trace returned due to hacked LsqFit package
         baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
@@ -431,17 +431,20 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     avg_pars_proposed = zeros(length(pars0), E)
     trace_proposed = [ [Float64[]] for e=1:E]
     trace_gradient = [ [Float64[]] for e=1:E]
+    trace_step     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
+    trace_lrate     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
     proposed_durations = Array{Millisecond, 1}(undef, E)
     # @warn "Not running proposed identification now"
     for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"
-        opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
-            # perform_SGD_adam_new(get_adjoint_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
-            # perform_SGD_adam(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
-        avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
+        # opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
+        #     perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)
+        # DEBUG
+        opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e], trace_step[e], trace_lrate[e] =
+            perform_SGD_adam_debug(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)#0)
+        # avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
 
         writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
         writedlm(joinpath(data_dir, "tmp/backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
@@ -460,7 +463,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # Call Dates.value[setup_duration] or e.g. Dates.value.(baseline_durations) to convert Millisecond to Int
     durations = (setup_duration, baseline_durations, proposed_durations)
-    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, durations
+    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, trace_lrate, durations
 end
 
 function get_outputs(expid::String, pars0::Array{Float64,1})
@@ -2408,6 +2411,79 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
     return all_pars, cost_vals, min_ind, duration
 end
 
+function gridsearch_3distsens(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    # @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    a1ref = 0.8
+    a2ref = 16
+    cref  = 0.6
+    δa1 = 0.02
+    δa2 = 0.2
+    δc  = 0.02
+
+    a1vals = a1ref-4δa1:δa1:a1ref+4δa1
+    a2vals = a2ref-4δa2:δa2:a2ref+4δa2
+    cvals  =   cref-4δc:δc:cref+4δc
+    # a1vals = a1ref
+    # a2vals = a2ref
+    # cvals  = cref
+
+    cost_vals = [zeros(length(a1vals)*length(a2vals)*length(cvals)) for e=1:E]
+    all_pars = zeros(3, length(a1vals)*length(a2vals)*length(cvals))
+    min_ind = fill(-1, (E,))
+    min_cost = fill(Inf, (E,))
+    ind = 1
+    time_start = now()
+    try
+        for (ia1, my_a1) in enumerate(a1vals)
+            for (ia2, my_a2) in enumerate(a2vals)
+                for (ic, my_c) in enumerate(cvals)
+                    for e = 1:E
+                        pars = [my_a1, my_a2, my_c]
+                        all_pars[:,ind] = pars
+                        Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                        cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                        if cost_vals[e][ind] < min_cost[e]
+                            min_ind[e] = ind
+                            min_cost[e] = cost_vals[e][ind]
+                        end
+                        @info "Completed computing cost for e = $e, ia1=$ia2, ia2=$ia1, ic = $ic"
+                    end
+                    ind += 1
+                end
+            end
+        end
+    catch e
+        bt = catch_backtrace()
+        msg = sprint(showerror, e, bt)
+        @warn "Terminating prematurely due to error"
+        println(msg)
+    end
+    duration = now()-time_start
+
+    return all_pars, cost_vals, min_ind, duration
+end
+
 function gridsearch_debug(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
@@ -3022,19 +3098,24 @@ function debug_input_effect(expid::String, N_trans::Int = 0)
     return Ys
 end
 
+# Also adds time-varying beta_1, dependent on the new hyper-parameter λ
+#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# TODO: IT WAS A BAD IDEA TO DELETE PREVIOUS SGD DEBUD, MANY DEBUG FUNCTIONS USE IT!!!! ADD IT BACK FROM OLD COMMIT!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 function perform_SGD_adam_debug(
-    get_grad_estimate_debug::Function,
+    get_grad_estimate::Function,
     pars0::Array{Float64,1},                        # Initial guess for parameters
     bounds::Array{Float64, 2},                      # Parameter bounds
-    learning_rate::Function=learning_rate_vec;
-    tol::Float64=1e-4,
+    learning_rate::Function=learning_rate_vec_red;
+    tol::Float64=1e-6,
     maxiters=200,
     verbose=false,
-    betas::Array{Float64,1} = [0.9, 0.999])   # betas are the decay parameters of moment estimates
+    betas::Array{Float64,1} = [0.9, 0.999],
+    λ = 0.5)   # betas are the decay parameters of moment estimates
     # betas::Array{Float64,1} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
 
     eps = 0.#1e-8
-    q = 20
+    q = 20# TODO: This is a little arbitrary, but because of low tolerance, the stopping criterion is never reached anyway
     last_q_norms = fill(Inf, q)
     running_criterion() = mean(last_q_norms) > tol
     s = zeros(size(pars0)) # First moment estimate
@@ -3042,35 +3123,92 @@ function perform_SGD_adam_debug(
 
     t = 1
     pars = pars0
-    cost_vals = Float64[]
     trace = [pars]
-    grad_norms = Float64[]
     grad_trace = []
-    while t <= maxiters
-        grad_est, cost_val = get_grad_estimate_debug(pars, M_rate(t))
-        push!(cost_vals, cost_val)
-        push!(grad_norms, norm(grad_est))
-        s = betas[1]*s + (1-betas[1])*grad_est
+    step_trace = []
+    lrate_trace = []
+    margin = 0#10
+    while t <= maxiters+margin
+        grad_est = get_grad_estimate(pars, M_rate(t))
+
+        beta1t = betas[1]*(λ^(t-1))
+        s = beta1t*s + (1-beta1t)*grad_est
         r = betas[2]*r + (1-betas[2])*(grad_est.^2)
-        shat = s/(1-betas[1]^t)
+        shat = s/(1-betas[1]^t) # Seems like betas[1] should be used instead of beta1t here
         rhat = r/(1-betas[2]^t)
-        step = -learning_rate(t, norm(grad_est)).*shat./(sqrt.(rhat).+eps)
+        unscaled_step = -shat./(sqrt.(rhat).+eps)
+        step = learning_rate(t, norm(grad_est)).*unscaled_step
+        # step = -learning_rate_vec_red(t, norm(grad_est)).*shat./(sqrt.(rhat).+eps)
         # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         # running_criterion(grad_est) || break
         if verbose
-            println("Iteration $t, average gradient norm $(mean(last_q_norms)), gradient $(grad_est) and step $(step) with parameter estimate $pars")
+            println("Iteration $t, average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
         end
         running_criterion() || break
-        pars = pars + step
-        project_on_bounds!(pars, bounds)
-        push!(trace, pars)
+        if t > margin
+            pars = pars + step
+            project_on_bounds!(pars, bounds)
+            push!(trace, pars)
+        end
         push!(grad_trace, grad_est)
+        push!(step_trace, step)
+        push!(lrate_trace, learning_rate(t, norm(grad_est)).*unscaled_step)
         # (t-1)%10+1 maps t to a number between 1 and 10 (inclusive)
         last_q_norms[(t-1)%q+1] = norm(grad_est)
         t += 1
     end
-    return pars, trace, cost_vals, grad_trace
+    return pars, trace, grad_trace, step_trace, lrate_trace
 end
+
+# function perform_SGD_adam_debug(
+#     get_grad_estimate_debug::Function,
+#     pars0::Array{Float64,1},                        # Initial guess for parameters
+#     bounds::Array{Float64, 2},                      # Parameter bounds
+#     learning_rate::Function=learning_rate_vec;
+#     tol::Float64=1e-4,
+#     maxiters=200,
+#     verbose=false,
+#     betas::Array{Float64,1} = [0.9, 0.999])   # betas are the decay parameters of moment estimates
+#     # betas::Array{Float64,1} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
+#
+#     eps = 0.#1e-8
+#     q = 20
+#     last_q_norms = fill(Inf, q)
+#     running_criterion() = mean(last_q_norms) > tol
+#     s = zeros(size(pars0)) # First moment estimate
+#     r = zeros(size(pars0)) # Second moment estimate
+#
+#     t = 1
+#     pars = pars0
+#     cost_vals = Float64[]
+#     trace = [pars]
+#     grad_norms = Float64[]
+#     grad_trace = []
+#     while t <= maxiters
+#         grad_est, cost_val = get_grad_estimate_debug(pars, M_rate(t))
+#         push!(cost_vals, cost_val)
+#         push!(grad_norms, norm(grad_est))
+#         s = betas[1]*s + (1-betas[1])*grad_est
+#         r = betas[2]*r + (1-betas[2])*(grad_est.^2)
+#         shat = s/(1-betas[1]^t)
+#         rhat = r/(1-betas[2]^t)
+#         step = -learning_rate(t, norm(grad_est)).*shat./(sqrt.(rhat).+eps)
+#         # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
+#         # running_criterion(grad_est) || break
+#         if verbose
+#             println("Iteration $t, average gradient norm $(mean(last_q_norms)), gradient $(grad_est) and step $(step) with parameter estimate $pars")
+#         end
+#         running_criterion() || break
+#         pars = pars + step
+#         project_on_bounds!(pars, bounds)
+#         push!(trace, pars)
+#         push!(grad_trace, grad_est)
+#         # (t-1)%10+1 maps t to a number between 1 and 10 (inclusive)
+#         last_q_norms[(t-1)%q+1] = norm(grad_est)
+#         t += 1
+#     end
+#     return pars, trace, cost_vals, grad_trace
+# end
 
 function test_SGD_on_known_cost()
     # Cost given by 0.5*(x^T)Hx+cx
