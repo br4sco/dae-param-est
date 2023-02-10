@@ -103,6 +103,11 @@ function get_cost_gradient(Y::Array{Float64,1}, Ym::Array{Float64,2}, jacsYm::Ar
         )[:]
 end
 
+# NOTE: SCALAR_OUTPUT is assumed
+function get_cost_value(Y::Array{Float64,1}, Ym::Array{Float64,2}, N_trans::Int=0)
+    (1/(size(Y,1)-N_trans-1))*sum( ( Y[N_trans+1:end] - mean(Ym[N_trans+1:end,:], dims=2) ).^2 )
+end
+
 # We do linear interpolation between exact values because it's fast
 # n is the dimension of one sample of the state
 function interpw(W::Array{Float64, 2}, m::Int, n::Int)
@@ -439,11 +444,12 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"
-        # opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-        #     perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)
-        # DEBUG
-        opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e], trace_step[e], trace_lrate[e] =
-            perform_SGD_adam_debug(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)#0)
+        opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
+            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)
+        # # DEBUG
+        # opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e], trace_step[e], trace_lrate[e] =
+        #     perform_SGD_adam_debug(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)#0)
+
         # avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
 
         writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
@@ -463,7 +469,8 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # Call Dates.value[setup_duration] or e.g. Dates.value.(baseline_durations) to convert Millisecond to Int
     durations = (setup_duration, baseline_durations, proposed_durations)
-    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, trace_lrate, durations
+    # return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, trace_lrate, durations
+    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, durations
 end
 
 function get_outputs(expid::String, pars0::Array{Float64,1})
@@ -1053,6 +1060,276 @@ function sample_cost_func(expid::String, par_vec::Array{Array{Float64,1},1}, N_t
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
+
+function debug_dist_sens(expid::String, pars0::Array{Float64,1}, Δ::Float64=0.01)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    u = exp_data.u
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    @assert (length(pars0) == num_dyn_pars+length(W_meta.free_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
+
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    p = get_all_parameters(pars0)
+    θ = p[1:dθ]
+    η = p[dθ+1: dθ+dη]
+    # C = reshape(η[nx+1:end], (n_out, n_tot))
+
+    # === Computes output of the baseline model ===
+    Y_base, sens_base = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars0, N) |> h_comp
+
+    # === Computes outputs of the proposed model ===
+    # TODO: Should we consider storing and loading white noise, to improve repeatability
+    # of the results? Currently repeatability is based on fixed random seed
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+    q_a = length(dist_par_inds[findall(dist_par_inds .<= nx)])
+    n_sens = nx*(1+q_a)
+    # Creating Z_sens should ensure that the white noise that is fed into the
+    # nominal (non-sensitivity) part of the disturbance system is the same as
+    # the noise in Zm, so that the disturbance model state should always give
+    # the same realization given the same Zm, regardless of the number of free
+    # disturbance parameters corresponding to the "a-vector" in the disturbance model
+    Z_sens = [zeros(Nw, n_tot*(1+q_a)) for m = 1:M]
+    for m = 1:M
+        for i = 1:n_out
+            Z_sens[m][:, (i-1)*n_sens+1:(i-1)*n_sens+nx] = Zm[m][:, (i-1)*nx+1:i*nx]
+            Z_sens[m][:, (i-1)*n_sens+nx+1:i*n_sens] = randn(Nw, q_a*nx)
+        end
+    end
+    dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Z_sens)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+
+    calc_mean_y_N_prop(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+        solvew_sens(u, t -> wmm(m)(t), free_pars, N) |> h_comp
+    calc_mean_y_prop(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, free_pars, m)
+    Ym_prop, sens_m_prop = solve_in_parallel_sens(m -> calc_mean_y_prop(pars0, m), ms)
+    Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
+
+    val = wmm(1)(0.07)
+    println("dist + sens at true val: $(val)")
+
+    # RESULTS SEEM TO MATCH NUMERICAL APPROXIMATIONS VERY WELL!!!! :D
+
+    # Ym_prop1 = Ym_prop
+    # sens_m_prop1 = sens_m_prop
+    # Y_mean_prop1 = Y_mean_prop
+    # Ym_prop2 = Ym_prop
+    # sens_m_prop2 = sens_m_prop
+    # Y_mean_prop2 = Y_mean_prop
+    # Ym_prop3 = Ym_prop
+    # sens_m_prop3 = sens_m_prop
+    # Y_mean_prop3 = Y_mean_prop
+
+    # ################## a1 ################
+    η = [0.8+Δ, 16.0, 0.0, 0.6]
+    dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Z_sens)
+    wmm1(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+    println("Approx a1 sens: $((wmm1(1)(0.07)[1]-val[1])/Δ)")
+
+    calc_mean_y_N_prop1(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+        solvew_sens(u, t -> wmm1(m)(t), free_pars, N) |> h_comp
+    calc_mean_y_prop1(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop1(N, free_pars, m)
+    Ym_prop1, sens_m_prop1 = solve_in_parallel_sens(m -> calc_mean_y_prop1(pars0, m), ms)
+    Y_mean_prop1 = reshape(mean(Ym_prop1, dims = 2), :)
+
+    # ################## a2 ################
+    η = [0.80, 16+Δ, 0.0, 0.6]
+    dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Z_sens)
+    wmm2(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+    println("Approx a2 sens: $((wmm2(1)(0.07)[1]-val[1])/Δ)")
+
+    calc_mean_y_N_prop2(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+        solvew_sens(u, t -> wmm2(m)(t), free_pars, N) |> h_comp
+    calc_mean_y_prop2(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop2(N, free_pars, m)
+    Ym_prop2, sens_m_prop2 = solve_in_parallel_sens(m -> calc_mean_y_prop2(pars0, m), ms)
+    Y_mean_prop2 = reshape(mean(Ym_prop1, dims = 2), :)
+
+    # ################## c ################
+    η = [0.80, 16.0, 0.0, 0.6+Δ]
+    dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Z_sens)
+    wmm3(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+    println("Approx c sens: $((wmm3(1)(0.07)[1]-val[1])/Δ)")
+
+    calc_mean_y_N_prop3(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+        solvew_sens(u, t -> wmm3(m)(t), free_pars, N) |> h_comp
+    calc_mean_y_prop3(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop3(N, free_pars, m)
+    Ym_prop3, sens_m_prop3 = solve_in_parallel_sens(m -> calc_mean_y_prop3(pars0, m), ms)
+    Y_mean_prop3 = reshape(mean(Ym_prop1, dims = 2), :)
+
+    # Comparing output sensitivities to numerical estimates
+    numrate1 = (Ym_prop1-Ym_prop)./Δ;
+    numrate2 = (Ym_prop2-Ym_prop)./Δ;
+    numrate3 = (Ym_prop3-Ym_prop)./Δ;
+    sens1    = zeros(length(sens_m_prop[1][:,1]), length(sens_m_prop))
+    sens2    = zeros(length(sens_m_prop[1][:,1]), length(sens_m_prop))
+    sens3    = zeros(length(sens_m_prop[1][:,1]), length(sens_m_prop))
+    for i = eachindex(sens_m_prop)
+        sens1[:,i] = sens_m_prop[i][:,1]
+        sens2[:,i] = sens_m_prop[i][:,2]
+        sens3[:,i] = sens_m_prop[i][:,3]
+    end
+
+    # Comparing cost function sensitivity to numerical estimate
+    N = size(Y,2)-1
+    costsens = zeros(3,N+1)
+    costests1 = zeros(N+1)
+    costests2 = zeros(N+1)
+    costests3 = zeros(N+1)
+    costests1NOTRANS = zeros(N+1)
+    costests2NOTRANS = zeros(N+1)
+    costests3NOTRANS = zeros(N+1)
+    for e=eachindex(Y[1,:])
+        costsens[:,e]  = get_cost_gradient(Y[:,e], Ym_prop[:,1:M÷2], sens_m_prop[M÷2+1:end], 500)
+        costests1[e]   = (get_cost_value(Y[:,e], Ym_prop1, 500)-get_cost_value(Y[:,e], Ym_prop, 500))/Δ
+        costests2[e]   = (get_cost_value(Y[:,e], Ym_prop2, 500)-get_cost_value(Y[:,e], Ym_prop, 500))/Δ
+        costests3[e]   = (get_cost_value(Y[:,e], Ym_prop3, 500)-get_cost_value(Y[:,e], Ym_prop, 500))/Δ
+    end
+    # costests[i,e]/costsens[i,e] gives estimate/sensitivity wrt to parameter i for data-set e
+    costests = vcat(costests1', costests2', costests3')
+    costestsNOTRANS = vcat(costests1NOTRANS', costests2NOTRANS', costests3NOTRANS')
+
+    # To compare nuermical estimates with sensitivity estimates for parameter i,
+    # realizaiton e, call
+    # p = plot(numratei[:,e]); plot(p, sensi[:,e])
+    res_tup = (Ym_prop, sens_m_prop, Ym_prop1, sens_m_prop1, Ym_prop2, sens_m_prop2, Ym_prop3, sens_m_prop3)
+    detcostres = debug_det_costs(Y, Ym_prop, Ym_prop1, Ym_prop2, Ym_prop3, sens1, sens2, sens3, Δ, 500)
+
+    return numrate1, numrate2, numrate3, sens1, sens2, sens3, costests, costsens, res_tup, detcostres
+end
+
+function debug_det_costs(Y::Array{Float64,2}, Ym_prop::Array{Float64,2},
+        Ym_prop1::Array{Float64,2}, Ym_prop2::Array{Float64,2},
+        Ym_prop3::Array{Float64,2}, sens1::Array{Float64,2},
+        sens2::Array{Float64,2}, sens3::Array{Float64,2}, Δ::Float64, N_trans::Int = 0)
+    N = size(Y,1)-1
+
+    E = size(Y,2)
+    derivs1 = Matrix{Float64}(undef, M, E)
+    derivs2 = Matrix{Float64}(undef, M, E)
+    derivs3 = Matrix{Float64}(undef, M, E)
+    ests1 = Matrix{Float64}(undef, M, E)
+    ests2 = Matrix{Float64}(undef, M, E)
+    ests3 = Matrix{Float64}(undef, M, E)
+    derivs1E = Vector{Float64}(undef, E)
+    derivs2E = Vector{Float64}(undef, E)
+    derivs3E = Vector{Float64}(undef, E)
+    ests1E   = Vector{Float64}(undef, E)
+    ests2E   = Vector{Float64}(undef, E)
+    ests3E   = Vector{Float64}(undef, E)
+    Mlim     = M  # Mlim=1 makes E-version match non-E versions for m=1
+    # For analysing bias/variance of sensitivity as a function of M
+    num_blocks = 10
+    maxM = M÷(2num_blocks)
+    derivs1M = Matrix{Float64}(undef, num_blocks, E)
+    derivs2M = Matrix{Float64}(undef, num_blocks, E)
+    derivs3M = Matrix{Float64}(undef, num_blocks, E)
+    for e=1:E
+
+        ########### THIS PART CONSIDERS MSE OF TRUE OUTPUT AND ONE SINGLE REALIZATION OF THE SIMULATED OUTPUT
+
+        # diffs[k,m] is the difference at time instant k using realization m
+        diffs   = Y[:,e].-Ym_prop
+        diffs1  = Y[:,e].-Ym_prop1
+        diffs2  = Y[:,e].-Ym_prop2
+        diffs3  = Y[:,e].-Ym_prop3
+        # costs (row-vector), costs[m] is the cost using realization m
+        costs   = (1/(N+1-N_trans))*sum(diffs[N_trans+1:end,:].^2, dims=1)
+        costs1  = (1/(N+1-N_trans))*sum(diffs1[N_trans+1:end,:].^2, dims=1)
+        costs2  = (1/(N+1-N_trans))*sum(diffs2[N_trans+1:end,:].^2, dims=1)
+        costs3  = (1/(N+1-N_trans))*sum(diffs3[N_trans+1:end,:].^2, dims=1)
+        # derivs[m, e] is the derivative for cost of data-set e using simulated realization m
+        derivs1[:,e] = transpose((2/(N+1-N_trans))*sum(-diffs[N_trans+1:end,:].*sens1[N_trans+1:end,:], dims=1))
+        derivs2[:,e] = transpose((2/(N+1-N_trans))*sum(-diffs[N_trans+1:end,:].*sens2[N_trans+1:end,:], dims=1))
+        derivs3[:,e] = transpose((2/(N+1-N_trans))*sum(-diffs[N_trans+1:end,:].*sens3[N_trans+1:end,:], dims=1))
+        # ests[m,e] is the estimated derivative for cost of realization e using simulated realization m
+        ests1[:,e]   = transpose(costs1-costs)/Δ
+        ests2[:,e]   = transpose(costs2-costs)/Δ
+        ests3[:,e]   = transpose(costs3-costs)/Δ
+
+        ######## THIS PART CONSIDERED MSE OF TRUE OUTPUT AND MEAN SIMULATED OUTPUT OVER M REALIZATIONS #############
+
+        # diffsE[k] difference data and mean realization at timestep k
+        diffsE   = Y[:,e].-mean(Ym_prop[:,1:Mlim], dims=2)
+        diffs1E  = Y[:,e].-mean(Ym_prop1[:,1:Mlim], dims=2)
+        diffs2E  = Y[:,e].-mean(Ym_prop2[:,1:Mlim], dims=2)
+        diffs3E  = Y[:,e].-mean(Ym_prop3[:,1:Mlim], dims=2)
+        # costsE cost for data-set e
+        costsE   = first((1/(N+1-N_trans))*sum(diffsE[N_trans+1:end].^2, dims=1))
+        costsE1  = first((1/(N+1-N_trans))*sum(diffs1E[N_trans+1:end].^2, dims=1))
+        costsE2  = first((1/(N+1-N_trans))*sum(diffs2E[N_trans+1:end].^2, dims=1))
+        costsE3  = first((1/(N+1-N_trans))*sum(diffs3E[N_trans+1:end].^2, dims=1))
+        # derivsE[e] derivative of cost for data-set e
+        derivs1E[e] = first((2/(N+1-N_trans))*sum(-diffsE[N_trans+1:end].*mean(sens1[N_trans+1:end,1:Mlim], dims=2)))
+        derivs2E[e] = first((2/(N+1-N_trans))*sum(-diffsE[N_trans+1:end].*mean(sens2[N_trans+1:end,1:Mlim], dims=2)))
+        derivs3E[e] = first((2/(N+1-N_trans))*sum(-diffsE[N_trans+1:end].*mean(sens3[N_trans+1:end,1:Mlim], dims=2)))
+        # estsE[e] estimated derivative of cost for data-set e
+        ests1E[e]   = (costsE1-costsE)/Δ
+        ests2E[e]   = (costsE2-costsE)/Δ
+        ests3E[e]   = (costsE3-costsE)/Δ
+
+        ### ANALYZING MEAN AND VARIANCE OF GRADIENT ESTIMATES AS A FUNCTION OF M ###
+        for limM = 1:maxM
+            for iblock = 1:num_blocks
+                range  = (iblock-1)*limM+1:iblock*limM
+                range2 = M÷2+(iblock-1)*limM+1:M÷2+iblock*limM
+                # diffsE[k] difference data and mean realization at timestep k
+                diffsM   = Y[:,e].-mean(Ym_prop[:,range], dims=2)
+                diffs1M  = Y[:,e].-mean(Ym_prop1[:,range], dims=2)
+                diffs2M  = Y[:,e].-mean(Ym_prop2[:,range], dims=2)
+                diffs3M  = Y[:,e].-mean(Ym_prop3[:,range], dims=2)
+                # costsE cost for data-set e
+                costsM   = first((1/(N+1-N_trans))*sum(diffsM[N_trans+1:end].^2, dims=1))
+                costsM1  = first((1/(N+1-N_trans))*sum(diffs1M[N_trans+1:end].^2, dims=1))
+                costsM2  = first((1/(N+1-N_trans))*sum(diffs2M[N_trans+1:end].^2, dims=1))
+                costsM3  = first((1/(N+1-N_trans))*sum(diffs3M[N_trans+1:end].^2, dims=1))
+                # derivsE[e] derivative of cost for data-set e
+                derivs1M[iblock, e] = first((2/(N+1-N_trans))*sum(-diffsM[N_trans+1:end].*mean(sens1[N_trans+1:end,range2], dims=2)))
+                derivs2M[iblock, e] = first((2/(N+1-N_trans))*sum(-diffsM[N_trans+1:end].*mean(sens2[N_trans+1:end,range2], dims=2)))
+                derivs3M[iblock, e] = first((2/(N+1-N_trans))*sum(-diffsM[N_trans+1:end].*mean(sens3[N_trans+1:end,range2], dims=2)))
+            end
+        end
+    end
+
+
+
+
+    ##############################################
+    ########## ALSO COMPUTE MSE?????? ############
+    ##############################################
+
+    # diffs   = Y[:,1].-Ym_prop
+    # diffs1  = Y[:,1].-Ym_prop1
+    # diffs2  = Y[:,1].-Ym_prop2
+    # diffs3  = Y[:,1].-Ym_prop3
+    # costs   = (1/(N+1-N_trans))*sum(diffs[N_trans+1:end,:].^2, dims=1)
+    # costs1  = (1/(N+1-N_trans))*sum(diffs1[N_trans+1:end,:].^2, dims=1)
+    # costs2  = (1/(N+1-N_trans))*sum(diffs2[N_trans+1:end,:].^2, dims=1)
+    # costs3  = (1/(N+1-N_trans))*sum(diffs3[N_trans+1:end,:].^2, dims=1)
+    # derivs1 = (2/(N+1-N_trans))*sum(-diffs[N_trans+1:end,:].*sens1[N_trans+1:end,:], dims=1)
+    # derivs2 = (2/(N+1-N_trans))*sum(-diffs[N_trans+1:end,:].*sens2[N_trans+1:end,:], dims=1)
+    # derivs3 = (2/(N+1-N_trans))*sum(-diffs[N_trans+1:end,:].*sens3[N_trans+1:end,:], dims=1)
+    # ests1   = (costs1-costs)/Δ
+    # ests2   = (costs2-costs)/Δ
+    # ests3   = (costs3-costs)/Δ
+    return derivs1, derivs2, derivs3, ests1, ests2, ests3, derivs1E, derivs2E, derivs3E, ests1E, ests2E, ests3E, derivs1M, derivs2M, derivs3M
+end
+
 function estimate_gradient_directions(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
@@ -2441,13 +2718,16 @@ function gridsearch_3distsens(expid::String, N_trans::Int = 0)
     δa2 = 0.2
     δc  = 0.02
 
-    a1vals = a1ref-4δa1:δa1:a1ref+4δa1
-    a2vals = a2ref-4δa2:δa2:a2ref+4δa2
-    cvals  =   cref-4δc:δc:cref+4δc
+    a1vals = a1ref-2δa1:δa1:a1ref+2δa1
+    a2vals = a2ref-2δa2:δa2:a2ref+2δa2
+    cvals  =   cref-2δc:δc:cref+2δc
     # a1vals = a1ref
     # a2vals = a2ref
     # cvals  = cref
 
+    a1fixed = [[zeros(length(a2vals), length(cvals)) for i=1:length(a1vals)] for e=1:E]
+    a2fixed = [[zeros(length(a1vals), length(cvals)) for i=1:length(a2vals)] for e=1:E]
+    cfixed  = [[zeros(length(a1vals), length(a2vals)) for i=1:length(cvals)]  for e=1:E]
     cost_vals = [zeros(length(a1vals)*length(a2vals)*length(cvals)) for e=1:E]
     all_pars = zeros(3, length(a1vals)*length(a2vals)*length(cvals))
     min_ind = fill(-1, (E,))
@@ -2468,6 +2748,13 @@ function gridsearch_3distsens(expid::String, N_trans::Int = 0)
                             min_cost[e] = cost_vals[e][ind]
                         end
                         @info "Completed computing cost for e = $e, ia1=$ia2, ia2=$ia1, ic = $ic"
+
+                        # Elements arranged in such a way that e.g.
+                        # plot(a1vals, a2vals, cfixed[1][3], st=:surface)
+                        # will have correctly labeled axes. Same for other plots
+                        a1fixed[e][ia1][ic, ia2] = cost_vals[e][ind]
+                        a2fixed[e][ia2][ic, ia1] = cost_vals[e][ind]
+                        cfixed[e][ic][ia2, ia2]  = cost_vals[e][ind]
                     end
                     ind += 1
                 end
@@ -2481,7 +2768,14 @@ function gridsearch_3distsens(expid::String, N_trans::Int = 0)
     end
     duration = now()-time_start
 
-    return all_pars, cost_vals, min_ind, duration
+    # Can stack up plots nicely as follows:
+    # p1 = plot(a1vals, a2vals, cfixed[1][3], legend=false, st=:surface)
+    # p2...p5
+    # l = @layout [a b; c d e]
+    # plot(p1, p2, p3, p4, p5, layout=l)
+    plot_tools = (a1vals, a2vals, cvals, a1fixed, a2fixed, cfixed)
+
+    return all_pars, cost_vals, min_ind, duration, plot_tools
 end
 
 function gridsearch_debug(expid::String, N_trans::Int = 0)
@@ -2645,6 +2939,10 @@ function gridsearch_k_1distsens(expid::String, N_trans::Int = 0)
     duration = now()-time_start
 
     return avals, kvals, cost_vals, duration
+end
+
+function get_3par_plottable(all_pars, cost_vals)
+    firstfixed = Array{Tuple()}
 end
 
 function allpar_viz_1par(all_pars::Array{Float64,2}, cost_vals::Array{Float64,1}, par_vecs::Array{Array{Float64,1},1}, var_par_ind::Int, fixed_pars::Array{Float64,1})

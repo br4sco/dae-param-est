@@ -56,6 +56,24 @@ function Φ(mat_in::Array{Float64,2}, nx::Int)
     return mat
 end
 
+function Phi(mat_in::Array{Float64,2}, nx::Int)::LowerTriangular
+    mat = LowerTriangular(mat_in)
+    for i=1:nx
+        mat[i,i] *= 0.5
+    end
+    return mat
+    # mat = zeros(size(mat_in))
+    # for i=1:nx
+    #     for j=1:nx
+    #         if i==j
+    #             mat[i,j] = 0.5*mat_in[i,j]
+    #         elseif i>j
+    #             mat[i,j] = mat_in[i,j]
+    #         end
+    #     end
+    # end
+end
+
 function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
     nx      = size(A,1)
     Mexp    = [-A B*(B'); zeros(size(A)) A']
@@ -121,6 +139,88 @@ function discretize_ct_noise_model_with_sensitivities(
     Bdηa = kron(Matrix(I, na, na), Bd)*Φ( Φ_arg )
 
     A_mat = [Ad zeros(nx,na*nx); Adηa kron(Matrix(I,na,na), Ad)]
+    B_mat = [Bd; Bdηa]
+    C_mat = zeros((nη+1)n_out, nx_sens*n_in)
+    for row_block = 1:nη+1
+        if row_block == 1
+            for col_block = 1:n_in
+                C_mat[(row_block-1)*n_out+1:row_block*n_out,
+                    (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
+                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+                # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
+                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
+            end
+        elseif row_block <= na+1
+            ind = row_block-1
+            for col_block = 1:n_in
+                C_mat[(row_block-1)*n_out+1:row_block*n_out,
+                    ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
+                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+            end
+        else
+            k, j, i = get_k_j_i(sens_inds[row_block-1])
+            C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
+        end
+    end
+
+    return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
+end
+
+function discretize_ct_noise_model_with_sensitivities_alt(
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
+    # sens_inds: indices of parameter with respect to which we compute the
+    # sensitivity of disturbance output w
+
+    nx = size(mdl.A,1)
+    n_out = size(mdl.C, 1)
+    n_in  = size(mdl.C, 2)÷nx
+    function get_k_j_i(zeta::Int64)::Tuple{Int64, Int64, Int64}
+        k = rem( (zeta-1), nx ) + 1
+        j = rem( (zeta - k - nx), nx*n_in)÷nx + 1
+        i = (zeta - j*nx - k)÷(nx*n_in) + 1
+        return k, j, i
+    end
+
+    # Indices of free parameters corresponding to "a-vector" in disturbance model
+    sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
+    nη   = length(sens_inds)
+    na = length(sens_inds_a)
+    nx_sens = (1+na)*nx
+
+    Aηa = zeros(na*nx, nx)
+    for i = 1:na
+        Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
+    end
+
+    M = [mdl.A             zeros(nx, na*nx)                mdl.B*(mdl.B');
+         Aηa         kron(Matrix(1.0I, na, na), mdl.A)   zeros(nx*na, nx);
+         zeros(nx, nx)     zeros(nx, nx*na)                -mdl.A' ]
+    Mexp = exp(M*Ts)
+    Ad   = Mexp[1:nx, 1:nx]
+    Dd   = Hermitian(Mexp[1:nx, (na+1)*nx+1:(na+2)*nx]*(Ad'))
+    Bd   = cholesky(Dd).L
+    # Adηa = Mexp[nx+1:(na+1)*nx, 1:nx]
+    # temp = Mexp[nx+1:(nθ+1)*nx, (nθ+1)*nx+1:(nθ+2)*nx]*(Ad')
+
+    # # OLD
+    # Ddηa = Mexp[nx+1:(na+1)*nx, (na+1)*nx+1:(na+2)*nx]*(Ad')
+    # for i = 1:na
+    #     Ddηa[(i-1)*nx+1:i*nx, :] += (Ddηa[(i-1)*nx+1:i*nx, :])'
+    # end
+    # Φ_arg = ((kron(Matrix(I, na, na), Bd)) \ Ddηa ) / (Bd')
+    # Bdηa = kron(Matrix(I, na, na), Bd)*Φ( Φ_arg )
+
+    # NEW
+    Bdηa = zeros(na*nx, nx)
+    for i = 1:na
+        # H = Mexp[i*nx+1:(i+1)*nx, nx*(na+1)+1:nx*(2+na)]
+        Ddηai = Mexp[i*nx+1:(i+1)*nx, nx*(na+1)+1:nx*(2+na)]*(Ad')
+        Ddηai += Ddηai'
+        Bdηa[(i-1)*nx+1:i*nx,:] = Bd*Phi((Bd\Ddηai)/(Bd'), nx)
+    end
+
+    # A_mat = [Ad zeros(nx,na*nx); Adηa kron(Matrix(I,na,na), Ad)]
+    A_mat = Mexp[1:nx*(1+na), 1:nx*(1+na)]
     B_mat = [Bd; Bdηa]
     C_mat = zeros((nη+1)n_out, nx_sens*n_in)
     for row_block = 1:nη+1
