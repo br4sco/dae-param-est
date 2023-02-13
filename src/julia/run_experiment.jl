@@ -248,13 +248,13 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = Array{Float64}(undef, 0)#[m, L, k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
-    get_all_θs(pars::Array{Float64,1}) = [m, L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1, 1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 0.1]
-    model_sens_to_use = pendulum_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 0.1]
+    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = pendulum_adjoint
 elseif model_id == MOH_MDL
@@ -286,7 +286,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]#, x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
 elseif model_id == MOH_MDL
     f(x::Array{Float64,1}) = x[2]
     f_sens(x::Array{Float64,1}) = [x[4]]
@@ -2775,7 +2775,82 @@ function gridsearch_3distsens(expid::String, N_trans::Int = 0)
     # plot(p1, p2, p3, p4, p5, layout=l)
     plot_tools = (a1vals, a2vals, cvals, a1fixed, a2fixed, cfixed)
 
+    # # The following code can be used to plot a 3D scatter plot where cost is
+    # # represented by color. cost_vals probably have to be re-scaled
+    # using PlotlyJS
+    #
+    # plot(scatter(
+    #     x=allpars[1,:],
+    #     y=allpars[2,:],
+    #     z=allpars[3,:],
+    #     mode="markers",
+    #     marker=attr(
+    #         size=12,
+    #         color=costvals2,                # set color to an array/list of desired values
+    #         colorscale="Viridis",   # choose a colorscale
+    #         opacity=0.8
+    #     ),
+    #     type="scatter3d"
+    # ), Layout(margin=attr(l=0, r=0, b=0, t=0)))
+
     return all_pars, cost_vals, min_ind, duration, plot_tools
+end
+
+function newdebug_alongcurve(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 10
+    # @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    opt_pars_proposed = readdlm("data/results/CDC23_20k/opt_pars_proposed.csv", ',')
+
+    # ref1 = [0.28985242672688427, 6.423540049745506, 5.997677634129923, 0.5515604690820335, 17.301181823064447, 0.49488112002045737]
+    ref2 = [0.3, 6.25, 6.25, 0.8, 16, 0.6]
+
+    # vec = ref2-ref1;
+    midsteps = 10;
+    frac = 1/midsteps;
+
+    range = -3frac:frac:1+3frac
+
+    all_pars = [zeros(length(ref2), length(range)) for e=1:E]
+    cost_vals = [zeros(length(range)) for e=1:E]
+#
+    ind = 1
+    for e = 1:E
+        ref1 = opt_pars_proposed[:,e]
+        vec = ref2-ref1
+        for diff = range
+            pars = ref1+diff*vec
+            all_pars[e][:,ind] = pars
+            Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+            cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+            @info "Completed computing cost for e = $e,ind=$ind out of $(length(range))"
+            ind += 1
+        end
+        writedlm("data/results/20k_alongcurve/cost_vals$e.csv", cost_vals[e], ',')
+        writedlm("data/results/20k_alongcurve/pars$e.csv", all_pars[e], ',')
+        ind = 1
+    end
+
+    return all_pars, cost_vals
 end
 
 function gridsearch_debug(expid::String, N_trans::Int = 0)
