@@ -2974,9 +2974,10 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 3#10
+    E = 1#0
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
+    Zm5000 = [randn(Nw, n_tot) for m = 1:5000]
 
     opt_pars_proposed = readdlm("data/results/CDC23_20k/opt_pars_proposed.csv", ',')
 
@@ -2984,13 +2985,15 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
     ref2 = [0.3, 6.25, 6.25, 0.8, 16, 0.6]
 
     # vec = ref2-ref1;
-    midsteps = 10;
+    midsteps = 1#10
+    sidesteps = 1#3
     frac = 1/midsteps;
 
-    range = -3frac:frac:1+3frac
+    range = -sidesteps*frac:frac:1+sidesteps*frac
 
     all_pars = [zeros(length(ref2), length(range)) for e=1:E]
     cost_vals = [zeros(length(range)) for e=1:E]
+    Ym5000 = [[zeros(N+1, 5000) for i=eachindex(range)] for e=1:E]
 
     ind = 1
     for e = 1:E
@@ -2999,7 +3002,9 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
         for diff = range
             pars = ref1+diff*vec
             all_pars[e][:,ind] = pars
-            Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+            # Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+            Ym1000[e][ind] = simulate_system(exp_data, pars, 5000, dist_sens_inds, isws, Zm5000)
+            Ym = mean(Ym5000[e][ind][:,1:M], dims=2)
             cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
             @info "Completed computing cost for e = $e,ind=$ind out of $(length(range))"
             ind += 1
@@ -3009,7 +3014,80 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
         ind = 1
     end
 
-    return all_pars, cost_vals
+    return all_pars, cost_vals, Ym5000
+end
+
+function Ym1000_alongcurve(expid::String, Ym1000::Vector{Vector{Matrix{Float64}}}, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1#0
+    # @warn "Using E = 1 right now, instead of something larger"
+    # Zm = [randn(Nw, n_tot) for m = 1:M]
+    # Zm1000 = [randn(Nw, n_tot) for m = 1:1000]
+    
+    opt_pars_proposed = readdlm("data/results/CDC23_20k/opt_pars_proposed.csv", ',')
+
+    # ref1 = [0.28985242672688427, 6.423540049745506, 5.997677634129923, 0.5515604690820335, 17.301181823064447, 0.49488112002045737]
+    ref2 = [0.3, 6.25, 6.25, 0.8, 16, 0.6]
+
+    # vec = ref2-ref1;
+    midsteps = 1#10
+    sidesteps = 1#3
+    frac = 1/midsteps;
+
+    range = -sidesteps*frac:frac:1+sidesteps*frac
+
+    all_pars = [zeros(length(ref2), length(range)) for e=1:E]
+    cost_vals = [zeros(length(range)) for e=1:E]
+    cost_vals_300 = [zeros(length(range)) for e=1:E]
+    cost_vals_500 = [zeros(length(range)) for e=1:E]
+    cost_vals_750 = [zeros(length(range)) for e=1:E]
+    cost_vals_1000 = [zeros(length(range)) for e=1:E]
+
+    ind = 1
+    for e = 1:E
+        ref1 = opt_pars_proposed[:,e]
+        vec = ref2-ref1
+        for diff = range
+            pars = ref1+diff*vec
+            all_pars[e][:,ind] = pars
+            # Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+            # Ym1000[e][ind] = simulate_system(exp_data, pars, 1000, dist_sens_inds, isws, Zm1000)
+            Ym = mean(Ym1000[e][ind][:,1:M], dims=2)
+            myYm1000 = mean(Ym1000[e][ind], dims=2)
+            myYm300 = mean(Ym1000[e][ind][:,1:300], dims=2)
+            myYm500 = mean(Ym1000[e][ind][:,1:500], dims=2)
+            myYm750 = mean(Ym1000[e][ind][:,1:750], dims=2)
+            cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+            cost_vals_1000[e][ind] = mean((Y[N_trans+1:end, e].-myYm1000[N_trans+1:end]).^2)
+            cost_vals_300[e][ind]  = mean((Y[N_trans+1:end, e].-myYm300[N_trans+1:end]).^2)
+            cost_vals_500[e][ind]  = mean((Y[N_trans+1:end, e].-myYm500[N_trans+1:end]).^2)
+            cost_vals_750[e][ind]  = mean((Y[N_trans+1:end, e].-myYm750[N_trans+1:end]).^2)
+            @info "Completed computing cost for e = $e,ind=$ind out of $(length(range))"
+            ind += 1
+        end
+        # writedlm("data/results/20k_alongcurve/cost_vals$e.csv", cost_vals[e], ',')
+        # writedlm("data/results/20k_alongcurve/pars$e.csv", all_pars[e], ',')
+        ind = 1
+    end
+
+    return all_pars, cost_vals, cost_vals_300, cost_vals_500, cost_vals_750, cost_vals_1000
 end
 
 function newdebug_separatedim(expid::String, N_trans::Int = 0)
