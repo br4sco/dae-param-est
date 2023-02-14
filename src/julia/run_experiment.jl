@@ -30,10 +30,11 @@ end
 struct AdjointData
     wmm::Function
     y_func::Function
+    dy_func::Function
     u::Function
     sols::Array{DAESolution,1}
     N::Int
-    Ts::Float64
+    Ts::Float64 # TODO: No need to pass this I think, Ts already global?
     p::Array{Float64,1}
     xp0::Matrix{Float64}
 end
@@ -251,7 +252,7 @@ if model_id == PENDULUM
     const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 0.1]
     model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
@@ -1445,6 +1446,164 @@ function test_disturbance_sensitivities(expid::String)
 
     p = plot(wdiffs)
     plot!(p, wdiffs_analytical)
+end
+
+function my_new_adjoint_test(exp_id::String)
+    exp_data, isws = get_experiment_data(exp_id)
+    W_meta = exp_data.W_meta
+    η = W_meta.η
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+    Zm = [randn(Nw, n_tot) for m=1:M]
+    Y = exp_data.Y
+    np = length(free_dyn_pars_true)
+
+    # This vector contains 𝑎𝑙𝑙 parameters, not only the free ones (i.e., also known parameters)
+    # p = vcat(vcat(get_all_θs(free_dyn_pars_true), W_meta.η))
+    p = vcat(get_all_θs(free_dyn_pars_true), W_meta.η)
+    free_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])
+
+    # TODO: Do they have to be independent between iterations? Yup, 99.9% sure, so need to generate new white noise
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+
+    u = exp_data.u
+    w1  = wmm(1)
+    w2  = wmm(2)
+
+    forward_solve(m) = solvew(u, wmm(m), free_pars_true, N)
+    # forward_sens_solve(m) = solvew_sens(u, wmm(m), free_pars_true, N) |> h_sens   # TODO: Use later to compare with forward sensitivity
+    sols = get_sol_in_parallel(forward_solve, 1:M)
+
+    # NOTE: Why do we interpolate Y like this, but e.g. dx as below?
+    # I'm not sure, but it's perhaps not super important right now
+    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
+    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+
+    # Computing dx
+    function get_der_est(sol)
+        der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
+        # ts = sol.t[1:end-1]
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+    end
+    function get_mvar_cubic(ts, der_est)
+        temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
+        t -> [temp[i](t) for i=1:length(temp)]
+        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    end
+
+    ts, der_est = get_der_est(sols[1])
+    dx = get_mvar_cubic(ts, der_est)
+    ts2, der_est2 = get_der_est(sols[2])
+    dx2 = get_mvar_cubic(ts2, der_est2)
+
+    # Computing xp0, initial conditions of derivative of x wrt to p
+    mdl = model_to_use(φ0, u, w1, p)
+    mdl_sens = model_sens_to_use(φ0, u, w1, p)
+    n_mdl = length(mdl.x0)
+    xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
+
+    mdl_adj, get_Gp = my_pendulum_adjoint(u, wmm(1), p, N*Ts, sols[1], sols[2], y_func, dy_func, xp0, dx, dx2)
+
+    # adj_prob = problem(mdl_adj, N, Ts)
+    # adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+    #     maxiters = maxiters)
+
+    # DEBUG: Can be used for quicker testing of adjoint method:
+    ad = AdjointData(wmm, y_func, dy_func, u, sols, N, Ts, p, xp0)
+    Gp = 0.3#get_Gp(adj_sol)
+    return Gp, ad
+
+    # Gp = get_Gp(adj_sol)
+    # return Gp, dur
+end
+
+function my_new_adjoint_test_fast(ad::AdjointData)
+    # exp_data, isws = get_experiment_data(exp_id)
+    # W_meta = exp_data.W_meta
+    # η = W_meta.η
+    # Y = exp_data.Y
+    # N = size(Y,1)-1
+    # Nw = exp_data.Nw
+    # nx = W_meta.nx
+    # n_in = W_meta.n_in
+    # n_out = W_meta.n_out
+    # n_tot = nx*n_in
+    # dη = length(W_meta.η)
+    # dist_par_inds = W_meta.free_par_inds
+    # Zm = [randn(Nw, n_tot) for m=1:M]
+    # Y = exp_data.Y
+    # np = length(free_dyn_pars_true)
+    #
+    # # This vector contains 𝑎𝑙𝑙 parameters, not only the free ones (i.e., also known parameters)
+    # # p = vcat(vcat(get_all_θs(free_dyn_pars_true), W_meta.η))
+    # p = vcat(get_all_θs(free_dyn_pars_true), W_meta.η)
+    # free_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])
+    #
+    # # TODO: Do they have to be independent between iterations? Yup, 99.9% sure, so need to generate new white noise
+    # dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+    # # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    # XWm = simulate_noise_process_mangled(dmdl, Zm)
+    # wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+
+    # u = exp_data.u
+    # w1  = wmm(1)
+    # w2  = wmm(2)
+
+    # forward_solve(m) = solvew(u, wmm(m), free_pars_true, N)
+    # # forward_sens_solve(m) = solvew_sens(u, wmm(m), free_pars_true, N) |> h_sens   # TODO: Use later to compare with forward sensitivity
+    # sols = get_sol_in_parallel(forward_solve, 1:M)
+
+    # # NOTE: Why do we interpolate Y like this, but e.g. dx as below?
+    # # I'm not sure, but it's perhaps not super important right now
+    # y_func  = interpolated_signal(ad.Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    # dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
+    # dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+
+    # Computing dx
+    function get_der_est(sol)
+        der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
+        # ts = sol.t[1:end-1]
+        ts = 0:Ts:(ad.N-1)*Ts
+        return ts, der_est
+    end
+    function get_mvar_cubic(ts, der_est)
+        temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
+        t -> [temp[i](t) for i=1:length(temp)]
+        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    end
+
+    ts, der_est = get_der_est(ad.sols[1])
+    dx = get_mvar_cubic(ts, der_est)
+    ts2, der_est2 = get_der_est(ad.sols[2])
+    dx2 = get_mvar_cubic(ts2, der_est2)
+
+    # Computing xp0, initial conditions of derivative of x wrt to p
+    mdl = model_to_use(φ0, ad.u, ad.wmm(1), ad.p)
+    mdl_sens = model_sens_to_use(φ0, ad.u, ad.wmm(1), ad.p)
+    n_mdl = length(mdl.x0)
+    xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
+
+    mdl_adj, get_Gp = my_pendulum_adjoint(ad.u, ad.wmm(1), ad.p, ad.N*Ts, ad.sols[1], ad.sols[2], ad.y_func, ad.dy_func, ad.xp0, dx, dx2)
+
+    adj_prob = problem(mdl_adj, ad.N, Ts)
+    adj_sol = solve(adj_prob, saveat = 0:Ts:ad.N*Ts, abstol = abstol, reltol = reltol,
+        maxiters = maxiters)
+
+    Gp = get_Gp(adj_sol)
+
+    return Gp, ad, adj_sol, get_Gp
 end
 
 function test_adjoint_method(exp_id::String)
@@ -2815,7 +2974,7 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 10
+    E = 3#10
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
@@ -2832,7 +2991,7 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
 
     all_pars = [zeros(length(ref2), length(range)) for e=1:E]
     cost_vals = [zeros(length(range)) for e=1:E]
-#
+
     ind = 1
     for e = 1:E
         ref1 = opt_pars_proposed[:,e]
@@ -2851,6 +3010,69 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
     end
 
     return all_pars, cost_vals
+end
+
+function newdebug_separatedim(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1#0
+    # @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # opt_pars_proposed = readdlm("data/results/CDC23_20k/opt_pars_proposed.csv", ',')
+
+    # ref1 = [0.28985242672688427, 6.423540049745506, 5.997677634129923, 0.5515604690820335, 17.301181823064447, 0.49488112002045737]
+    ref = [0.3, 6.25, 6.25, 0.8, 16, 0.6]
+    step_sizes = 0.1*ref#[0.01, 0.1, 0.1, 0.01, 0.1, 0.01]
+    num_steps  = 5  # Steps taken on each side of the reference
+    Emat = I(length(ref))
+
+    # vec = ref2-ref1;
+    midsteps = 10;
+    frac = 1/midsteps;
+
+    range = -3frac:frac:1+3frac
+
+    # par_vals[e][j,i] Contains value for parameter j during iteration i, for data-set e
+    # All parameters other than j are assumed to be fixed to the value given in ref
+    par_vals  = [zeros(length(ref), 2num_steps+1) for e=1:E]
+    cost_vals = [zeros(length(ref), 2*num_steps+1) for e=1:E]
+
+    for e = 1:E
+        # ref1 = opt_pars_proposed[:,e]
+        # vec = ref2-ref1
+        for j=eachindex(ref)    # Considers one parameter at a time
+            ind = 1
+            for i = -num_steps:num_steps
+                pars = ref+i*step_sizes[j]*Emat[:,j]
+                par_vals[e][j,ind] = pars[j]
+                Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                cost_vals[e][j, ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                @info "Completed computing cost for e = $e, j=$j, ind=$ind out of $(2num_steps+1)"
+                ind += 1
+            end
+            writedlm("data/results/20k_separatedim/cost_vals$e.csv", cost_vals[e], ',')
+            writedlm("data/results/20k_separatedim/pars$e.csv", par_vals[e], ',')
+        end
+    end
+
+    return par_vals, cost_vals
 end
 
 function gridsearch_debug(expid::String, N_trans::Int = 0)
