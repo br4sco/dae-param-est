@@ -54,7 +54,7 @@ model_id = PENDULUM
 # Nw is given by Nw >= (Ts/δ)*N
 const δ = 0.01                  # noise sampling time
 const Ts = 0.1                  # step-size
-const M = 100       # Number of monte-carlo simulations used for estimating mean
+const M = 1000       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
@@ -2974,10 +2974,10 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1#0
+    E = 10
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
-    Zm5000 = [randn(Nw, n_tot) for m = 1:5000]
+    # Zm5000 = [randn(Nw, n_tot) for m = 1:5000]
 
     opt_pars_proposed = readdlm("data/results/CDC23_20k/opt_pars_proposed.csv", ',')
 
@@ -2985,15 +2985,17 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
     ref2 = [0.3, 6.25, 6.25, 0.8, 16, 0.6]
 
     # vec = ref2-ref1;
-    midsteps = 1#10
-    sidesteps = 1#3
+    midsteps = 10
+    sidesteps = 3
     frac = 1/midsteps;
 
     range = -sidesteps*frac:frac:1+sidesteps*frac
 
+    range = 1-frac:frac/10:1+frac
+
     all_pars = [zeros(length(ref2), length(range)) for e=1:E]
     cost_vals = [zeros(length(range)) for e=1:E]
-    Ym5000 = [[zeros(N+1, 5000) for i=eachindex(range)] for e=1:E]
+    # Ym5000 = [[zeros(N+1, 5000) for i=eachindex(range)] for e=1:E]
 
     ind = 1
     for e = 1:E
@@ -3002,11 +3004,11 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
         for diff = range
             pars = ref1+diff*vec
             all_pars[e][:,ind] = pars
-            # Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
-            Ym1000[e][ind] = simulate_system(exp_data, pars, 5000, dist_sens_inds, isws, Zm5000)
-            Ym = mean(Ym5000[e][ind][:,1:M], dims=2)
+            Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+            # Ym1000[e][ind] = simulate_system(exp_data, pars, 5000, dist_sens_inds, isws, Zm5000)
+            # Ym = mean(Ym5000[e][ind][:,1:M], dims=2)
             cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-            @info "Completed computing cost for e = $e,ind=$ind out of $(length(range))"
+            @info "Completed computing cost for e = $e,ind=$ind out of $(length(range)). Cost=$(cost_vals[e][ind])"
             ind += 1
         end
         writedlm("data/results/20k_alongcurve/cost_vals$e.csv", cost_vals[e], ',')
@@ -3014,7 +3016,7 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
         ind = 1
     end
 
-    return all_pars, cost_vals, Ym5000
+    return all_pars, cost_vals#, Ym5000
 end
 
 function Ym1000_alongcurve(expid::String, Ym1000::Vector{Vector{Matrix{Float64}}}, N_trans::Int = 0)
@@ -3040,7 +3042,7 @@ function Ym1000_alongcurve(expid::String, Ym1000::Vector{Vector{Matrix{Float64}}
     # @warn "Using E = 1 right now, instead of something larger"
     # Zm = [randn(Nw, n_tot) for m = 1:M]
     # Zm1000 = [randn(Nw, n_tot) for m = 1:1000]
-    
+
     opt_pars_proposed = readdlm("data/results/CDC23_20k/opt_pars_proposed.csv", ',')
 
     # ref1 = [0.28985242672688427, 6.423540049745506, 5.997677634129923, 0.5515604690820335, 17.301181823064447, 0.49488112002045737]
@@ -3109,7 +3111,7 @@ function newdebug_separatedim(expid::String, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1#0
+    E = 10
     # @warn "Using E = 1 right now, instead of something larger"
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
@@ -3117,15 +3119,9 @@ function newdebug_separatedim(expid::String, N_trans::Int = 0)
 
     # ref1 = [0.28985242672688427, 6.423540049745506, 5.997677634129923, 0.5515604690820335, 17.301181823064447, 0.49488112002045737]
     ref = [0.3, 6.25, 6.25, 0.8, 16, 0.6]
-    step_sizes = 0.1*ref#[0.01, 0.1, 0.1, 0.01, 0.1, 0.01]
+    step_sizes = 0.01*ref#[0.01, 0.1, 0.1, 0.01, 0.1, 0.01]
     num_steps  = 5  # Steps taken on each side of the reference
     Emat = I(length(ref))
-
-    # vec = ref2-ref1;
-    midsteps = 10;
-    frac = 1/midsteps;
-
-    range = -3frac:frac:1+3frac
 
     # par_vals[e][j,i] Contains value for parameter j during iteration i, for data-set e
     # All parameters other than j are assumed to be fixed to the value given in ref
@@ -3142,13 +3138,35 @@ function newdebug_separatedim(expid::String, N_trans::Int = 0)
                 par_vals[e][j,ind] = pars[j]
                 Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
                 cost_vals[e][j, ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-                @info "Completed computing cost for e = $e, j=$j, ind=$ind out of $(2num_steps+1)"
+                @info "Completed computing cost for e = $e, j=$j, ind=$ind out of $(2num_steps+1). Cost=$(cost_vals[e][j, ind])"
                 ind += 1
             end
-            writedlm("data/results/20k_separatedim/cost_vals$e.csv", cost_vals[e], ',')
-            writedlm("data/results/20k_separatedim/pars$e.csv", par_vals[e], ',')
         end
+        writedlm("data/results/20k_separatedim/cost_vals$e.csv", cost_vals[e], ',')
+        writedlm("data/results/20k_separatedim/pars$e.csv", par_vals[e], ',')
     end
+
+    #= Can plot results nicely like this:
+    p1 = plot(par_vals[1,:], cost_vals[1,:]);
+    p2 = plot(par_vals[2,:], cost_vals[2,:]);
+    p3 = plot(par_vals[3,:], cost_vals[3,:]);
+    p4 = plot(par_vals[4,:], cost_vals[4,:]);
+    p5 = plot(par_vals[5,:], cost_vals[5,:]);
+    p6 = plot(par_vals[6,:], cost_vals[6,:]);
+    l  = @layout [a b c; d e f];
+    plot(p1,p2,p3,p4,p5,p6, layout=l)
+
+    or without ticks
+
+    p1 = plot(par_vals[1,:], cost_vals[1,:], yticks=false);
+    p2 = plot(par_vals[2,:], cost_vals[2,:], yticks=false);
+    p3 = plot(par_vals[3,:], cost_vals[3,:], yticks=false);
+    p4 = plot(par_vals[4,:], cost_vals[4,:], yticks=false);
+    p5 = plot(par_vals[5,:], cost_vals[5,:], yticks=false);
+    p6 = plot(par_vals[6,:], cost_vals[6,:], yticks=false);
+    l  = @layout [a b c; d e f];
+    plot(p1,p2,p3,p4,p5,p6, layout=l)
+    =#
 
     return par_vals, cost_vals
 end
