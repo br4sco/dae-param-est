@@ -332,6 +332,8 @@ end
 #     return x_process
 # end
 
+# NOTE: I don't think this function is used anywhere, and it seems to have
+# something funky going on with dimensions and shapes
 function simulate_noise_process(
     mdl::DT_SS_Model,
     data::Array{Array{Float64,2}, 1}
@@ -351,7 +353,6 @@ function simulate_noise_process(
     x_process = [ fill(NaN, (nx*n_in,)) for i=1:N+1, m=1:M]
     for ind = 1:n_in
         for m=1:M
-
             y, t, x = lsim(sys, data[m][:, (ind-1)*nx+1:ind*nx], t, x0=mdl.x0)
             for i=1:N+1
                 x_process[i,m][(ind-1)*nx+1:ind*nx] = x[i,:]

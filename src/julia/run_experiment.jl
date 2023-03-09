@@ -252,9 +252,9 @@ if model_id == PENDULUM
     const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4; 0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 0.1]
+    const_learning_rate = [0.1, 1.0, 1.0, 0.01, 0.1, 0.01]
     model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = pendulum_adjoint
@@ -387,7 +387,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1
+    E = 10
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -441,12 +441,14 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     trace_lrate     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
     proposed_durations = Array{Millisecond, 1}(undef, E)
     # @warn "Not running proposed identification now"
-    for e=1:E
+    # for e=1:E
+    @warn "Only running proposed identificaiton for e=3"
+    for e=3:10
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)
+            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
         # # DEBUG
         # opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e], trace_step[e], trace_lrate[e] =
         #     perform_SGD_adam_debug(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)#0)
@@ -3123,12 +3125,21 @@ function newdebug_separatedim(expid::String, N_trans::Int = 0)
     num_steps  = 5  # Steps taken on each side of the reference
     Emat = I(length(ref))
 
+    @warn "Overwriting original ref"
+    # Row 26 is trace_prop3 for results CDC23_20k (i.e. row 26 of trace for e=3 basically)
+    # ref = [0.2642295187977945, 6.4804506374222175, 5.784126863615928, 0.5646819510243084, 17.7808097323123, 0.48348040209345633]
+
+    # I lowered reference for k, since obtained results seemed to indicate that k was too high, despite other values being fine
+    ref = [0.2642295187977945, 6.4804506374222175, 5.784126863615928, 0.5646819510243084, 17.7808097323123, 0.48348040209345633]
+
     # par_vals[e][j,i] Contains value for parameter j during iteration i, for data-set e
     # All parameters other than j are assumed to be fixed to the value given in ref
     par_vals  = [zeros(length(ref), 2num_steps+1) for e=1:E]
     cost_vals = [zeros(length(ref), 2*num_steps+1) for e=1:E]
 
-    for e = 1:E
+    @warn "Only simulating for e=3"
+    for e = 3:3
+    # for e = 1:E
         # ref1 = opt_pars_proposed[:,e]
         # vec = ref2-ref1
         for j=eachindex(ref)    # Considers one parameter at a time
