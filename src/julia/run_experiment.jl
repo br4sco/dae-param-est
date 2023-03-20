@@ -54,7 +54,7 @@ model_id = PENDULUM
 # Nw is given by Nw >= (Ts/δ)*N
 const δ = 0.01                  # noise sampling time
 const Ts = 0.1                  # step-size
-const M = 1000       # Number of monte-carlo simulations used for estimating mean
+const M = 100       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
@@ -3643,6 +3643,79 @@ function gridsearch_k_1distsens(expid::String, N_trans::Int = 0)
     duration = now()-time_start
 
     return avals, kvals, cost_vals, duration
+end
+
+function gridsearch_2distsens(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
+
+    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # NOTE: All parameters have to be set as free for this functions,
+    # so that we can set m, L, k, and c to their fixed values
+    # Taken from from_Alsvin/20k_hugest_differentadam/2000its_biasstart
+    # mean starting from iteration 500 forward, of all parameters that were
+    # relatively constant (so should be close to minimum)
+    mfix = 0.2980673022654188
+    Lfix = 6.288208419671489
+    kfix = 6.264040559373865
+    cfix = 0.5258645076185884
+
+    a1ref = 0.8
+    a2ref = 16.0
+
+    δ1 = a1ref/50
+    δ2 = a2ref/50
+    num_steps = 1#0
+    a1vals = a1ref-num_steps*δ1:δ1:a1ref+num_steps*δ1
+    a2vals = a2ref-num_steps*δ2:δ2:a2ref+num_steps*δ2
+
+    # cost_vals = [zeros(length(avals), length(kvals)) for e=1:E]
+    cost_vals = [fill(NaN, (length(a1vals), length(a2vals))) for e=1:E]
+    ind = 1
+    time_start = now()
+    try
+        for (i1, my_a1) in enumerate(a1vals)
+            for (i2, my_a2) in enumerate(a2vals)
+                for e = 1:E
+                    pars = [mfix, Lfix, kfix, my_a1, my_a2, cfix]
+                    Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                    # cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                    cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
+                    @info "Completed computing cost for e = $e, ia=$i1, ik=$i2. WARN: Using e=3 instead of default"
+                end
+                ind += 1
+            end
+        end
+    finally
+        writedlm(joinpath(data_dir, "tmp/backup_a1vals.csv"), a1vals, ',')
+        writedlm(joinpath(data_dir, "tmp/backup_a2vals.csv"), a2vals, ',')
+        for e=1:E
+            writedlm(joinpath(data_dir, "tmp/cost_vals_$e.csv"), cost_vals[e], ',')
+        end
+    end
+    duration = now()-time_start
+
+    return a1vals, a2vals, cost_vals, duration
 end
 
 function get_3par_plottable(all_pars, cost_vals)
