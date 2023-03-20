@@ -1664,124 +1664,6 @@ function pendulum_sensitivity_k_with_dist_sens_3(Φ::Float64, u::Function, w::Fu
     end
 end
 
-# global debug_counter
-# debug_counter = 0
-
-# NEW VERSION WRITTEN 2023, WITH SOME NEW CONVENTIONS (AND HOPEFULLY BUGFIXES)
-# NOTE Assumes free dynamical parameters are m, L, and k
-# TODO: I think we can change all occurences of Array{Float64,1} to Vector{Float64}, pretty sure they are the same type, one just looks nicer (introduced in Julia 1.7 I think)
-function my_pendulum_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, dy::Function, xp0::Array{Float64, 2}, dx::Function, dx2::Function)
-    # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
-    # But good enough for now, just should be different in final version perhaps
-    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
-        np = size(xp0,2)
-        @assert (np == 3) "my_pendulum_adjoint is hard-coded to only handle three parameters (m,L,k), make sure to pass correct xp0"
-        nx = size(xp0,1)
-        x  = t -> sol(t)
-        x2 = t -> sol2(t)
-        Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
-                    0           2*dx(t)[6]          0   0                   -1          0   0
-                    -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
-                    0          -dx(t)[3]            0   0               2k*abs(x(t)[5]) 0   0
-                    -2x(t)[1]     -2x(t)[2]         0   0                   0           0   0
-                    x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
-                    x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
-        # (namely the derivative of F with respect to the variable x_p)
-        Fdx = t -> vcat([1   0   0          0   0   2x(t)[1]    0
-                         0   1   0          0   0   2x(t)[2]    0
-                         0   0   -x(t)[1]   m   0   0           0
-                         0   0   -x(t)[2]   0   m   0           0], zeros(3,7))
-        Fddx = t -> vcat([  0   0  0            0   0   2dx(t)[1]    0
-                            0   0  0            0   0   2dx(t)[2]    0
-                            0   0  -dx(t)[1]    0   0   0            0
-                            0   0  -dx(t)[2]    0   0   0            0], zeros(3,7))
-        Fp = t -> [0            0           0
-                   0            0           0
-                   dx(t)[4]     0       abs(x(t)[4])*x(t)[4]
-                   dx(t)[5]+g   0       abs(x(t)[5])*x(t)[5]
-                   0            2L          0
-                   0            0           0
-                   0            0           0]
-        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-y(t))/T]
-        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-dy(t))/T]
-
-        ###################### INITIALIZING ADJOINT SYSTEM ####################
-        # Indices 1-4 are differential (d), while 5-7 are algebraic (a)
-        dinds = 1:4
-        ainds = 5:7
-        λT  = zeros(7)
-        dλT = zeros(7)
-        temp = (-gₓ(T))/vcat(Fdx(T)[dinds,:], -Fx(T)[ainds,:])
-        λT[dinds] = zeros(length(dinds))
-        λT[ainds] = temp[ainds]
-        dλT[dinds] = temp[dinds]
-        temp = (-gdₓ(T) + (dλT[dinds]')*(Fx(T)[dinds,:] - Fddx(T)[dinds,:] - Fdx(T)[dinds,:]) + (λT[ainds]')*Fx(T)[ainds,:])/vcat(Fdx(T)[dinds,:], -Fx(T)[ainds,:])
-        dλT[ainds] = temp[ainds]
-
-        # # the residual function
-        # function f!(res, dz, z, θ, t)
-        #     λ  = z[1:nx]
-        #     dλ = dz[1:nx]
-        #     β  = z[nx+1:end]
-        #     βp = dz[nx+1:end]
-        #     for i=1:nx
-        #         res[i] = -dλ⋅Fdx(T-t)[:,i] + λ⋅(Fddx(T-t)[:,i].-Fx(T-t)[:,i]) + gₓ(T-t)[i]
-        #     end
-        #     # Could be written simpler and less general, since np=1 for this model
-        #     for j = 1:np
-        #         res[nx+j] = βp[j] + λ⋅Fp(T-t)[:,j]  # NOTE: I'm unsure about sign of βp
-        #     end
-        #     nothing
-        # end
-
-        # THIS IS AN ENORMOUS IMPROVEMENT :D BUT STILL NOT QUITE AS FAST AS FORWARD SENSITIVITY!
-        # the residual function
-        # NOTE: Could time-varying coefficients be the problem?? Sure would require more allocations?
-        # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
-        function f!(res, dz, z, θ, t)
-            λ  = z[1:nx]
-            dλ = dz[1:nx]
-            β  = z[nx+1:end]
-            dβ = dz[nx+1:end]
-            res[1]  = dx(T-t)[3]*λ[3] - dλ[1] - 2*dx(T-t)[6]*λ[1] + 2*λ[5]*x(T-t)[1] - λ[6]*x(T-t)[4] - (λ[7]*x(T-t)[2])/(L^2)
-            res[2]  = dx(T-t)[3]*λ[4] - dλ[2] - 2*dx(T-t)[6]*λ[2] + 2*λ[5]*x(T-t)[2] - λ[6]*x(T-t)[5] + (λ[7]*x(T-t)[1])/(L^2)
-            res[3]  = dλ[3]*x(T-t)[1] - dx(T-t)[2]*λ[4] - dx(T-t)[1]*λ[3] + dλ[4]*x(T-t)[2]
-            res[4]  = λ[1] - dλ[3]*m - λ[6]*x(T-t)[1] - 2*k*λ[3]*abs(x(T-t)[4])
-            res[5]  = λ[2] - dλ[4]*m - λ[6]*x(T-t)[2] - 2*k*λ[4]*abs(x(T-t)[5])
-            res[6]  = 2*dx(T-t)[1]*λ[1] + 2*dx(T-t)[2]*λ[2] - 2*dλ[1]*x(T-t)[1] - 2*dλ[2]*x(T-t)[2]
-            res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - λ[7]
-            res[8]  = dβ[1] + dx(T-t)[4]*λ[3] + λ[4]*(dx(T-t)[5] + g)
-            res[9]  = dβ[2] + 2L*λ[5]
-            res[10] = dβ[3] + λ[3]*x(T-t)[4]*abs(x(T-t)[4]) + λ[4]*x(T-t)[5]*abs(x(T-t)[5])
-            nothing
-        end
-
-        # Solving backwards in time =>
-        # 1. Initial conditions will equal terminal conditions
-        # 2. All derivatives have to be negated
-        λ0  = λT[:]
-        dλ0 = -dλT[:]
-        x0  = vcat(λ0, zeros(np))
-        dx0 = vcat(dλ0, (-(Fp(T)')*λT)[:])
-
-        # Function returning Gp given adjoint solution
-        function get_Gp(adj_sol::DAESolution)
-            @warn "Opposite sign compared to my computations!!! On both terms"
-            Gp = -adj_sol.u[end][end-np+1:end] - (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
-        end
-
-        # dvars = [true, false]
-        dvars = vcat(fill(true, 4), fill(false, 3), fill(true, np))
-
-        r0 = zeros(length(x0))
-        # f!(r0, dλ0, λ0, [], 0.0)
-        f!(r0, dx0, x0, [], 0.0)
-
-        # t -> 0.0 is just a dummy function, not to be used
-        Model(f!, t -> 0.0, x0, dx0, dvars, r0), get_Gp
-    end
-end
-
 # NOTE Assumes free dynamical parameters are only k
 # TODO: I think we can change all occurences of Array{Float64,1} to Vector{Float64}, pretty sure they are the same type, one just looks nicer (introduced in Julia 1.7 I think)
 function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, dy::Function, xp0::Array{Float64, 2}, dx::Function, dx2::Function)
@@ -1793,6 +1675,7 @@ function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Array{Float64, 
         nx = size(xp0,1)
         x  = t -> sol(t)
         x2 = t -> sol2(t)
+
         Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
                     0           2*dx(t)[6]          0   0                   -1          0   0
                     -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
@@ -1829,39 +1712,40 @@ function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Array{Float64, 
         temp = (-gdₓ(T) + (dλT[dinds]')*(Fx(T)[dinds,:] - Fddx(T)[dinds,:] - Fdx(T)[dinds,:]) + (λT[ainds]')*Fx(T)[ainds,:])/vcat(Fdx(T)[dinds,:], -Fx(T)[ainds,:])
         dλT[ainds] = temp[ainds]
 
-        # # the residual function
-        # function f!(res, dz, z, θ, t)
-        #     λ  = z[1:nx]
-        #     dλ = dz[1:nx]
-        #     β  = z[nx+1:end]
-        #     βp = dz[nx+1:end]
-        #     for i=1:nx
-        #         res[i] = -dλ⋅Fdx(T-t)[:,i] + λ⋅(Fddx(T-t)[:,i].-Fx(T-t)[:,i]) + gₓ(T-t)[i]
-        #     end
-        #     # Could be written simpler and less general, since np=1 for this model
-        #     for j = 1:np
-        #         res[nx+j] = βp[j] + λ⋅Fp(T-t)[:,j]  # NOTE: I'm unsure about sign of βp
-        #     end
-        #     nothing
-        # end
-
-        # THIS IS AN ENORMOUS IMPROVEMENT :D BUT STILL NOT QUITE AS FAST AS FORWARD SENSITIVITY!
         # the residual function
         # NOTE: Could time-varying coefficients be the problem?? Sure would require more allocations?
         # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
         function f!(res, dz, z, θ, t)
-            λ  = z[1:nx]
-            dλ = dz[1:nx]
-            β  = z[nx+1:end]
-            dβ = dz[nx+1:end]
-            res[1]  = dx(T-t)[3]*λ[3] - dλ[1] - 2*dx(T-t)[6]*λ[1] + 2*λ[5]*x(T-t)[1] - λ[6]*x(T-t)[4] - (λ[7]*x(T-t)[2])/(L^2)
-            res[2]  = dx(T-t)[3]*λ[4] - dλ[2] - 2*dx(T-t)[6]*λ[2] + 2*λ[5]*x(T-t)[2] - λ[6]*x(T-t)[5] + (λ[7]*x(T-t)[1])/(L^2)
-            res[3]  = dλ[3]*x(T-t)[1] - dx(T-t)[2]*λ[4] - dx(T-t)[1]*λ[3] + dλ[4]*x(T-t)[2]
-            res[4]  = λ[1] - dλ[3]*m - λ[6]*x(T-t)[1] - 2*k*λ[3]*abs(x(T-t)[4])
-            res[5]  = λ[2] - dλ[4]*m - λ[6]*x(T-t)[2] - 2*k*λ[4]*abs(x(T-t)[5])
-            res[6]  = 2*dx(T-t)[1]*λ[1] + 2*dx(T-t)[2]*λ[2] - 2*dλ[1]*x(T-t)[1] - 2*dλ[2]*x(T-t)[2]
-            res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - λ[7]
-            res[8]  = dβ[1] + dx(T-t)[4]*λ[3] + λ[4]*(dx(T-t)[5] + g)
+            # # Completely unreadabe but most efficient version (still not a huge improvement)
+            # res[1]  = dx(T-t)[3]*z[3] - dz[1] - 2*dx(T-t)[6]*z[1] + 2*z[5]*x(T-t)[1] - z[6]*x(T-t)[4] - (z[7]*x(T-t)[2])/(L^2)
+            # res[2]  = dx(T-t)[3]*z[4] - dz[2] - 2*dx(T-t)[6]*z[2] + 2*z[5]*x(T-t)[2] - z[6]*x(T-t)[5] + (z[7]*x(T-t)[1])/(L^2)
+            # res[3]  = dz[3]*x(T-t)[1] - dx(T-t)[2]*z[4] - dx(T-t)[1]*z[3] + dz[4]*x(T-t)[2]
+            # res[4]  = z[1] - dz[3]*m - z[6]*x(T-t)[1] - 2*k*z[3]*abs(x(T-t)[4])
+            # res[5]  = z[2] - dz[4]*m - z[6]*x(T-t)[2] - 2*k*z[4]*abs(x(T-t)[5])
+            # res[6]  = 2*dx(T-t)[1]*z[1] + 2*dx(T-t)[2]*z[2] - 2*dz[1]*x(T-t)[1] - 2*dz[2]*x(T-t)[2]
+            # res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - z[7]
+            # res[8]  = dz[8] + dz[3]*abs(x(T-t)[4])*x(T-t)[4] + dz[4]*abs(x(T-t)[5])*x(T-t)[5]
+
+            # # Medium readable but quite efficient version
+            # λ  = z[1:nx]
+            # dλ = dz[1:nx]
+            # β  = z[nx+1:end]
+            # dβ = dz[nx+1:end]
+            # res[1]  = dx(T-t)[3]*λ[3] - dλ[1] - 2*dx(T-t)[6]*λ[1] + 2*λ[5]*x(T-t)[1] - λ[6]*x(T-t)[4] - (λ[7]*x(T-t)[2])/(L^2)
+            # res[2]  = dx(T-t)[3]*λ[4] - dλ[2] - 2*dx(T-t)[6]*λ[2] + 2*λ[5]*x(T-t)[2] - λ[6]*x(T-t)[5] + (λ[7]*x(T-t)[1])/(L^2)
+            # res[3]  = dλ[3]*x(T-t)[1] - dx(T-t)[2]*λ[4] - dx(T-t)[1]*λ[3] + dλ[4]*x(T-t)[2]
+            # res[4]  = λ[1] - dλ[3]*m - λ[6]*x(T-t)[1] - 2*k*λ[3]*abs(x(T-t)[4])
+            # res[5]  = λ[2] - dλ[4]*m - λ[6]*x(T-t)[2] - 2*k*λ[4]*abs(x(T-t)[5])
+            # res[6]  = 2*dx(T-t)[1]*λ[1] + 2*dx(T-t)[2]*λ[2] - 2*dλ[1]*x(T-t)[1] - 2*dλ[2]*x(T-t)[2]
+            # res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - λ[7]
+            # res[8]  = dβ[1] + dλ[3]*abs(x(T-t)[4])*x(T-t)[4] + dλ[4]*abs(x(T-t)[5])*x(T-t)[5]
+            # # Readable but slightly less efficient version
+            # res[1:7] = -(dλ')*Fdx(T-t) + (λ')*(Fddx(T-t)-Fx(T-t)) + gₓ(T-t)
+            # res[8]  = dβ[1]+(λ')*Fp(T-t)
+
+            # Super-readable but less efficient version
+            res[1:7] = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
+            res[8]   = -dz[8] - (z[1:7]')*Fp(T-t)
             nothing
         end
 
@@ -1870,222 +1754,31 @@ function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Array{Float64, 
         # 2. All derivatives have to be negated
         λ0  = λT[:]
         dλ0 = -dλT[:]
+        # z0 = λ0
+        # dz0 = dλ0
         z0  = vcat(λ0, zeros(np))
         dz0 = vcat(dλ0, -(λT')*Fp(T))   # For some reasing (λT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
+        # TODO: Can we delete these row below here perhaps?
+        # z0  = vcat(λ0, 0.0)
+        # dz0 = vcat(dλ0, λ0[1])   # For some reasing (λT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
 
         # Function returning Gp given adjoint solution
         function get_Gp(adj_sol::DAESolution)
-            # @warn "Opposite sign compared to my computations!!! On both terms"
-            Gp = -adj_sol.u[end][end-np+1:end] - (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
+            # NOTE: Changes signs to match what I had in my manual calculations, seems correct now
+            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
+            Gp = adj_sol.u[end][nx+1:nx+np] + (((adj_sol.u[end][1:nx]')*Fdx(0))*xp0)[:]
+            # return 0.0
         end
 
-        # dvars = [true, false]
         dvars = vcat(fill(true, 4), fill(false, 3), fill(true, np))
+        # dvars = vcat(fill(true, 4), fill(false, 3))
 
         r0 = zeros(length(z0))
         f!(r0, dz0, z0, [], 0.0)
-        # @info "r0 is: $r0"
+        # @info "r0 is: $r0 here, λ0: $λ0, dλ0: $dλ0"
 
         # t -> 0.0 is just a dummy function, not to be used
-        Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
-    end
-end
-
-# For calculating some extra quantities to check the correctness of lambda
-# NOTE Assumes free dynamical parameters are only k
-# TODO: I think we can change all occurences of Array{Float64,1} to Vector{Float64}, pretty sure they are the same type, one just looks nicer (introduced in Julia 1.7 I think)
-function my_pendulum_adjoint_konly_debug(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, dy::Function, xp0::Array{Float64, 2}, dx::Function, dx2::Function)
-    # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
-    # But good enough for now, just should be different in final version perhaps
-    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
-        np = size(xp0,2)
-        @assert (np == 1) "my_pendulum_adjoint is hard-coded to only handle one parameter k, make sure to pass correct xp0"
-        nx = size(xp0,1)
-        x  = t -> sol(t)
-        x2 = t -> sol2(t)
-        Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
-                    0           2*dx(t)[6]          0   0                   -1          0   0
-                    -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
-                    0          -dx(t)[3]            0   0               2k*abs(x(t)[5]) 0   0
-                    -2x(t)[1]     -2x(t)[2]         0   0                   0           0   0
-                    x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
-                    x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
-        # (namely the derivative of F with respect to the variable x_p)
-        Fdx = t -> vcat([1   0   0          0   0   2x(t)[1]    0
-                         0   1   0          0   0   2x(t)[2]    0
-                         0   0   -x(t)[1]   m   0   0           0
-                         0   0   -x(t)[2]   0   m   0           0], zeros(3,7))
-        Fddx = t -> vcat([  0   0  0            0   0   2dx(t)[1]    0
-                            0   0  0            0   0   2dx(t)[2]    0
-                            0   0  -dx(t)[1]    0   0   0            0
-                            0   0  -dx(t)[2]    0   0   0            0], zeros(3,7))
-        Fp = t -> [.0; .0; abs(x(t)[4])*x(t)[4]; abs(x(t)[5])*x(t)[5]; .0; .0; .0]
-        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-y(t))/T]
-        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-dy(t))/T]
-
-        # NOTE: Convention is used that derivatives wrt to θ stack along cols
-        # while derivatives wrt to x stack along rows
-
-        ###################### INITIALIZING ADJOINT SYSTEM ####################
-        # Indices 1-4 are differential (d), while 5-7 are algebraic (a)
-        dinds = 1:4
-        ainds = 5:7
-        λT  = zeros(7)
-        dλT = zeros(7)
-        temp = (-gₓ(T))/vcat(Fdx(T)[dinds,:], -Fx(T)[ainds,:])
-        λT[dinds] = zeros(length(dinds))
-        λT[ainds] = temp[ainds]
-        dλT[dinds] = temp[dinds]
-        temp = (-gdₓ(T) + (dλT[dinds]')*(Fx(T)[dinds,:] - Fddx(T)[dinds,:] - Fdx(T)[dinds,:]) + (λT[ainds]')*Fx(T)[ainds,:])/vcat(Fdx(T)[dinds,:], -Fx(T)[ainds,:])
-        dλT[ainds] = temp[ainds]
-
-        # # the residual function
-        # function f!(res, dz, z, θ, t)
-        #     λ  = z[1:nx]
-        #     dλ = dz[1:nx]
-        #     β  = z[nx+1:end]
-        #     βp = dz[nx+1:end]
-        #     for i=1:nx
-        #         res[i] = -dλ⋅Fdx(T-t)[:,i] + λ⋅(Fddx(T-t)[:,i].-Fx(T-t)[:,i]) + gₓ(T-t)[i]
-        #     end
-        #     # Could be written simpler and less general, since np=1 for this model
-        #     for j = 1:np
-        #         res[nx+j] = βp[j] + λ⋅Fp(T-t)[:,j]  # NOTE: I'm unsure about sign of βp
-        #     end
-        #     nothing
-        # end
-
-        # THIS IS AN ENORMOUS IMPROVEMENT :D BUT STILL NOT QUITE AS FAST AS FORWARD SENSITIVITY!
-        # the residual function
-        # NOTE: Could time-varying coefficients be the problem?? Sure would require more allocations?
-        # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
-        function f!(res, dz, z, θ, t)
-            λ  = z[1:nx]
-            dλ = dz[1:nx]
-            β  = z[nx+1:end]
-            dβ = dz[nx+1:end]
-            res[1]  = dx(T-t)[3]*λ[3] - dλ[1] - 2*dx(T-t)[6]*λ[1] + 2*λ[5]*x(T-t)[1] - λ[6]*x(T-t)[4] - (λ[7]*x(T-t)[2])/(L^2)
-            res[2]  = dx(T-t)[3]*λ[4] - dλ[2] - 2*dx(T-t)[6]*λ[2] + 2*λ[5]*x(T-t)[2] - λ[6]*x(T-t)[5] + (λ[7]*x(T-t)[1])/(L^2)
-            res[3]  = dλ[3]*x(T-t)[1] - dx(T-t)[2]*λ[4] - dx(T-t)[1]*λ[3] + dλ[4]*x(T-t)[2]
-            res[4]  = λ[1] - dλ[3]*m - λ[6]*x(T-t)[1] - 2*k*λ[3]*abs(x(T-t)[4])
-            res[5]  = λ[2] - dλ[4]*m - λ[6]*x(T-t)[2] - 2*k*λ[4]*abs(x(T-t)[5])
-            res[6]  = 2*dx(T-t)[1]*λ[1] + 2*dx(T-t)[2]*λ[2] - 2*dλ[1]*x(T-t)[1] - 2*dλ[2]*x(T-t)[2]
-            res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - λ[7]
-            res[8]  = dβ[1] + dx(T-t)[4]*λ[3] + λ[4]*(dx(T-t)[5] + g)
-            nothing
-        end
-
-        # Solving backwards in time =>
-        # 1. Initial conditions will equal terminal conditions
-        # 2. All derivatives have to be negated
-        λ0  = λT[:]
-        dλ0 = -dλT[:]
-        z0  = vcat(λ0, zeros(np))
-        dz0 = vcat(dλ0, -(λT')*Fp(T))   # For some reasing (λT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
-
-        # Function returning Gp given adjoint solution
-        function get_Gp(adj_sol::DAESolution)
-            # @warn "Opposite sign compared to my computations!!! On both terms"
-            Gp = -adj_sol.u[end][end-np+1:end] - (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
-        end
-
-        # dvars = [true, false]
-        dvars = vcat(fill(true, 4), fill(false, 3), fill(true, np))
-
-        r0 = zeros(length(z0))
-        f!(r0, dz0, z0, [], 0.0)
-        # @info "r0 is: $r0"
-
-        # t -> 0.0 is just a dummy function, not to be used
-        Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
-    end
-end
-
-# NOTE Assumes free dynamical parameters are m, L, and k
-# TODO: I think we can change all occurences of Array{Float64,1} to Vector{Float64}, pretty sure they are the same type, one just looks nicer (introduced in Julia 1.7 I think)
-function pendulum_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, xp0::Array{Float64, 2}, dx::Function)
-    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
-        np = size(xp0,2)
-        x  = t -> sol(t)
-        x2 = t -> sol2(t)           # NOTE: TODO: x2 is not used here, mistake since we hsould use independent realization!!
-        # dx = t -> sol(t, Val{1})  # TODO: Does this give same results as sol.up???? NOTE: Nope, sol.up is Nothing, and this just uses finite differences)
-        Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
-                    0           2*dx(t)[6]          0   0                   -1          0   0
-                    -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
-                    0          -dx(t)[3]            0   0               2k*abs(x(t)[5]) 0   0
-                    -2x(t)[1]     -2x(t)[2]         0   0                   0           0   0
-                    x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
-                    x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
-        # (namely the derivative of F with respect to the variable x_p)
-        Fdx = t -> vcat([1   0   0          0   0   2x(t)[1]    0
-                         0   1   0          0   0   2x(t)[2]    0
-                         0   0   -x(t)[1]   m   0   0           0
-                         0   0   -x(t)[2]   0   m   0           0], zeros(3,7))
-        Fddx = t -> vcat([  0   0  0            0   0   2dx(t)[1]    0
-                            0   0  0            0   0   2dx(t)[2]    0
-                            0   0  -dx(t)[1]    0   0   0            0
-                            0   0  -dx(t)[2]    0   0   0            0], zeros(3,7))
-        Fp = t -> [0            0           0
-                   0            0           0
-                   dx(t)[4]     0       abs(x(t)[4])*x(t)[4]
-                   dx(t)[5]+g   0       abs(x(t)[5])*x(t)[5]
-                   0            2L          0
-                   0            0           0
-                   0            0           0]
-        gₓ = t -> [0    0    0    0    0    0    2(x(t)[7]-y(t))/T]'    # TODO: Use x2 instead, this is wrong!!
-        λT  = -gₓ(T)
-        dλT = [-x(T)[2]*λT[7]/(L^2)   x(T)[1]*λT[7]/(L^2)  0   0   0   0   0]'
-
-        # println("Adjoint residual: $((dλT')*Fdx(T) + (λT')*(Fx(T)-Fddx(T)) + gₓ(T)')")
-        # println("Terminal constraint: $((λT')*(Fdx(T)))")
-
-        # the residual function
-        function f!(res, dx, x, θ, t)
-            # global debug_counter
-            # debug_counter += 1
-            #
-            # if debug_counter % 10000 == 0
-            #     @info "counter: $debug_counter"
-            # end
-            # Dynamic Equations
-            # res[1] = -dλ⋅Fdx(T-t)[:,1] + λ⋅(Fx(T-t)[:,1].-Fddx(T-t)[:,1]) + gₓ(T-t)[1]
-            # # res[2] = -dλ⋅Fdx(T-t)[:,2] + λ⋅(Fx(T-t)[:,2].-Fddx(T-t)[:,2]) + gₓ(T-t)[2]
-            # res[2] = λ⋅(Fx(T-t)[:,2].-Fddx(T-t)[:,2]) + gₓ(T-t)[2]
-            # @info "Called this!"
-            len = length(x)
-            λ  = x[1:len-np]
-            dλ = dx[1:len-np]
-            β  = x[len-np+1:end]
-            βp = dx[len-np+1:end]
-            for i=1:len-np
-                res[i] = -dλ⋅Fdx(T-t)[:,i] + λ⋅(Fddx(T-t)[:,i].-Fx(T-t)[:,i]) + gₓ(T-t)[i]
-            end
-            # Could be written simpler and less general, since np=1 for this model
-            for j = 1:np
-                res[len-np+j] = -βp[j] + (λ')*Fp(T-t)[:,j]
-            end
-            nothing
-        end
-
-        λ0  = λT[:]
-        dλ0 = -dλT[:]
-        x0  = vcat(λ0, zeros(np))
-        dx0 = vcat(dλ0, (-(Fp(T)')*λT)[:])
-
-        # Function returning Gp given adjoint solution
-        function get_Gp(adj_sol::DAESolution)
-            Gp = -adj_sol.u[end][end-np+1:end] - (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
-        end
-
-        # dvars = [true, false]
-        dvars = vcat(fill(true, 4), fill(false, 3), fill(true, np))
-
-        r0 = zeros(length(x0))
-        # f!(r0, dλ0, λ0, [], 0.0)
-        f!(r0, dx0, x0, [], 0.0)
-
-        # t -> 0.0 is just a dummy function, not to be used
-        Model(f!, t -> 0.0, x0, dx0, dvars, r0), get_Gp
+        return Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
     end
 end
 
@@ -2118,102 +1811,113 @@ function model_mohamed(Φ::Float64, u::Function, w::Function, θ::Array{Float64,
     Model(f!, t -> 0.0, x0, dx0, dvars, r0)
 end
 
-function mohamed_sens(Φ::Float64, u::Function, w::Function, θ::Array{Float64,1})
-    @warn "This function doesn't generate a correct sensitivty model, only x0 is correct"
+function mohamed_sens(Φ::Float64, u::Function, w::Function, p::Array{Float64,1})
+    θ = p[1]
     # NOTE: Φ not used, just passed to have consistent interface
-    function f!(res, dx, x, θ, t)
+    zeta(dx, x, t) = (θ*x[1] + u(t)[1] + w(t)[1])^2 + 1
+    dzeta_dx1(dx, x, t) = 2θ*(θ*x[1]+u(t)[1]+w(t)[1])
+    dzeta_dθ(dx, x, t)  = 2x[1]*(θ*x[1]+u(t)[1]+w(t)[1])
+    # zeta(t) = (θ*x(t)[1] + u(t)[1] + w(t)[1])^2 + 1
+    # dzeta_dx1(t) = 2θ*(θ*x(t)[1]+u(t)[1]+w(t)[1])
+    # dzeta_dθ(t)  = 2x(t)[1]*(θ*x(t)[1]+u(t)[1]+w(t)[1])
+
+    # @warn "This function doesn't generate a correct sensitivty model, only x0 is correct"
+    function f!(res, dx, x, p, t)
+        wt = w(t)[1]^2
+        ut = u(t)[1]
+        # Dynamic Equations
+        res[1] = dx[1] + θ*x[1] + ut + wt
+        res[2] = x[2] + 2/( (θ*x[1]+ut+wt)^2 + 1 )
+        # Sensitivity equations
+        # res[3] = dx_θ[1] + p*x_θ[1] + x[1]
+        # res[4] = -2*zeta(dx,x,t)*dzeta_dx1(dx,x,t)*x_θ[1] + x_θ[2] -2 *zeta(dx,x,t)*dzeta_dθ(dx,x,t)
+        res[3] = dx[3] + θ*x[3] + x[1]
+        res[4] = -2*zeta(dx,x,t)*dzeta_dx1(dx,x,t)*x[3] + x[4] - 2*zeta(dx,x,t)*dzeta_dθ(dx,x,t)
         nothing
     end
 
-    p = θ[1]
     # Finding consistent initial conditions
     # Initial values, the pendulum starts at rest
     u0 = u(0.0)[1]
-    w0 = w(0.0)[1]
-    x10 = -(u0+w0)/p
-    xp10 = (u0+w0)/(p^2)
-    xp20 = 2*( 2*p*(p*x10+u0+w0)*xp10 + 2*x10*(p*x10+u0+w0) )/(((p*x10 + u0 + w0)^2+1)^2)
-    x0 = [x10, -2/( (p*x10+u0+w0)^2 + 1 ), xp10, xp20]
+    w0 = w(0.0)[1]^2
+    x10 = -(u0+w0)/θ
+    xp10 = (u0+w0)/(θ^2)
+    xp20 = 2*( 2*θ*(θ*x10+u0+w0)*xp10 + 2*x10*(θ*x10+u0+w0) )/(((θ*x10 + u0 + w0)^2+1)^2)
+    x0 = [x10, -2/( (θ*x10+u0+w0)^2 + 1 ), xp10, xp20]
     dx0 = [0.0, 0.0, 0.0, 0.0]
 
     dvars = [true, false, true, false]
 
     r0 = zeros(length(x0))
     f!(r0, dx0, x0, [], 0.0)
+    # @info "r0 is $r0"
 
     # t -> 0.0 is just a dummy function, not to be used
     Model(f!, t -> 0.0, x0, dx0, dvars, r0)
 end
 
-function mohamed_adjoint(u::Function, w::Function, θ::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, xp0::Array{Float64,2})
-    p = θ[1]
+# Just writing it from scratch since a lot of time has passed and I've learned some stuff
+function mohamed_adjoint_new(u::Function, w::Function, p::Array{Float64, 1}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, dy::Function, xp0::Array{Float64,2}, dx::Function, dx2::Function)
+    θ = p[1]
     np = size(xp0, 2)
     x  = t -> sol(t)
     x2 = t -> sol2(t)
-    dx = t -> sol(t, Val{1})  # TODO: Does this give same results as sol.up???? NOTE: Nope, sol.up is Nothing, and this just uses finite differences)
-    zeta(t) = (p*x(t)[1] + u(t)[1] + w(t)[1])^2 + 1
-    dzeta_dx1(t) = 2p*(p*x(t)[1]+u(t)[1]+w(t)[1])
-    dzeta_dp(t)  = 2x(t)[1]*(p*x(t)[1]+u(t)[1]+w(t)[1])
+    zeta(t) = (θ*x(t)[1] + u(t)[1] + w(t)[1])^2 + 1
+    dzeta_dx1(t) = 2θ*(θ*x(t)[1]+u(t)[1]+w(t)[1])
+    dzeta_dθ(t)  = 2x(t)[1]*(θ*x(t)[1]+u(t)[1]+w(t)[1])
 
-    Fx(t)   = [p 0.0; -(2/(zeta(t)^2))*dzeta_dx1(t) 1.0]
+    Fx(t)   = [θ 0.0; -(2/(zeta(t)^2))*dzeta_dx1(t) 1.0]
     Fdx(t)  = [1.0 0.0; 0.0 0.0]
     Fddx(t) = zeros(2,2)
-    Fp(t)   = [x(t)[1]; -(2/(zeta(t)^2))*dzeta_dp(t)]
+    Fθ(t)   = [x(t)[1]; -(2/(zeta(t)^2))*dzeta_dθ(t)]
     gₓ(t)   = [0  2(x2(t)[2]-y(t))/T]'
+    dgₓ(t)  = [0  2(dx2(t)[2]-dy(t))/T]'
+
+    ###################### INITIALIZING ADJOINT SYSTEM ####################
+    # Index 1 is differential (d), while index 2 is algebraic (a)
+    λT  = zeros(2)
+    dλT = zeros(2)
+    λT[1] = 0.0
+    # λT[2] = gₓ(T)/F_xa^a = gₓ(T)
+    λT[2] = gₓ(T)[2]
+    dλT[1] = - (λT')*[-θ; (2/(zeta(T)^2))*dzeta_dx1(T)] - gₓ(T)[1]
+    dλT[2] = dgₓ(T)[2]
+    #######################################################################
 
     # the residual function
-    function f!(res, dx, x, θ, t)
+    function f!(res, dz, z, θ, t)
         # Dynamic Equations
-        # res[1] = -dλ⋅Fdx(T-t)[:,1] + λ⋅(Fx(T-t)[:,1].-Fddx(T-t)[:,1]) + gₓ(T-t)[1]
-        # # res[2] = -dλ⋅Fdx(T-t)[:,2] + λ⋅(Fx(T-t)[:,2].-Fddx(T-t)[:,2]) + gₓ(T-t)[2]
-        # res[2] = λ⋅(Fx(T-t)[:,2].-Fddx(T-t)[:,2]) + gₓ(T-t)[2]
-        len = length(x)
-        λ  = x[1:len-np]
-        dλ = dx[1:len-np]
-        β  = x[len-np+1:end]
-        βp = dx[len-np+1:end]
-        for i=1:len-np
-            res[i] = -dλ⋅Fdx(T-t)[:,i] + λ⋅(Fddx(T-t)[:,i].-Fx(T-t)[:,i]) + gₓ(T-t)[i]
-        end
-        # Could be written simpler and less general, since np=1 for this model
-        for j = 1:np
-            res[len-np+j] = -βp[j] + (λ')*Fp(T-t)[:,j]
-        end
+        # res[1] = (dλ')*Fdx(t) + (λ')*(Fddx(t)-Fx(t)) + gₓ(t)
+        # res[2] = dβ + (λ')*Fθ
+        res[1:2] = -(dz[1:2]')*Fdx(T-t) + (z[1:2]')*(Fddx(T-t)-Fx(T-t)) + gₓ(T-t)'
+        res[3] = dz[3] + (z[1:2]')*Fθ(T-t)
         nothing
     end
 
-    λT  = gₓ(T)
-    # NOTE: Since dλ[2] doesn't appear in the adjoint system (λ[2] is a algebraic
-    # variable) it seems that the terminal value for dλ[2] doesn't matter, and
-    # can be set to anything, saving us the hassle of computing the derivative of
-    # the true output NOTE: This should be generalizable to all systems in our
-    # approach
-    dλT = [-(2/(zeta(T)^2))*dzeta_dx1(T)*(gₓ(T)[2]); 0.0]
-
-    # println("Adjoint residual: $((dλT')*Fdx(T) + (λT')*(Fddx(T)-Fx(T)) + gₓ(T)')")
-    # println("Terminal constraint: $((λT')*(Fdx(T)))")
+    function get_Gp(adj_sol::DAESolution)
+        Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
+    end
 
     λ0  = λT[:]
     dλ0 = -dλT[:]
+    β0  = 0.0
+    dβ0 = -(λ0')*Fθ(T)
     # x0  = λ0
     # dx0 = dλ0
-    x0  = vcat(λ0, zeros(np))
-    dx0 = vcat(dλ0, (-(Fp(T)')*λT)[:])
-
-    function get_Gp(adj_sol::DAESolution)
-        Gp = -adj_sol.u[end][end-np+1:end] - (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
-    end
+    z0  = vcat(λ0,β0)
+    dz0 = vcat(dλ0, dβ0)
 
     # dvars = [true, false]
-    dvars = vcat([true, false], fill(true, np))
+    dvars = vcat([true, false], [true])
 
     # r0 = zeros(length(λ0))
     # f!(r0, dλ0, λ0, [], 0.0)
-    r0 = zeros(length(x0))
-    f!(r0, dx0, x0, [], 0.0)
+    r0 = zeros(length(z0))
+    f!(r0, dz0, z0, [], 0.0)
+    # @info "r0 is: $r0"
 
     # t -> 0.0 is just a dummy function, not to be used
-    Model(f!, t -> 0.0, x0, dx0, dvars, r0), get_Gp
+    Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
 end
 
 # DEBUG, TODO: Delete

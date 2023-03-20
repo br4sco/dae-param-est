@@ -1450,12 +1450,14 @@ function test_disturbance_sensitivities(expid::String)
     plot!(p, wdiffs_analytical)
 end
 
-function my_new_adjoint_test(exp_id::String)
-    exp_data, isws = get_experiment_data(exp_id)
+# Ultimate stochastic adjoint debugging function
+function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
+    Random.seed!(123)
+    exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
-    η = W_meta.η
     Y = exp_data.Y
     N = size(Y,1)-1
+    u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1463,157 +1465,228 @@ function my_new_adjoint_test(exp_id::String)
     n_tot = nx*n_in
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
-    Zm = [randn(Nw, n_tot) for m=1:M]
-    Y = exp_data.Y
-    np = length(free_dyn_pars_true)
 
-    # This vector contains 𝑎𝑙𝑙 parameters, not only the free ones (i.e., also known parameters)
-    # p = vcat(vcat(get_all_θs(free_dyn_pars_true), W_meta.η))
-    p = vcat(get_all_θs(free_dyn_pars_true), W_meta.η)
-    free_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    p = get_all_parameters(free_dyn_pars_true) # All true parameters
+    θ = p[1:dθ]                                # All true dynamical parameters
+    η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
+    free_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])  # All true free parameters
 
-    # TODO: Do they have to be independent between iterations? Yup, 99.9% sure, so need to generate new white noise
-    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
-    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-    XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+    Zm = [randn(Nw, n_tot) for m = 1:2M]
 
-    u = exp_data.u
-    w1  = wmm(1)
-    w2  = wmm(2)
+    # --------------------------------------------------------------------------
+    # --------------- Forward solution of nominal system -----------------------
+    # --------------------------------------------------------------------------
+    dmdl_true = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl_true, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl_true.Cd, XWm, m, δ)
 
-    forward_solve(m) = solvew(u, wmm(m), free_pars_true, N)
-    # forward_sens_solve(m) = solvew_sens(u, wmm(m), free_pars_true, N) |> h_sens   # TODO: Use later to compare with forward sensitivity
-    sols = get_sol_in_parallel(forward_solve, 1:M)
+    # forward_solve(m) = solvew(u, wmm(m), free_pars_true, N)                 # Without sensitivity analysis
+    forward_solve(m) = solvew_sens(u, wmm(m), free_pars_true, N)              # With sensitivity analysis
+    @info "Starting forward solving..."
+    # @warn "Used to simulate with 2M realizations here, now only with M, to get determinstic cost function"
+    sols_for = get_sol_in_parallel(forward_solve, 1:2M)
+    @info "Finished forward solving!"
 
-    # NOTE: Why do we interpolate Y like this, but e.g. dx as below?
-    # I'm not sure, but it's perhaps not super important right now
-    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    # --------------------------------------------------------------------------
+    # ------------- Cost gradient using forward sensitivty ---------------------
+    # --------------------------------------------------------------------------
+
+    # NOTE: Assumes forward_solve included sensitivities
+
+    my_np = 1   # Only identifying one parameter, namely k
+    Ys = zeros(N+1, length(sols_for))
+    senss = [zeros(N+1, my_np) for j=1:length(sols_for)]
+    cost_grads = zeros(M)
+    for (i, sol) = enumerate(sols_for)
+        Yi, sensi = apply_two_outputfun_mvar(f, f_sens, sol)
+        Ys[:,i] = Yi
+        senss[i] = sensi
+    end
+
+    for m=1:M
+        temp = get_cost_gradient(Y[N_trans+1:end, 1], Ys[N_trans+1:end,m:m], [senss[m]])
+        cost_grads[m] = first(get_cost_gradient(Y[N_trans+1:end, 1], Ys[N_trans+1:end,m:m], [senss[M+m]]))
+    end
+
+    for_dif_est = first(get_cost_gradient(Y[N_trans+1:end, 1], Ys[N_trans+1:end,1:M], senss[M+1:2M]))
+    # cost_grad = first(get_cost_gradient(Y[N_trans+1:end, 1], Ys[N_trans+1:end,1:M], senss[M+1:2M]))
+
+    # For extracting Ys if not using forward sensitivity
+    Ys = zeros(N+1, length(sols_for))
+    for (i, sol) = enumerate(sols_for)
+        Yi = apply_outputfun(f, sol)
+        Ys[:,i] = Yi
+    end
+
+    # --------------------------------------------------------------------------
+    # ------------ Numerical approximation of cost gradient --------------------
+    # --------------------------------------------------------------------------
+
+    # DEBUG: For numerical approximation
+    my_δ = 0.01
+    forward_solve2(m) = solvew(u, wmm(m), free_pars_true.+my_δ, N) |> h # NOTE: Not solving for sensitivities here
+    # @warn "Used to simulate with 2M realizations here, now only with M, to get determinstic cost function"
+    Ym2 = solve_in_parallel(forward_solve2, collect(1:2M))
+
+    numcost1 = get_cost_value(Y[:,1], Ys,  N_trans)
+    numcost2 = get_cost_value(Y[:,1], Ym2, N_trans)
+    num_est = (numcost2-numcost1)/my_δ
+
+    # @info "Ys: $(Ys[5:10,1])"
+    # @info "Y: $(Y[5:10,1])"
+    # @info "Ym2: $(Ym2[5:10,1])"
+    # @info "$numcost1, $numcost2, $num_est"
+    # println(Y[500000,2])
+
+    # # End of above DEBUG
+
+
+    # # NOTE: TODO: Manual way gives sliightly different result, I rly don't know why!!!!!!!!!!!
+    # # ------------------ MANUAL WAY ----------------------
+    # sol_for = solvew_sens(exp_data.u, wmm(1), free_dyn_pars_true, N)
+    # for_sol_data = h_debug(sol_for)
+    # for_sol_mat = zeros(length(sol_for.u),length(sol_for.u[1]))
+    # for i=eachindex(sol_for.u)
+    #     for j=eachindex(sol_for.u[1])
+    #         for_sol_mat[i,j] = sol_for.u[i][j]
+    #     end
+    # end
+    # Y1 = for_sol_mat[:,7]
+    # sens1 = for_sol_mat[:,14]
+    #
+    # sol_for2 = solvew_sens(exp_data.u, wmm(2), free_dyn_pars_true, N)
+    # for_sol_data2 = h_debug(sol_for2)
+    # for_sol_mat2 = zeros(length(sol_for2.u),length(sol_for2.u[1]))
+    # for i=eachindex(sol_for2.u)
+    #     for j=eachindex(sol_for2.u[1])
+    #         for_sol_mat2[i,j] = sol_for2.u[i][j]
+    #     end
+    # end
+    # Y2 = for_sol_mat[:,7]
+    # sens2 = for_sol_mat[:,14]
+    #
+    # # Obtaining cost derivative (deterministic cost from one realization)
+    # for_dif_est = first(get_cost_gradient(Y[1:N+1, 1], reshape(Y1, length(Y1), 1), [reshape(sens1, length(sens1),1)], N_trans))
+    # ----------------------------------------------------
+
+    # --------------------------------------------------------------------------
+    # ------------- Solution of adjoint system (backwards) ---------------------
+    # --------------------------------------------------------------------------
+    # Computing dx
+    function get_der_est(sol)
+        der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
+        # ts = sol.t[1:end-1]
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+    end
+    function get_der_est(vals::Matrix{Float64})
+        # Rows of matrix are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        der_est = (vals[2:end,:]-vals[1:end-1,:])/Ts
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+        # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
+    end
+    function get_mvar_cubic(ts, der_est::Vector{Vector{Float64}})
+        temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
+        t -> [temp[i](t) for i=1:length(temp)]
+        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    end
+    function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
+    end
+
+    y_func  = interpolated_signal(Y[N_trans+1:end,1], 0:Ts:(size(Y,1)-1)*Ts)
     dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
     dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
 
-    # Computing dx
-    function get_der_est(sol)
-        der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
-        # ts = sol.t[1:end-1]
-        ts = 0:Ts:(N-1)*Ts
-        return ts, der_est
-    end
-    function get_mvar_cubic(ts, der_est)
-        temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
-        t -> [temp[i](t) for i=1:length(temp)]
-        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
-    end
-
-    ts, der_est = get_der_est(sols[1])
-    dx = get_mvar_cubic(ts, der_est)
-    ts2, der_est2 = get_der_est(sols[2])
-    dx2 = get_mvar_cubic(ts2, der_est2)
-
     # Computing xp0, initial conditions of derivative of x wrt to p
-    mdl = model_to_use(φ0, u, w1, p)
-    mdl_sens = model_sens_to_use(φ0, u, w1, p)
+    mdl = model_to_use(φ0, u, wmm(1), p)
+    mdl_sens = model_sens_to_use(φ0, u, wmm(1), p)
     n_mdl = length(mdl.x0)
     xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
 
-    mdl_adj, get_Gp = my_pendulum_adjoint(u, wmm(1), p, N*Ts, sols[1], sols[2], y_func, dy_func, xp0, dx, dx2)
 
+    # # -------- MANUAL WAY -------------
+    # ts, der_est = get_der_est(sol_for)
+    # dx = get_mvar_cubic(ts, der_est)
+    # _, der_est2 = get_der_est(sol_for2)
+    # dx2 = get_mvar_cubic(ts, der_est2)
+    # # ts, der_est = get_der_est(sols_for[1])
+    # # dx = get_mvar_cubic(ts, der_est)
+    # # _, der_est2 = get_der_est(sols_for[2])
+    # # dx2 = get_mvar_cubic(ts, der_est2)
+    # mdl_adj, get_Gp = my_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, sol_for, sol_for2, y_func, dy_func, xp0, dx, dx2)
     # adj_prob = problem(mdl_adj, N, Ts)
     # adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
     #     maxiters = maxiters)
+    # Gp = first(get_Gp(adj_sol))
+    # # ---------------------------------
 
-    # DEBUG: Can be used for quicker testing of adjoint method:
-    ad = AdjointData(wmm, y_func, dy_func, u, sols, N, Ts, p, xp0)
-    Gp = 0.3#get_Gp(adj_sol)
-    return Gp, ad
-
-    # Gp = get_Gp(adj_sol)
-    # return Gp, dur
-end
-
-function my_new_adjoint_test_fast(ad::AdjointData)
-    # exp_data, isws = get_experiment_data(exp_id)
-    # W_meta = exp_data.W_meta
-    # η = W_meta.η
-    # Y = exp_data.Y
-    # N = size(Y,1)-1
-    # Nw = exp_data.Nw
-    # nx = W_meta.nx
-    # n_in = W_meta.n_in
-    # n_out = W_meta.n_out
-    # n_tot = nx*n_in
-    # dη = length(W_meta.η)
-    # dist_par_inds = W_meta.free_par_inds
-    # Zm = [randn(Nw, n_tot) for m=1:M]
-    # Y = exp_data.Y
-    # np = length(free_dyn_pars_true)
-    #
-    # # This vector contains 𝑎𝑙𝑙 parameters, not only the free ones (i.e., also known parameters)
-    # # p = vcat(vcat(get_all_θs(free_dyn_pars_true), W_meta.η))
-    # p = vcat(get_all_θs(free_dyn_pars_true), W_meta.η)
-    # free_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])
-    #
-    # # TODO: Do they have to be independent between iterations? Yup, 99.9% sure, so need to generate new white noise
-    # dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
-    # # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-    # XWm = simulate_noise_process_mangled(dmdl, Zm)
-    # wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
-
-    # u = exp_data.u
-    # w1  = wmm(1)
-    # w2  = wmm(2)
-
-    # forward_solve(m) = solvew(u, wmm(m), free_pars_true, N)
-    # # forward_sens_solve(m) = solvew_sens(u, wmm(m), free_pars_true, N) |> h_sens   # TODO: Use later to compare with forward sensitivity
-    # sols = get_sol_in_parallel(forward_solve, 1:M)
-
-    # # NOTE: Why do we interpolate Y like this, but e.g. dx as below?
-    # # I'm not sure, but it's perhaps not super important right now
-    # y_func  = interpolated_signal(ad.Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
-    # dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
-    # dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
-
-    # Computing dx
-    function get_der_est(sol)
-        der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
-        # ts = sol.t[1:end-1]
-        ts = 0:Ts:(ad.N-1)*Ts
-        return ts, der_est
-    end
-    function get_mvar_cubic(ts, der_est)
-        temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
-        t -> [temp[i](t) for i=1:length(temp)]
-        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    function calc_adj_m(m::Int)
+        ts, der_est = get_der_est(sols_for[m])
+        dx = get_mvar_cubic(ts, der_est)
+        # Stochastic cost
+        _, der_est2 = get_der_est(sols_for[M+m])
+        dx2 = get_mvar_cubic(ts, der_est2)
+        mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[M+m], y_func, dy_func, xp0, dx, dx2)
+        adj_prob = problem(mdl_adj, N, Ts)
+        adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+            maxiters = maxiters)
+        return get_Gp(adj_sol)
     end
 
-    ts, der_est = get_der_est(ad.sols[1])
-    dx = get_mvar_cubic(ts, der_est)
-    ts2, der_est2 = get_der_est(ad.sols[2])
-    dx2 = get_mvar_cubic(ts2, der_est2)
+    adj_ms = collect(1:M)
+    Gps = solve_adj_in_parallel(calc_adj_m, adj_ms)
+    Gp = mean(Gps)
 
-    # Computing xp0, initial conditions of derivative of x wrt to p
-    mdl = model_to_use(φ0, ad.u, ad.wmm(1), ad.p)
-    mdl_sens = model_sens_to_use(φ0, ad.u, ad.wmm(1), ad.p)
-    n_mdl = length(mdl.x0)
-    xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
+    # # DEBUG: Alternative way to compute Gp, just to compare
+    # x_for   = for_sol_mat[:, 1:7]
+    # xθ_for  = for_sol_mat[:, 8:14]
+    # adj_sol_mat = zeros(N+1,8)
+    # for i=eachindex(adj_sol.u)
+    #     for j=eachindex(adj_sol.u[1])
+    #         adj_sol_mat[i,j] = adj_sol.u[i][j]
+    #     end
+    # end
+    # λs = adj_sol_mat[end:-1:1,1:7]
+    # βs = adj_sol_mat[end:-1:1,8]
+    # ts, λ_der = get_der_est(λs)
+    # λ_func  = get_mvar_cubic(0:Ts:N*Ts, λs)
+    # dλ_func = get_mvar_cubic(ts, λ_der)
+    #
+    # Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
+    #                         0   1   0          0   0   2x2    0
+    #                         0   0   -x1      0.3   0   0      0
+    #                         0   0   -x2      0   0.3   0      0], zeros(3,7))
+    # # TODO: I should be able to obtain these from the forward problem!
+    # # NOTE: One of the terms here should be zero, if we initialized correctly
+    # term = (λ_func(N*Ts)')*Fdx(x_for[end,1], x_for[end,2])*xθ_for[end,:] - (λ_func(0.)')*Fdx(x_for[1,1], x_for[1,2])*xθ_for[1,:]
+    # Gp_alt = βs[1] - term
+    # # End of DEBUG: Alternative way to compute Gp
 
-    mdl_adj, get_Gp = my_pendulum_adjoint(ad.u, ad.wmm(1), ad.p, ad.N*Ts, ad.sols[1], ad.sols[2], ad.y_func, ad.dy_func, ad.xp0, dx, dx2)
+    # return num_est, Gps
+    return num_est, for_dif_est, Gp, Gps#, cost_grads, cost_grad
+    # return for_dif_est, Gp, Gp_alt
 
-    adj_prob = problem(mdl_adj, ad.N, Ts)
-    adj_sol = solve(adj_prob, saveat = 0:Ts:ad.N*Ts, abstol = abstol, reltol = reltol,
-        maxiters = maxiters)
-
-    Gp = get_Gp(adj_sol)
-
-    return Gp, ad, adj_sol, get_Gp
+    # return num_est, for_dif_est, 0.0, zeros(1000), cost_grads, cost_grad
 end
 
-function test_adjoint_method(exp_id::String)
-    exp_data, isws = get_experiment_data(exp_id)
+# Ultimate deterministic adjoint debugging function
+function debug_adjoint_deterministic(expid::String, N_trans::Int=0)
+    Random.seed!(123)
+    exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
-    η = W_meta.η
     Y = exp_data.Y
     N = size(Y,1)-1
+    u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1621,197 +1694,424 @@ function test_adjoint_method(exp_id::String)
     n_tot = nx*n_in
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
-    Zm = [randn(Nw, n_tot) for m=1:M]
-    Y = exp_data.Y
-    # @warn "Using custom N"
-    # N = 500
-    # N = Int(20/Ts)#size(exp_data.Y,1)-1
-    np = length(free_dyn_pars_true)
-    # N = size(Y,1)-1
 
-    # This vector contains 𝑎𝑙𝑙 parameters, not only the free ones (i.e., also known parameters)
-    p = vcat(vcat(get_all_θs(free_dyn_pars_true), W_meta.η))
-    free_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    p = get_all_parameters(free_dyn_pars_true) # All true parameters
+    θ = p[1:dθ]                                # All true dynamical parameters
+    η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
 
-    # TODO: Do they have to be independent between iterations? Yup, 99% sure, so need to generate new white noise
-    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
-    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-    XWm = simulate_noise_process_mangled(dmdl, Zm)
-    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
-    # NOTE: OPTION 2: Use the rows below here for exact interpolation
-    # reset_isws!(isws)
-    # XWm = simulate_noise_process(dmdl, Zm)
-    # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
+    Zm = [randn(Nw, n_tot) for m = 1:M]
 
-    u = exp_data.u
-    w1  = wmm(1)
-    w2  = wmm(2)
-    # # NOTE: TODO: Using sin(t) as input for pendulum doesn't work at all for some reason
-    # @warn "Using sin(t) instead of real w"
-    # u(t)  = [sin(t)]
-    # w1(t) = [sin(t)]
-    # w2(t) = [cos(t)]
-    # wtrue(t) = [sin(t)]
-    # @warn "Using custom Y"
-    # sol_true = solvew(u, wtrue, p, N)
-    # Y = [sol_true.u[i][2] for i=1:length(sol_true.u)]
+    # --------------------------------------------------------------------------
+    # --------------- Forward solution of nominal system -----------------------
+    # --------------------------------------------------------------------------
+    dmdl_true = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl_true, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl_true.Cd, XWm, m, δ)
 
-    # NOTE: OKAY, BUILT-IN INTERPOLATION IS ZEROTH ORDER (AT LEAST FOR DERIVATIVE)
-    # AND ABSOLUTELY SUCKS, BUT LET'S JUST STICK WITH IT FOR NOW, EASY TO USE AT LEAST
-    # But, TODO: You should probably not use 0th order interpolation in simulation.jl
-    y_func = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    sol_for = solvew_sens(u, wmm(1), free_dyn_pars_true, N)
+    for_sol_data = h_debug(sol_for)
 
-    # # DEBUG
-    # @warn "Doing some debug-plotting"
-    # times_debug = 0:0.01:N*Ts
-    # y_vals = [y_func(t) for t = times_debug]
-    # w1vals = [first(wmm(1)(t)) for t = times_debug]
-    # w2vals = [first(wmm(2)(t)) for t = times_debug]
-    #
-    # p1 = plot(times_debug, y_vals)
-    # savefig(p1, "p1t.png")
-    # p2 = plot(times_debug, w1vals)
-    # savefig(p2, "p2t.png")
-    # p3 = plot(times_debug, w2vals)
-    # savefig(p3, "p3t.png")
-    # # END DEBUG
+    for_sol_mat = zeros(length(sol_for.u),length(sol_for.u[1]))
+    for i=eachindex(sol_for.u)
+        for j=eachindex(sol_for.u[1])
+            for_sol_mat[i,j] = sol_for.u[i][j]
+        end
+    end
+    Y1 = for_sol_mat[:,num_dyn_vars]
+    sens1 = for_sol_mat[:,2num_dyn_vars]
 
+    # Obtaining cost derivative (deterministic cost from one realization)
+    for_dif_est = first(get_cost_gradient(Y[1:N+1, 1], reshape(Y1, length(Y1), 1), [reshape(sens1, length(sens1),1)], N_trans))
 
-    # ws = [w1, w2]
-    # forward_solve(m) = solvew(u, ws[m], p, N)   # Below row more general, this one just used to easier replace by sin()-input
-    forward_solve(m) = solvew(u, wmm(m), free_pars_true, N)
-    # forward_sens_solve(m) = solvew_sens(u, ws[m], p, N)
-    forward_sens_solve(m) = solvew_sens(u, wmm(m), free_pars_true, N) |> h_sens
-    sols = get_sol_in_parallel(forward_solve, 1:M)
+    my_δ = 0.01
+    Y2 = solvew(exp_data.u, wmm(1), free_dyn_pars_true.+my_δ, N) |> h
+    cost  = get_cost_value(Y[:,1], reshape(Y1, length(Y1),1), N_trans)
+    cost2 = get_cost_value(Y[:,1], reshape(Y2, length(Y2),1), N_trans)
+    num_est = (cost2-cost)/my_δ
 
+    # --------------------------------------------------------------------------
+    # ------------- Solution of adjoint system (backwards) ---------------------
+    # --------------------------------------------------------------------------
+    # Computing dx
     function get_der_est(sol)
         der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
         # ts = sol.t[1:end-1]
         ts = 0:Ts:(N-1)*Ts
         return ts, der_est
     end
-    function get_mvar_cubic(ts, der_est)
+    function get_der_est(vals::Matrix{Float64})
+        # Rows of matrix are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        der_est = (vals[2:end,:]-vals[1:end-1,:])/Ts
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+        # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
+    end
+    function get_mvar_cubic(ts, der_est::Vector{Vector{Float64}})
         temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
         t -> [temp[i](t) for i=1:length(temp)]
         # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
     end
-    function get_mvar_linear(ts, der_est)
-        temp = [linear_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
-        t -> [temp[i](t) for i=1:length(temp)]
-        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
     end
-    ts, der_est = get_der_est(sols[1])
-    dx = t -> sols[1](t, Val{1})
-    dx2 = get_mvar_cubic(ts, der_est)
-    dx3 = get_mvar_linear(ts, der_est)
+
+    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
+    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    ts, der_est = get_der_est(sol_for)
+    dx = get_mvar_cubic(ts, der_est)
 
     # Computing xp0, initial conditions of derivative of x wrt to p
-    mdl = model_to_use(φ0, u, w1, p)
-    mdl_sens = model_sens_to_use(φ0, u, w1, p)
+    mdl = model_to_use(φ0, u, wmm(1), p)
+    mdl_sens = model_sens_to_use(φ0, u, wmm(1), p)
     n_mdl = length(mdl.x0)
     xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
-    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sols[1], sols[2], y_func, xp0, dx2)
+
+    # mdl_adj, get_Gp = my_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, sol_for, sol_for, y_func, dy_func, xp0, dx, dx)
+    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sol_for, sol_for, y_func, dy_func, xp0, dx, dx)
     adj_prob = problem(mdl_adj, N, Ts)
-    adj_start = now()
-    # adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
-    #     maxiters = maxiters)
-    dur = now() - adj_start
+    adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+        maxiters = maxiters)
 
-    # DEBUG: Can be used for quicker testing of adjoint method:
-    ad = AdjointData(wmm, y_func, u, sols, N, Ts, p, xp0)
-    Gp = 0.3#get_Gp(adj_sol)
-    return Gp, ad
+    Gp = first(get_Gp(adj_sol))
+    # DEBUG: Alternative way to compute Gp, just to compare
+    x_for   = for_sol_mat[:, 1:num_dyn_vars]
+    xθ_for  = for_sol_mat[:, num_dyn_vars+1:2num_dyn_vars]
+    adj_sol_mat = zeros(N+1,num_dyn_vars+1)
+    for i=eachindex(adj_sol.u)
+        for j=eachindex(adj_sol.u[1])
+            adj_sol_mat[i,j] = adj_sol.u[i][j]
+        end
+    end
+    λs = adj_sol_mat[end:-1:1,1:num_dyn_vars]
+    βs = adj_sol_mat[end:-1:1,num_dyn_vars+1]
+    ts, λ_der = get_der_est(λs)
+    λ_func  = get_mvar_cubic(0:Ts:N*Ts, λs)
+    dλ_func = get_mvar_cubic(ts, λ_der)
 
-    # Gp = get_Gp(adj_sol)
-    # return Gp, dur
+    term = 0.0
+    if model_id == PENDULUM
+        Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
+                                0   1   0          0   0   2x2    0
+                                0   0   -x1      0.3   0   0      0
+                                0   0   -x2      0   0.3   0      0], zeros(3,7))
+    elseif model_id == MOH_MDL
+        Fdx = (x1, x2) -> [1.0 0.0; 0.0 0.0]
+    end
+    # TODO: I should be able to obtain these from the forward problem!
+    # NOTE: One of the terms here should be zero, if we initialized correctly
+    term = (λ_func(N*Ts)')*Fdx(x_for[end,1], x_for[end,2])*xθ_for[end,:] - (λ_func(0.)')*Fdx(x_for[1,1], x_for[1,2])*xθ_for[1,:]
+    Gp_alt = βs[1] - term
+    # End of DEBUG: Alternative way to compute Gp
+
+    return num_est, for_dif_est, Gp, Gp_alt#, debug_thing, term#, λs
 end
 
-function test_adjoint_method_fast(ad::AdjointData)
-    u = ad.u
-    wmm = ad.wmm
-    p = ad.p
-    N = ad.N
-    Ts = ad.Ts
-    sols = ad.sols
-    y_func = ad.y_func
-    xp0 = ad.xp0
+# Ultimate deterministic adjoint debugging function
+function debug_adjoint_semistochastic(expid::String, N_trans::Int=0)
+    Random.seed!(123)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    u = exp_data.u
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
 
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    p = get_all_parameters(free_dyn_pars_true) # All true parameters
+    θ = p[1:dθ]                                # All true dynamical parameters
+    η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
+    free_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])  # All true free parameters
+
+    # Zm = [randn(Nw, n_tot) for m = 1:2M]
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # --------------------------------------------------------------------------
+    # --------------- Forward solution of nominal system -----------------------
+    # --------------------------------------------------------------------------
+    dmdl_true = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl_true, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl_true.Cd, XWm, m, δ)
+
+    forward_solve(m) = solvew_sens(u, wmm(m), free_pars_true, N)
+    @info "Starting forward solving..."
+    # sols_for = get_sol_in_parallel(forward_solve, 1:2M)
+    sols_for = get_sol_in_parallel(forward_solve, 1:M)
+    @info "Finished forward solving!"
+
+    # --------------------------------------------------------------------------
+    # ------------- Cost gradient using forward sensitivty ---------------------
+    # --------------------------------------------------------------------------
+
+    my_np = 1   # Only identifying one parameter, namely k
+    Ys = zeros(N+1, length(sols_for))
+    senss = [zeros(N+1, my_np) for j=1:length(sols_for)]
+    for_dif_ests = zeros(M)
+    for (i, sol) = enumerate(sols_for)
+        Yi, sensi = apply_two_outputfun_mvar(f, f_sens, sol)
+        Ys[:,i] = Yi
+        senss[i] = sensi
+    end
+
+    for m=1:M
+        temp = get_cost_gradient(Y[:,1], Ys[:,m:m], [senss[m]])
+        for_dif_ests[m] = first(get_cost_gradient(Y[:,1], Ys[:,m:m], [senss[m]]))
+        # for_dif_ests[m] = first(get_cost_gradient(Y[:,1], Ys[:,m:m], [senss[M+m]]))
+    end
+
+    for_dif_est = first(get_cost_gradient(Y[:,1], Ys[:,1:M], senss[1:M]))
+    # for_dif_est = first(get_cost_gradient(Y[:,1], Ys[:,1:M], senss[M+1:2M]))
+    for_dif_est2 = 0.0
+    for m=1:M
+        for_dif_est2 += first(get_cost_gradient(Y[:,1], Ys[:,m:m], senss[m:m]))
+    end
+    for_dif_est2 = for_dif_est2/M;
+
+
+    # For extracting Ys if not using forward sensitivity
+    Ys = zeros(N+1, length(sols_for))
+    for (i, sol) = enumerate(sols_for)
+        Yi = apply_outputfun(f, sol)
+        Ys[:,i] = Yi
+    end
+
+    # --------------------------------------------------------------------------
+    # ------------ Numerical approximation of cost gradient --------------------
+    # --------------------------------------------------------------------------
+
+    my_δ = 0.01
+    forward_solve2(m) = solvew(u, wmm(m), free_pars_true.+my_δ, N) |> h # NOTE: Not solving for sensitivities here
+    # Ym2 = solve_in_parallel(forward_solve2, collect(1:2M))
+    Ym2 = solve_in_parallel(forward_solve2, collect(1:M))
+    cost  = get_cost_value(Y[:,1], Ys, N_trans)
+    cost2 = get_cost_value(Y[:,1], Ym2, N_trans)
+    num_est = (cost2-cost)/my_δ
+
+    num_est2 = 0.0
+    for m = 1:M
+        cost  = get_cost_value(Y[:,1], Ys[:,m:m], N_trans)
+        cost2 = get_cost_value(Y[:,1], Ym2[:,m:m], N_trans)
+        num_est2 += (cost2-cost)/my_δ
+    end
+    num_est2 = num_est2/M
+
+    ######################
+    ########################
+    # ACTUALLY USE NTRANS!!!!!!!!!!
+    # AND FIX STOCHSATIC TOOO!!!
+
+    ##################################################################################
+    # NOTE NOTE: STOCHASTIC CODE TALKS ABOUT SOME MANUAL WAY, IS THAT OF ANY RELEVANCE HERE??
+    ##################################################################################
+
+
+    # --------------------------------------------------------------------------
+    # ------------- Solution of adjoint system (backwards) ---------------------
+    # --------------------------------------------------------------------------
+    # Computing dx
     function get_der_est(sol)
         der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
         # ts = sol.t[1:end-1]
         ts = 0:Ts:(N-1)*Ts
         return ts, der_est
     end
-    function get_mvar_cubic(ts, der_est)
+    function get_der_est(vals::Matrix{Float64})
+        # Rows of matrix are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        der_est = (vals[2:end,:]-vals[1:end-1,:])/Ts
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+        # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
+    end
+    function get_mvar_cubic(ts, der_est::Vector{Vector{Float64}})
         temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
         t -> [temp[i](t) for i=1:length(temp)]
         # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
     end
-    function get_mvar_linear(ts, der_est)
-        temp = [linear_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
+    function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
+    end
+
+    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
+    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    # ts, der_est = get_der_est(sol_for)
+    # dx = get_mvar_cubic(ts, der_est)
+
+    # Computing xp0, initial conditions of derivative of x wrt to p
+    mdl = model_to_use(φ0, u, wmm(1), p)
+    mdl_sens = model_sens_to_use(φ0, u, wmm(1), p)
+    n_mdl = length(mdl.x0)
+    xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
+
+    function calc_adj_m(m::Int)
+        ts, der_est = get_der_est(sols_for[m])
+        dx = get_mvar_cubic(ts, der_est)
+        # _, der_est2 = get_der_est(sols_for[M+m])
+        # dx2 = get_mvar_cubic(ts, der_est2)
+        der_est2 = der_est
+        dx2 = dx
+        # mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[M+m], y_func, dy_func, xp0, dx, dx2)
+        mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[m], y_func, dy_func, xp0, dx, dx2)
+        adj_prob = problem(mdl_adj, N, Ts)
+        adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+            maxiters = maxiters)
+        return get_Gp(adj_sol)
+    end
+
+    adj_ms = collect(1:M)
+    Gps    = solve_adj_in_parallel(calc_adj_m, adj_ms)
+    Gp     = mean(Gps)
+
+    # mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sol_for, sol_for, y_func, dy_func, xp0, dx, dx)
+    # adj_prob = problem(mdl_adj, N, Ts)
+    # adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+    #     maxiters = maxiters)
+    #
+    # Gp = first(get_Gp(adj_sol))
+    # # DEBUG: Alternative way to compute Gp, just to compare
+    # x_for   = for_sol_mat[:, 1:num_dyn_vars]
+    # xθ_for  = for_sol_mat[:, num_dyn_vars+1:2num_dyn_vars]
+    # adj_sol_mat = zeros(N+1,num_dyn_vars+1)
+    # for i=eachindex(adj_sol.u)
+    #     for j=eachindex(adj_sol.u[1])
+    #         adj_sol_mat[i,j] = adj_sol.u[i][j]
+    #     end
+    # end
+    # λs = adj_sol_mat[end:-1:1,1:num_dyn_vars]
+    # βs = adj_sol_mat[end:-1:1,num_dyn_vars+1]
+    # ts, λ_der = get_der_est(λs)
+    # λ_func  = get_mvar_cubic(0:Ts:N*Ts, λs)
+    # dλ_func = get_mvar_cubic(ts, λ_der)
+    #
+    # term = 0.0
+    # if model_id == PENDULUM
+    #     Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
+    #                             0   1   0          0   0   2x2    0
+    #                             0   0   -x1      0.3   0   0      0
+    #                             0   0   -x2      0   0.3   0      0], zeros(3,7))
+    # elseif model_id == MOH_MDL
+    #     Fdx = (x1, x2) -> [1.0 0.0; 0.0 0.0]
+    # end
+    # # TODO: I should be able to obtain these from the forward problem!
+    # # NOTE: One of the terms here should be zero, if we initialized correctly
+    # term = (λ_func(N*Ts)')*Fdx(x_for[end,1], x_for[end,2])*xθ_for[end,:] - (λ_func(0.)')*Fdx(x_for[1,1], x_for[1,2])*xθ_for[1,:]
+    # Gp_alt = βs[1] - term
+    # # End of DEBUG: Alternative way to compute Gp
+
+    return num_est, for_dif_est, Gp, Gps, num_est2, for_dif_est2
+end
+
+# Ultimate benchmarkin problem generating function
+function get_benchmarking_problems(expid::String, N_trans::Int=0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    u = exp_data.u
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    p = get_all_parameters(free_dyn_pars_true) # All true parameters
+    θ = p[1:dθ]                                # All true dynamical parameters
+    η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
+
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # --------------------------------------------------------------------------
+    # --------------- Forward solution of nominal system -----------------------
+    # --------------------------------------------------------------------------
+    dmdl_true = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl_true, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl_true.Cd, XWm, m, δ)
+    sol_for = solvew_sens(u, wmm(1), free_dyn_pars_true, N)
+
+    for_prob = problem(
+        model_sens_to_use(φ0, u, wmm(1), p), N, Ts)
+
+    # --------------------------------------------------------------------------
+    # ------------- Solution of adjoint system (backwards) ---------------------
+    # --------------------------------------------------------------------------
+    # Computing dx
+    function get_der_est(sol)
+        der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
+        # ts = sol.t[1:end-1]
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+    end
+    function get_der_est(vals::Matrix{Float64})
+        # Rows of matrix are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        der_est = (vals[2:end,:]-vals[1:end-1,:])/Ts
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+        # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
+    end
+    function get_mvar_cubic(ts, der_est::Vector{Vector{Float64}})
+        temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
         t -> [temp[i](t) for i=1:length(temp)]
         # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
     end
-    ts, der_est = get_der_est(sols[1])
-    dx = t -> sols[1](t, Val{1})
-    dx2 = get_mvar_cubic(ts, der_est)
-    dx3 = get_mvar_linear(ts, der_est)
-
-    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sols[1], sols[2], y_func, xp0, dx3)
-    adj_prob = problem(mdl_adj, N, Ts)
-    adj_start = now()
-    adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
-        maxiters = maxiters)
-    dur = now() - adj_start
-
-    # TODO: This doesn't work. Consider fixing? Or just use interpolation package?
-    function lin_interp(ys, ts, t)
-        @warn "This doesn't seem to inteprolate correctly, figure out why"
-        k = Int(floor(t/Ts) + 1) # Just floor(t/Ts) gives index if indices start at 0
-        t1 = k*Ts
-        t2 = (k+1)*Ts
-        if k < 1
-            @warn "Requesting sample before t=0"
-            y = ys[1]
-        elseif k > length(ys)
-            @warn "Requesting sample after t=T"
-            y = ys[end]
-        else
-            # y1 = sol.u[k]
-            # y2 = sol.u[k+1]
-            # t1 = sol.t[k]
-            # t2 = sol.t[k+1]
-            # y = ((t-t1)*y2 + (t2-t)*y1)/Ts
-            y = ((t-t1)*ys[k+1] .+ (t2-t)*ys[k])./Ts
-        end
-        return y
+    function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
     end
-    # function lin_interp(sol, t)
-    #     k = Int(floor(t/Ts) + 1) # Just floor(t/Ts) gives index if indices start at 0
-    #     if k < 0
-    #         @warn "Requesting sample before t=0"
-    #         y = sol.u[1]
-    #     elseif k > length(sol.t)
-    #         @warn "Requesting sample after t=T"
-    #         y = sol.u[end]
-    #     else
-    #         # y1 = sol.u[k]
-    #         # y2 = sol.u[k+1]
-    #         # t1 = sol.t[k]
-    #         # t2 = sol.t[k+1]
-    #         # y = ((t-t1)*y2 + (t2-t)*y1)/Ts
-    #         y = ((t-sol.t[k])*sol.u[k+1] .+ (sol.t[k+1]-t)*sol.u[k])./Ts
-    #     end
-    #     return y
-    # end
-    # function der_est(sol, t)
-    #     h = 1e-6
-    #     return (lin_interp(sol, t+h).-lin_interp(sol, t))./h
-    # end
 
-    Gp = get_Gp(adj_sol)
-    # Gp = 0.3
-    return Gp, dur
+    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
+    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    ts, der_est = get_der_est(sol_for)
+    dx = get_mvar_cubic(ts, der_est)
+
+    # Computing xp0, initial conditions of derivative of x wrt to p
+    mdl = model_to_use(φ0, u, wmm(1), p)
+    mdl_sens = model_sens_to_use(φ0, u, wmm(1), p)
+    n_mdl = length(mdl.x0)
+    xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)
+
+    mdl_adj, get_Gp = my_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, sol_for, sol_for, y_func, dy_func, xp0, dx, dx)
+    adj_prob = problem(mdl_adj, N, Ts)
+
+    trange = 0:Ts:N*Ts
+
+    #= To compare benchmarks, run
+    @benchmark for_sol = solve(for_prob, saveat = trange, abstol = abstol, reltol = reltol, maxiters = 1000)
+    and
+    @benchmark adj_sol = solve(adj_prob, saveat = trange, abstol = abstol, reltol = reltol, maxiters = 1000)
+    =#
+
+    return for_prob, adj_prob, trange
 end
 
 function interpolated_signal(out, times)
