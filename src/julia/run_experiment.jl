@@ -78,7 +78,7 @@ demangle_XW(XW::Array{Float64, 2}, n_tot::Int) =
 # NOTE: SCALAR_OUTPUT is assumed
 # NOTE: The realizaitons Ym and jacYm must be independent for this to return
 # an unbiased estimate of the cost function gradient
-function get_cost_gradient(Y::Array{Float64,1}, Ym::Array{Float64,2}, jacsYm::Array{Array{Float64,2},1}, N_trans::Int=0)
+function get_cost_gradient(Y::Vector{Float64}, Ym::Matrix{Float64}, jacsYm::Vector{Matrix{Float64}}, N_trans::Int=0)
     # N = size(Y,1)-1, since Y also contains the zeroth sample.
     # While we sum over t0, t1, ..., tN, the error at t0 will always be zero
     # due to known initial conditions which is why we divide by N instead of N+1
@@ -257,7 +257,7 @@ if model_id == PENDULUM
     const_learning_rate = [0.1, 1.0, 1.0, 0.01, 0.1, 0.01]
     model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
-    model_adj_to_use = pendulum_adjoint
+    model_adj_to_use = my_pendulum_adjoint_konly
 elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
@@ -268,7 +268,7 @@ elseif model_id == MOH_MDL
     const_learning_rate = [0.1]
     model_sens_to_use = mohamed_sens
     model_to_use = model_mohamed
-    model_adj_to_use = mohamed_adjoint
+    model_adj_to_use = mohamed_adjoint_new
 end
 
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
@@ -889,7 +889,7 @@ function simulate_system_sens(
     exp_data::ExperimentData,
     free_pars::Array{Float64,1},
     M::Int,
-    dist_sens_inds::Array{Int64, 1},
+    dist_sens_inds::Array{Int64, 1},    # TODO: Aren't these included in exp_data? Why pass them separately then? Just seems random
     isws::Array{InterSampleWindow,1},
     Zm::Array{Array{Float64,2},1})::Tuple{Array{Float64,2}, Array{Array{Float64,2},1}}
 
@@ -1060,6 +1060,42 @@ function sample_cost_func(expid::String, par_vec::Array{Array{Float64,1},1}, N_t
 
     # In base_cost_vals, columns (x-axis) correspond to different values of the second parameter
     return par_vec, base_cost_vals, prop_cost_vals
+end
+
+# NOTE: Only genererates proposed cost function gradient (using forward sensitivity). TODO: Also get baseline?
+function sample_cost_func_grad(expid::String, par_vec::Array{Array{Float64,1},1}, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    # N = 200
+    # @warn "Using N=200 instead of default!!!!!!!!!!"
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    Zm = [randn(Nw, n_tot) for m = 1:2M]
+
+    # === Computing cost function of baseline model
+    # base_cost_vals = zeros(length(par_vec))
+    prop_grad_vals = zeros(length(par_vec),length(par_vec[1]))
+    for (i,pars) in enumerate(par_vec)
+        # Ys = solvew(exp_data.u, t -> zeros(n_out), pars, N) |> h
+        # base_cost_vals[i] = first(mean((Y[N_trans+1:N+1, 1].-Ys[N_trans+1:end]).^2, dims=1))
+        Ym, jacsYm = simulate_system_sens(exp_data, pars, 2M, dist_sens_inds, isws, Zm)
+        prop_grad_vals[i,:] = get_cost_gradient(Y[1:N+1, 1], Ym[:,1:M], jacsYm[M+1:end], N_trans)   # TODO: This one crashes, figure out what get_cost_gradient actually returns. Or maybe it crashes inside?
+    end
+
+    # In base_cost_vals, columns (x-axis) correspond to different values of the second parameter
+    return par_vec, prop_grad_vals
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
@@ -1505,13 +1541,20 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
         senss[i] = sensi
     end
 
-    for m=1:M
-        temp = get_cost_gradient(Y[N_trans+1:end, 1], Ys[N_trans+1:end,m:m], [senss[m]])
-        cost_grads[m] = first(get_cost_gradient(Y[N_trans+1:end, 1], Ys[N_trans+1:end,m:m], [senss[M+m]]))
-    end
+    # TODO: Delete
+    # for m=1:M
+    #     cost_grads[m] = first(get_cost_gradient(Y[:, 1], Ys[:,m:m], [senss[M+m]], N_trans))
+    # end
 
-    for_dif_est = first(get_cost_gradient(Y[N_trans+1:end, 1], Ys[N_trans+1:end,1:M], senss[M+1:2M]))
-    # cost_grad = first(get_cost_gradient(Y[N_trans+1:end, 1], Ys[N_trans+1:end,1:M], senss[M+1:2M]))
+    for_dif_est = first(get_cost_gradient(Y[:, 1], Ys[:,1:M], senss[M+1:2M], N_trans))
+    # for_dif_est = first(get_cost_gradient(Y[:, 1], Ys[:,1:M], senss[1:M], N_trans))
+
+    for_dif_est2 = 0.0
+    for m=1:M
+        # for_dif_est2 += first(get_cost_gradient(Y[:,1], Ys[:,m:m], senss[m:m]))
+        for_dif_est2 += first(get_cost_gradient(Y[:,1], Ys[:,m:m], senss[M+m:M+m]))
+    end
+    for_dif_est2 = for_dif_est2/M;
 
     # For extracting Ys if not using forward sensitivity
     Ys = zeros(N+1, length(sols_for))
@@ -1524,7 +1567,6 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
     # ------------ Numerical approximation of cost gradient --------------------
     # --------------------------------------------------------------------------
 
-    # DEBUG: For numerical approximation
     my_δ = 0.01
     forward_solve2(m) = solvew(u, wmm(m), free_pars_true.+my_δ, N) |> h # NOTE: Not solving for sensitivities here
     # @warn "Used to simulate with 2M realizations here, now only with M, to get determinstic cost function"
@@ -1534,14 +1576,13 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
     numcost2 = get_cost_value(Y[:,1], Ym2, N_trans)
     num_est = (numcost2-numcost1)/my_δ
 
-    # @info "Ys: $(Ys[5:10,1])"
-    # @info "Y: $(Y[5:10,1])"
-    # @info "Ym2: $(Ym2[5:10,1])"
-    # @info "$numcost1, $numcost2, $num_est"
-    # println(Y[500000,2])
-
-    # # End of above DEBUG
-
+    num_est2 = 0.0
+    for m = 1:M
+        cost  = get_cost_value(Y[:,1], Ys[:,m:m], N_trans)
+        cost2 = get_cost_value(Y[:,1], Ym2[:,m:m], N_trans)
+        num_est2 += (cost2-cost)/my_δ
+    end
+    num_est2 = num_est2/M
 
     # # NOTE: TODO: Manual way gives sliightly different result, I rly don't know why!!!!!!!!!!!
     # # ------------------ MANUAL WAY ----------------------
@@ -1637,6 +1678,7 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
         _, der_est2 = get_der_est(sols_for[M+m])
         dx2 = get_mvar_cubic(ts, der_est2)
         mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[M+m], y_func, dy_func, xp0, dx, dx2)
+        # mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[m], y_func, dy_func, xp0, dx, dx)
         adj_prob = problem(mdl_adj, N, Ts)
         adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
             maxiters = maxiters)
@@ -1672,11 +1714,8 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
     # Gp_alt = βs[1] - term
     # # End of DEBUG: Alternative way to compute Gp
 
-    # return num_est, Gps
-    return num_est, for_dif_est, Gp, Gps#, cost_grads, cost_grad
-    # return for_dif_est, Gp, Gp_alt
-
-    # return num_est, for_dif_est, 0.0, zeros(1000), cost_grads, cost_grad
+    return num_est, for_dif_est, Gp, num_est2, for_dif_est2
+    # return num_est, for_dif_est, Gp, Gps, num_est2, for_dif_est2
 end
 
 # Ultimate deterministic adjoint debugging function
@@ -1868,17 +1907,18 @@ function debug_adjoint_semistochastic(expid::String, N_trans::Int=0)
         senss[i] = sensi
     end
 
-    for m=1:M
-        temp = get_cost_gradient(Y[:,1], Ys[:,m:m], [senss[m]])
-        for_dif_ests[m] = first(get_cost_gradient(Y[:,1], Ys[:,m:m], [senss[m]]))
-        # for_dif_ests[m] = first(get_cost_gradient(Y[:,1], Ys[:,m:m], [senss[M+m]]))
-    end
-
     for_dif_est = first(get_cost_gradient(Y[:,1], Ys[:,1:M], senss[1:M]))
     # for_dif_est = first(get_cost_gradient(Y[:,1], Ys[:,1:M], senss[M+1:2M]))
+
+    # TODO: Delete
+    # for m=1:M
+    #     for_dif_ests[m] = first(get_cost_gradient(Y[:,1], Ys[:,m:m], [senss[m]]))
+    #     # for_dif_ests[m] = first(get_cost_gradient(Y[:,1], Ys[:,m:m], [senss[M+m]]))
+    # end
     for_dif_est2 = 0.0
     for m=1:M
         for_dif_est2 += first(get_cost_gradient(Y[:,1], Ys[:,m:m], senss[m:m]))
+        # for_dif_est2 += first(get_cost_gradient(Y[:,1], Ys[:,m:m], senss[M+m:M+m]))
     end
     for_dif_est2 = for_dif_est2/M;
 
@@ -2019,7 +2059,10 @@ function debug_adjoint_semistochastic(expid::String, N_trans::Int=0)
     # Gp_alt = βs[1] - term
     # # End of DEBUG: Alternative way to compute Gp
 
-    return num_est, for_dif_est, Gp, Gps, num_est2, for_dif_est2
+    # # num_est and for_dif_est estimate cost function gradient in a different
+    # # way and will therefore not match Gp
+    # return num_est, for_dif_est, Gp, Gps, num_est2, for_dif_est2
+    return num_est2, for_dif_est2, Gp
 end
 
 # Ultimate benchmarkin problem generating function
@@ -3685,7 +3728,7 @@ function gridsearch_2distsens(expid::String, N_trans::Int = 0)
 
     δ1 = a1ref/50
     δ2 = a2ref/50
-    num_steps = 1#0
+    num_steps = 10
     a1vals = a1ref-num_steps*δ1:δ1:a1ref+num_steps*δ1
     a2vals = a2ref-num_steps*δ2:δ2:a2ref+num_steps*δ2
 
@@ -3716,6 +3759,87 @@ function gridsearch_2distsens(expid::String, N_trans::Int = 0)
     duration = now()-time_start
 
     return a1vals, a2vals, cost_vals, duration
+end
+
+function gridsearch_with_grad_2distsens(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
+
+    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # NOTE: All parameters have to be set as free for this functions,
+    # so that we can set m, L, k, and c to their fixed values
+    # Taken from from_Alsvin/20k_hugest_differentadam/2000its_biasstart
+    # mean starting from iteration 500 forward, of all parameters that were
+    # relatively constant (so should be close to minimum)
+    mfix = 0.2980673022654188
+    Lfix = 6.288208419671489
+    kfix = 6.264040559373865
+    cfix = 0.5258645076185884
+
+    a1ref = 0.8
+    a2ref = 16.0
+
+    δ1 = a1ref/50
+    δ2 = a2ref/50
+    num_steps = 10
+    a1vals = a1ref-num_steps*δ1:δ1:a1ref+num_steps*δ1
+    a2vals = a2ref-num_steps*δ2:δ2:a2ref+num_steps*δ2
+
+    # cost_vals = [zeros(length(avals), length(kvals)) for e=1:E]
+    cost_vals   = [fill(NaN, (length(a1vals), length(a2vals))) for e=1:E]
+    cost_grads1 = [fill(NaN, (length(a1vals), length(a2vals))) for e=1:E]
+    cost_grads2 = [fill(NaN, (length(a1vals), length(a2vals))) for e=1:E]
+    ind = 1
+    time_start = now()
+    try
+        for (i1, my_a1) in enumerate(a1vals)
+            for (i2, my_a2) in enumerate(a2vals)
+                for e = 1:E
+                    pars = [mfix, Lfix, kfix, my_a1, my_a2, cfix]
+                    Ym, jacsYm = simulate_system_sens(exp_data, pars, M, dist_sens_inds, isws, Zm)
+                    cost_grad = get_cost_gradient(Y[:,3], Ym[:,1:M÷2], jacsYm[M÷2+1:end], N_trans)
+                    # Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                    # cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
+                    cost_vals[e][i1, i2] = get_cost_value(Y[:,3], Ym, N_trans)
+                    cost_grads1[e][i1, i2] = cost_grad[1]
+                    cost_grads2[e][i1, i2] = cost_grad[2]
+                    @info "Completed computing cost and gradient for e = $e, i1=$i1, i2=$i2. WARN: Using e=3 instead of default"
+                end
+                ind += 1
+            end
+        end
+    finally
+        writedlm(joinpath(data_dir, "tmp/backup_a1vals.csv"), a1vals, ',')
+        writedlm(joinpath(data_dir, "tmp/backup_a2vals.csv"), a2vals, ',')
+        for e=1:E
+            writedlm(joinpath(data_dir, "tmp/cost_vals_$e.csv"), cost_vals[e], ',')
+            writedlm(joinpath(data_dir, "tmp/cost_grads1_$e.csv"), cost_grads1[e], ',')
+            writedlm(joinpath(data_dir, "tmp/cost_grads2_$e.csv"), cost_grads2[e], ',')
+        end
+    end
+    duration = now()-time_start
+
+    return a1vals, a2vals, cost_vals, cost_grads1, cost_grads2, duration
 end
 
 function get_3par_plottable(all_pars, cost_vals)
