@@ -4232,7 +4232,7 @@ function gridsearch_2distsens_directional(expid::String, N_trans::Int = 0)
         for ix in 1:length(scales)
             for iy in 1:length(ort_scales)
                 for e = 1:E
-                    dist_pars = ref + xdiffs[:,ix] + ydiffs[:,ix]
+                    dist_pars = ref + xdiffs[:,ix] + ydiffs[:,iy]
                     par_vals[ix, iy] = dist_pars
                     pars = [mfix, Lfix, kfix, dist_pars[1], dist_pars[2], cfix]
                     Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
