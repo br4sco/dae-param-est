@@ -249,14 +249,14 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [L]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
-    get_all_θs(pars::Array{Float64,1}) = [m, pars[1], g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [1.0]#[0.1, 1.0, 1.0]#, 0.01, 0.1, 0.01]
-    model_sens_to_use = pendulum_sensitivity_L#_sans_g#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [0.1, 1.0, 1.0, 0.01, 0.1, 0.01]
+    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_Lonly
     model_stepbystep = pendulum_adj_stepbystep_L
@@ -573,8 +573,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
-    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
+    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
@@ -4168,6 +4168,90 @@ function gridsearch_2distsens(expid::String, N_trans::Int = 0)
     duration = now()-time_start
 
     return a1vals, a2vals, cost_vals, duration
+end
+
+function gridsearch_2distsens_directional(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
+
+    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # NOTE: All parameters have to be set as free for this functions,
+    # so that we can set m, L, k, and c to their fixed values
+    # Taken from from_Alsvin/20k_hugest_differentadam/2000its_biasstart
+    # mean starting from iteration 500 forward, of all parameters that were
+    # relatively constant (so should be close to minimum)
+    mfix = 0.2980673022654188
+    Lfix = 6.288208419671489
+    kfix = 6.264040559373865
+    cfix = 0.5258645076185884
+
+    a1ref = 0.8
+    a2ref = 16.0
+    ref = [a1ref, a2ref]
+    dir = [a1ref, -a2ref]
+    ort_dir = [a2ref, a1ref]
+
+    scale = 0.5
+    num_steps = 10
+    scales = -scale:(1/2num_steps):scale
+    ort_scales = -0.02:0.01:0.02
+    lenx = length(scales)
+    leny = length(ort_scales)
+    # Creates matrices, where each column is a vector pointing in the direction
+    # of dir (ort_dir), with a scale given by scales (ort_scales), each row
+    # corresponding to one scale
+    xdiffs = dir*(collect(scales)')
+    ydiffs = dir*(collect(ort_scales)')
+    par_vals = Matrix{Vector{Float64}}(undef, (length(scales),length(ort_scales)))
+
+    # cost_vals = [zeros(length(avals), length(kvals)) for e=1:E]
+    cost_vals = [fill(NaN, (length(scales), length(ort_scales))) for e=1:E]
+    ind = 1
+    time_start = now()
+    try
+        for ix in 1:length(scales)
+            for iy in 1:length(ort_scales)
+                for e = 1:E
+                    dist_pars = ref + xdiffs[:,ix] + ydiffs[:,ix]
+                    par_vals[ix, iy] = dist_pars
+                    pars = [mfix, Lfix, kfix, dist_pars[1], dist_pars[2], cfix]
+                    Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                    # cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                    cost_vals[e][ix, iy] = mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
+                    @info "Completed computing cost for e = $e, ix=$ix, iy=$iy out of ($lenx, $leny). WARN: Using e=3 instead of default"
+                end
+                # ind += 1
+            end
+        end
+    finally
+        writedlm(joinpath(data_dir, "tmp/backup_parvals.csv"), par_vals, ',')
+        for e=1:E
+            writedlm(joinpath(data_dir, "tmp/cost_vals_$e.csv"), cost_vals[e], ',')
+        end
+    end
+    duration = now()-time_start
+
+    return par_vals, cost_vals, duration
 end
 
 function gridsearch_with_grad_2distsens(expid::String, N_trans::Int = 0)
