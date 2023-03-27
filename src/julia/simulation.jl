@@ -299,7 +299,7 @@ function pendulum_dist_sens_3(Φ::Float64, u::Function, w::Function, θ::Array{F
     end
 end
 
-function pendulum_sensitivity(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_k(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1778,8 +1778,8 @@ function my_pendulum_adjoint(u::Function, w::Function, θ::Vector{Float64}, T::F
         Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
                     0           2*dx(t)[6]          0   0                   -1          0   0
                     -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
-                    0          -dx(t)[3]            0   0               2k*abs(x(t)[5]) 0   0
-                    -2x(t)[1]     -2x(t)[2]         0   0                   0           0   0
+                    0            -dx(t)[3]          0   0               2k*abs(x(t)[5]) 0   0
+                    2x(t)[1]      2x(t)[2]          0   0                   0           0   0
                     x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
                     x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
         # (namely the derivative of F with respect to the variable x_p)
@@ -1907,8 +1907,8 @@ function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}
         Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
                     0           2*dx(t)[6]          0   0                   -1          0   0
                     -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
-                    0          -dx(t)[3]            0   0               2k*abs(x(t)[5]) 0   0
-                    -2x(t)[1]     -2x(t)[2]         0   0                   0           0   0
+                    0            -dx(t)[3]          0   0               2k*abs(x(t)[5]) 0   0
+                    2x(t)[1]      2x(t)[2]          0   0                   0           0   0
                     x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
                     x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
         # (namely the derivative of F with respect to the variable x_p)
@@ -2036,8 +2036,8 @@ function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}
         Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
                     0           2*dx(t)[6]          0   0                   -1          0   0
                     -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
-                    0          -dx(t)[3]            0   0               2k*abs(x(t)[5]) 0   0
-                    2x(t)[1]     2x(t)[2]           0   0                   0           0   0
+                    0            -dx(t)[3]          0   0               2k*abs(x(t)[5]) 0   0
+                    2x(t)[1]      2x(t)[2]          0   0                   0           0   0
                     x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
                     x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
         # (namely the derivative of F with respect to the variable x_p)
@@ -2165,10 +2165,10 @@ function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}
         x2 = t -> sol2(t)
 
         Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
-                    0             2*dx(t)[6]        0   0                  -1           0   0
+                    0           2*dx(t)[6]          0   0                   -1          0   0
                     -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
-                    0             -dx(t)[3]         0   0               2k*abs(x(t)[5]) 0   0
-                    2x(t)[1]       2x(t)[2]         0   0                   0           0   0
+                    0            -dx(t)[3]          0   0               2k*abs(x(t)[5]) 0   0
+                    2x(t)[1]      2x(t)[2]          0   0                   0           0   0
                     x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
                     x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
         # (namely the derivative of F with respect to the variable x_p)
@@ -2275,18 +2275,18 @@ function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function pendulum_adj_stepbystep(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+function pendulum_adj_stepbystep_k(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
     @warn "pendulum_adj_stepbystep only adapted for k-parameter currently, no others"
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # x  = t -> sol(t)
         Fx = (x, dx) -> [2dx[6]        0               0   -1                  0           0   0
                           0           2*dx[6]          0   0                   -1          0   0
-                          -dx[3]         0             0   2k*abs(x[4])     0           0   0
-                          0          -dx[3]            0   0               2k*abs(x[5]) 0   0
-                          -2x[1]     -2x[2]         0   0                   0           0   0
-                          x[4]        x[5]          0   x[1]            x[2]      0   0
-                          x[2]/(L^2)  -x[1]/(L^2)   0   0                   0           0   1]
+                          -dx[3]         0             0   2k*abs(x[4])        0           0   0
+                          0          -dx[3]            0   0               2k*abs(x[5])    0   0
+                          2x[1]      2x[2]             0   0                   0           0   0
+                          x[4]        x[5]             0   x[1]              x[2]          0   0
+                          x[2]/(L^2)  -x[1]/(L^2)      0   0                   0           0   1]
         # (namely the derivative of F with respect to the variable x_p)
         Fdx = (x, dx) -> vcat([1   0   0          0   0   2x[1]    0
                                0   1   0          0   0   2x[2]    0
@@ -2294,8 +2294,8 @@ function pendulum_adj_stepbystep(Φ::Float64, u::Function, w::Function, θ::Arra
                                0   0   -x[2]   0   m   0           0], zeros(3,7))
         Fddx = (x, dx) -> vcat([  0   0  0            0   0   2dx[1]    0
                                   0   0  0            0   0   2dx[2]    0
-                                  0   0  -dx[1]    0   0   0            0
-                                  0   0  -dx[2]    0   0   0            0], zeros(3,7))
+                                  0   0  -dx[1]       0   0   0         0
+                                  0   0  -dx[2]       0   0   0         0], zeros(3,7))
         Fp = (x, dx) -> [0
                         0
                         abs(x[4])*x[4]
@@ -2352,6 +2352,13 @@ function pendulum_adj_stepbystep(Φ::Float64, u::Function, w::Function, θ::Arra
             # res[20] = dx[20]  + ( (λ')*(Fx(x,dx)-Fddx(x,dx)) - (dλ')*Fdx(x,dx) - gx(x,dx,t)' )*xθ
             res[20] = dx[20] + ( (λ(t)')*(Fx(x,dx)-Fddx(x,dx)) - (dλ(t)')*Fdx(x,dx) - gₓ(x,dx,t)' )*x[8:14]
 
+            # res[21] = dx[21] - (gx(x,dx,t)')*xθ + (λ(t)')*( Fx(x,dx)*xθ + Fdx(x,dx)*dxθ + Fp(x,dx
+            res[21] = dx[21] - (gₓ(x,dx,t)')*x[8:14] + (λ(t)')*( Fx(x,dx)*x[8:14] + Fdx(x,dx)*dx[8:14] + Fp(x,dx) )
+
+            # res[22] = dx[22] - (λ(t)')*Fdx(t)*dxθ - ( (dλ(t)')*Fdx(t) + (λ(t)')*Fddx(t) )*xθ
+            res[22] = dx[22] - (λ(t)')*Fdx(x,dx)*dx[8:14] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )*x[8:14]
+            # res[22] = dx[22] - 2*sin(t)*cos(t)*(t^3) - (sin(t)^2)*3*t^2
+
             # This is the equations for my_pendulum_adjoint_konly
             # res[1:7] = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
             # <=> (z[1:7]')*(Fddx(T-t) - Fx(T-t)) - (dz[1:7]')*Fdx(T-t) + gₓ(T-t)
@@ -2400,11 +2407,15 @@ function pendulum_adj_stepbystep(Φ::Float64, u::Function, w::Function, θ::Arra
         dGp04 = -(λ(0.)')*Fp(pend0, pendp0)
         Gp04b  = 0.0
         dGp04b = - ( (λ(0.)')*(Fx(pend0,pendp0)-Fddx(pend0,pendp0)) -(dλ(0.)')*Fdx(pend0,pendp0) - gₓ(pend0,pendp0,0.0)' )*s0
+        Gp035  = 0.0
+        dGp035 = (gₓ(pend0,pendp0,0.0)')*s0 - (λ(0.0)')*( Fx(pend0,pendp0)*s0 + Fdx(pend0,pendp0)*sp0 + Fp(pend0,pendp0) )
+        partial    = 0.0
+        dpartial   = (λ(0.0)')*Fdx(pend0,pendp0)*sp0 + ( (dλ(0.0)')*Fdx(pend0,pendp0) + (λ(0.0)')*Fddx(pend0,pendp0) )*s0
 
-        x0   = vcat(pend0, s0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b)
-        dx0  = vcat(pendp0, sp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b)
+        x0   = vcat(pend0, s0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, partial)
+        dx0  = vcat(pendp0, sp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dpartial)
 
-        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true])
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true, true, true])
 
         r0 = zeros(length(x0))
         f!(r0, dx0, x0, [], 0.0)
@@ -2421,11 +2432,11 @@ function pendulum_adj_stepbystep_L(Φ::Float64, u::Function, w::Function, θ::Ar
         # x  = t -> sol(t)
         Fx = (x, dx) -> [2dx[6]        0               0   -1                  0           0   0
                           0           2*dx[6]          0   0                   -1          0   0
-                          -dx[3]         0             0   2k*abs(x[4])     0           0   0
-                          0          -dx[3]            0   0               2k*abs(x[5]) 0   0
-                          -2x[1]     -2x[2]         0   0                   0           0   0
-                          x[4]        x[5]          0   x[1]            x[2]      0   0
-                          x[2]/(L^2)  -x[1]/(L^2)   0   0                   0           0   1]
+                         -dx[3]        0               0   2k*abs(x[4])        0           0   0
+                          0          -dx[3]            0   0               2k*abs(x[5])    0   0
+                          2x[1]       2x[2]            0   0                   0           0   0
+                          x[4]        x[5]             0   x[1]               x[2]         0   0
+                          x[2]/(L^2)  -x[1]/(L^2)      0   0                   0           0   1]
         # (namely the derivative of F with respect to the variable x_p)
         Fdx = (x, dx) -> vcat([1   0   0          0   0   2x[1]    0
                                0   1   0          0   0   2x[2]    0
@@ -2547,11 +2558,11 @@ function pendulum_adj_stepbystep_L(Φ::Float64, u::Function, w::Function, θ::Ar
         dGp04b = - ( (λ(0.)')*(Fx(pend0,pendp0)-Fddx(pend0,pendp0)) -(dλ(0.)')*Fdx(pend0,pendp0) - gₓ(pend0,pendp0,0.0)' )*s0
         Gp035  = 0.0
         dGp035 = (gₓ(pend0,pendp0,0.0)')*s0 - (λ(0.0)')*( Fx(pend0,pendp0)*s0 + Fdx(pend0,pendp0)*sp0 + Fp(pend0,pendp0) )
-        Gp6    = 0.0
-        dGp6   = (λ(0.0)')*Fdx(pend0,pendp0)*sp0 + ( (dλ(0.0)')*Fdx(pend0,pendp0) + (λ(0.0)')*Fddx(pend0,pendp0) )*s0
+        partial    = 0.0
+        dpartial   = (λ(0.0)')*Fdx(pend0,pendp0)*sp0 + ( (dλ(0.0)')*Fdx(pend0,pendp0) + (λ(0.0)')*Fddx(pend0,pendp0) )*s0
 
-        x0   = vcat(pend0, s0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, Gp6)
-        dx0  = vcat(pendp0, sp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dGp6)
+        x0   = vcat(pend0, s0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, partial)
+        dx0  = vcat(pendp0, sp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dpartial)
 
         dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true, true, true])
 
