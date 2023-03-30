@@ -56,7 +56,7 @@ model_id = PENDULUM
 # Nw is given by Nw >= (Ts/δ)*N
 const δ = 0.01                  # noise sampling time
 const Ts = 0.1                  # step-size
-const M = 100       # Number of monte-carlo simulations used for estimating mean
+const M = 10#00       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
@@ -251,14 +251,14 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = [L]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Array{Float64,1}) = [m, pars[1], g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = [0.1 1e4];#[0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1, 1.0, 1.0, 0.01, 0.1, 0.01]
-    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [1.0]#[0.1, 1.0, 1.0, 0.01, 0.1, 0.01]
+    model_sens_to_use = pendulum_sensitivity_k#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly
     model_stepbystep = pendulum_adj_stepbystep_k
@@ -292,8 +292,8 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 if model_id == PENDULUM
     f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
     # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]#, x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
-    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
-    f_int(x::Vector{Float64})  = [x[15], x[16], x[17], x[18], x[1], x[2], x[8], x[9], x[10], x[11], x[12], x[13], x[14], x[19], x[20], x[21], x[22]]
+    f_sens(x::Array{Float64,1}) = [x[14]]#, x[21], x[28]]                                                                                           #tuesday debug starting here
+    f_int(x::Vector{Float64})  = [x[15], x[16], x[17], x[18], x[1], x[2], x[8], x[9], x[10], x[11], x[12], x[13], x[14], x[19], x[20], x[21], x[22], x[23], x[24], x[25], x[26], x[27], x[28], x[29]]
     f_sens_deb(x::Vector{Float64}) = x[8:14]
     f_deb(x::Vector{Float64}) = vcat(f_sens(x), f_int(x))
 elseif model_id == MOH_MDL
@@ -308,7 +308,8 @@ f_debug(x::Array{Float64,1}) = x
 h(sol) = apply_outputfun(f, sol)                            # for our model
 h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete model with dynamics sensitivity
 h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity
-h_debug(sol) = apply_outputfun(f_debug, sol)
+# h_debug(sol) = apply_outputfun(f_debug, sol)
+h_debug(sol) = apply_outputfun_mvar(f_debug, sol)
 h_int(sol)  = apply_two_outputfun_mvar(f, f_deb, sol)            # for also computing integral cost
 h_sens_deb(sol) = apply_two_outputfun_twomvar(f_debug, f_sens_deb, sol)
 
@@ -575,8 +576,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
-    free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
+    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
@@ -1654,9 +1655,13 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
         # Returns a function mapping time to the vector-value of the function at that time
     end
 
-    y_func  = interpolated_signal(Y[N_trans+1:end,1], 0:Ts:(size(Y,1)-1)*Ts)
+    # y_func  = interpolated_signal(Y[N_trans+1:end,1], 0:Ts:(size(Y,1)-1)*Ts)
+    y_func  = linear_interpolation(Y[N_trans+1:end,1], Ts)
     dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
-    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    # dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    dy_func = linear_interpolation(dY_est, Ts)
+    # NOTE: It is not recommended to access sol.u directly!!
+    x_func = linear_interpolation(sol_for.u, Ts)
 
     # Computing xp0, initial conditions of derivative of x wrt to p
     mdl = model_to_use(φ0, u, wmm(1), p)
@@ -1683,11 +1688,16 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
 
     function calc_adj_m(m::Int)
         ts, der_est = get_der_est(sols_for[m])
-        dx = get_mvar_cubic(ts, der_est)
+        # dx = get_mvar_cubic(ts, der_est)
+        dx = linear_interpolation(der_est, Ts)
         # Stochastic cost
         _, der_est2 = get_der_est(sols_for[M+m])
-        dx2 = get_mvar_cubic(ts, der_est2)
-        mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[M+m], y_func, dy_func, xp0, dx, dx2)
+        # dx2 = get_mvar_cubic(ts, der_est2)
+        dx2 = linear_interpolation(der_est2, Ts)
+        x_func  = linear_interpolation(sols_for[m].u, Ts)
+        x_func2 = linear_interpolation(sols_for[M+m].u, Ts)
+        mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, x_func, x_func2, y_func, dy_func, xp0, dx, dx2)
+        # mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[M+m], y_func, dy_func, xp0, dx, dx2)
         # mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[m], y_func, dy_func, xp0, dx, dx)
         adj_prob = problem(mdl_adj, N, Ts)
         adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
@@ -1796,11 +1806,16 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0)
         # Returns a function mapping time to the vector-value of the function at that time
     end
 
-    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    # y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    y_func  = linear_interpolation(Y[:,1], Ts)
     dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
-    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
-    ts, der_est = get_der_est(sol_for)
-    dx = get_mvar_cubic(ts, der_est)
+    # dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    dy_func = linear_interpolation(dY_est, Ts)
+    _, der_est = get_der_est(sol_for)
+    # dx = get_mvar_cubic(ts, der_est)
+    dx = linear_interpolation(der_est, Ts)
+    # NOTE: It is not recommended to access sol.u directly!!
+    x_func = linear_interpolation(sol_for.u, Ts)
 
     # Computing xp0, initial conditions of derivative of x wrt to p
     mdl = model_to_use(φ0, u, wmm(1), p)
@@ -1810,7 +1825,7 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0)
     xp0 = f_sens_deb(mdl_sens.x0) # NOTE: NEW
 
     # mdl_adj, get_Gp = my_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, sol_for, sol_for, y_func, dy_func, xp0, dx, dx)
-    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sol_for, sol_for, y_func, dy_func, xp0, dx, dx)
+    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
     adj_prob = problem(mdl_adj, N, Ts)
     adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
         maxiters = maxiters)
@@ -1891,7 +1906,9 @@ function debug_adjoint_deterministic(expid::String, N_trans::Int=0)
     XWm = simulate_noise_process_mangled(dmdl_true, Zm)
     wmm(m::Int) = mk_noise_interp(dmdl_true.Cd, XWm, m, δ)
 
+    pre1 = now()
     sol_for = solvew_sens(u, wmm(1), free_dyn_pars_true, N)
+    dur1 = now()-pre1
     # for_sol_data = h_debug(sol_for)
 
     # Y1, sens1 = sol_for |> h_comp
@@ -1947,11 +1964,16 @@ function debug_adjoint_deterministic(expid::String, N_trans::Int=0)
         # Returns a function mapping time to the vector-value of the function at that time
     end
 
-    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    # y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    y_func  = linear_interpolation(Y[:,1], Ts)
     dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
-    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
-    ts, der_est = get_der_est(sol_for)
-    dx = get_mvar_cubic(ts, der_est)
+    # dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    dy_func = linear_interpolation(dY_est, Ts)
+    _, der_est = get_der_est(sol_for)
+    # dx = get_mvar_cubic(ts, der_est)
+    dx = linear_interpolation(der_est, Ts)
+    # NOTE: It is not recommended to access sol.u directly!!
+    x_func = linear_interpolation(sol_for.u, Ts)
 
     # Computing xp0, initial conditions of derivative of x wrt to p
     mdl = model_to_use(φ0, u, wmm(1), p)
@@ -1961,11 +1983,15 @@ function debug_adjoint_deterministic(expid::String, N_trans::Int=0)
     xp0 = reshape(mdl_sens.x0[n_mdl+1:end], n_mdl, :)[:,1]
     # xp0 = f_sens_deb(mdl_sens.x0) # NOTE: NEW
 
-    # mdl_adj, get_Gp = my_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, sol_for, sol_for, y_func, dy_func, xp0, dx, dx)
-    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sol_for, sol_for, y_func, dy_func, xp0, dx, dx)
+    # mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, sol_for, sol_for, y_func, dy_func, xp0, dx, dx)
+    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
     adj_prob = problem(mdl_adj, N, Ts)
+    pre2 = now()
     adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
         maxiters = maxiters)
+    dur2 = now()-pre2
+
+    @info "Forward dur: $dur1, Adjoint dur: $dur2"
 
     Gp = first(get_Gp(adj_sol))
     # DEBUG: Alternative way to compute Gp, just to compare
@@ -2129,9 +2155,11 @@ function debug_adjoint_semistochastic(expid::String, N_trans::Int=0)
         # Returns a function mapping time to the vector-value of the function at that time
     end
 
-    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    # y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    y_func = linear_interpolation(Y[:,1], Ts)
     dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
-    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    # dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    dy_func = linear_interpolation(dY_est, Ts)
     # ts, der_est = get_der_est(sol_for)
     # dx = get_mvar_cubic(ts, der_est)
 
@@ -2147,13 +2175,16 @@ function debug_adjoint_semistochastic(expid::String, N_trans::Int=0)
     end
 
     function calc_adj_m(m::Int)
-        ts, der_est = get_der_est(sols_for[m])
-        dx = get_mvar_cubic(ts, der_est)
+        _, der_est = get_der_est(sols_for[m])
+        # dx = get_mvar_cubic(ts, der_est)
+        dx = linear_interpolation(der_est, Ts)
+        x_func = linear_interpolation(sols_for[m].u, Ts)
         # _, der_est2 = get_der_est(sols_for[M+m])
         # dx2 = get_mvar_cubic(ts, der_est2)
         der_est2 = der_est
         dx2 = dx
-        mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[m], y_func, dy_func, xp0, dx, dx2)
+        # mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[m], y_func, dy_func, xp0, dx, dx2)
+        mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx2)
         # NOTE: Not using version with N_trans, it doesn't seem to do any good anyway
         # mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[m], y_func, dy_func, xp0, dx, dx2, N_trans)
         adj_prob = problem(mdl_adj, N, Ts)
@@ -2304,9 +2335,11 @@ function debug_adjoint_semistochastic_mvar(expid::String, N_trans::Int=0)
         # Returns a function mapping time to the vector-value of the function at that time
     end
 
-    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    # y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    y_func = linear_interpolation(Y[:,1], Ts)
     dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
-    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    # dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    dy_func = linear_interpolation(dY_est, Ts)
     # ts, der_est = get_der_est(sol_for)
     # dx = get_mvar_cubic(ts, der_est)
 
@@ -2321,13 +2354,16 @@ function debug_adjoint_semistochastic_mvar(expid::String, N_trans::Int=0)
     end
 
     function calc_adj_m(m::Int)
-        ts, der_est = get_der_est(sols_for[m])
-        dx = get_mvar_cubic(ts, der_est)
+        _, der_est = get_der_est(sols_for[m])
+        # dx = get_mvar_cubic(ts, der_est)
+        dx = linear_interpolation(der_est, Ts)
+        x_func = linear_interpolation(sols_for[m].u, Ts)
         # _, der_est2 = get_der_est(sols_for[M+m])
         # dx2 = get_mvar_cubic(ts, der_est2)
         der_est2 = der_est
         dx2 = dx
-        mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[m], y_func, dy_func, xp0, dx, dx2)
+        # mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[m], y_func, dy_func, xp0, dx, dx2)
+        mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx2)
         # NOTE: Not using version with N_trans, it doesn't seem to do any good anyway
         # mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, sols_for[m], sols_for[m], y_func, dy_func, xp0, dx, dx2, N_trans)
         adj_prob = problem(mdl_adj, N, Ts)
@@ -2353,33 +2389,56 @@ function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::In
     Y = exp_data.Y
     λ_func = ad.λ_func
     dλ_func = ad.dλ_func
+    # λ_func  = t -> [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    # dλ_func = t -> [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     N = ad.N
     Ts = ad.Ts
-    dmdl_adj = model_stepbystep(φ0, ad.u, ad.wmm(1), ad.p, ad.y_func, ad.λ_func, ad.dλ_func, N*Ts)
+    dmdl_adj = model_stepbystep(φ0, ad.u, ad.wmm(1), ad.p, ad.y_func, λ_func, dλ_func, N*Ts)
     prob_adj = problem(dmdl_adj, N, Ts)
-    sol_adj  = solve(prob_adj, saveat = 0:ad.Ts:N*Ts, abstol = abstol, reltol = reltol,
+    sol_adj  = solve(prob_adj, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
         maxiters = maxiters)
-    # dmdl_adj = model_stepbystep(φ0, exp_data.u, wmm(1), p, y_func, λ_func, dλ_func, N*Ts)
-    # prob_adj = problem(dmdl_adj, N, Ts)
-    # sol_adj  = solve(prob_adj, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
-    #     maxiters = maxiters)
+
     Y_adj, sens_and_cost_adj = h_int(sol_adj)
-    int_sens      = sens_and_cost_adj[:,3]/(N*Ts)   # col 3  -> x[16] (h_int) (point 2)
-    adj_sens_1    = sens_and_cost_adj[:,4]/(N*Ts)   # col 4  -> x[17] (h_int) (point 3)
-    adj_sens_2_miss = sens_and_cost_adj[:,5]        # col 5  -> x[18] (h_int) # Must have additional term added to it (point 4)
-    adj_sens_miss = sens_and_cost_adj[:,15]         # col 15 -> x[19] (h_int) # Must have additional term added to it (point 5)
-    remainder     = sens_and_cost_adj[:,16]         # col 16 -> x[20] (h_int) (bonus point)
-    adj_sens_extra_miss = sens_and_cost_adj[:,17]   # col 17 -> x[21] (h_int) (point 3.5)
-    partial_int_miss = sens_and_cost_adj[:,18]       # col 18 -> x[22] (h_int) (point 6)
 
-    # NOTE: PERHAPS TOO MANY DIVISIONS BY T????
+    # @info "Solving partial"
+    # # JUST PARTIAL. DOES IT INCREASE ACCURACY?
+    # part_mdl  = partial_debugging(φ0, ad.u, ad.wmm(1), ad.p, ad.y_func, λ_func, dλ_func, N*Ts)
+    # part_prob = problem(part_mdl, N, Ts)
+    # sol_part  = solve(part_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+    #     maxiters = maxiters)
+    # states_part = h_debug(sol_part)
+    # @info "Finished solving partial, $(typeof(states_part)), $(size(states_part))"
 
-    sens1_adj = sens_and_cost_adj[:,1:1]
-    int_cost_adj = sens_and_cost_adj[:,2]/(N*Ts)
-    cost_sens_adj = sens_and_cost_adj[:,3]/(N*Ts)
-    xs_adj = sens_and_cost_adj[:, 6:7]
-    xθs_adj = sens_and_cost_adj[:, 8:14]
+    # int_sens      = sens_and_cost_adj[:,3]/(N*Ts)   # col 3  -> x[16] (h_int) (point 2)
+    # adj_sens_1    = sens_and_cost_adj[:,4]/(N*Ts)   # col 4  -> x[17] (h_int) (point 3)
+    # adj_sens_2_miss = sens_and_cost_adj[:,5]        # col 5  -> x[18] (h_int) # Must have additional term added to it (point 4)
+    # adj_sens_miss = sens_and_cost_adj[:,15]         # col 15 -> x[19] (h_int) # Must have additional term added to it (point 5)
+    # remainder     = sens_and_cost_adj[:,16]         # col 16 -> x[20] (h_int) (bonus point)
+    # adj_sens_extra_miss = sens_and_cost_adj[:,17]   # col 17 -> x[21] (h_int) (point 3.5)
+    # partial_int_miss = sens_and_cost_adj[:,18]       # col 18 -> x[22] (h_int) (point 6)
+    # tue_deb          =  sens_and_cost_adj[:,19:25]   # col 19:25 -> x[23]:x[29] (tuesday debug)
+    #
+    # sens1_adj = sens_and_cost_adj[:,1:1]
+    # int_cost_adj = sens_and_cost_adj[:,2]/(N*Ts)
+    # cost_sens_adj = sens_and_cost_adj[:,3]/(N*Ts)
+    my_xs_adj = sens_and_cost_adj[:, 6:7]
+    my_xθs_adj = sens_and_cost_adj[:, 8:14]        # NOTE: IS THIS RLY RIGHT? YEAH, IF WE HAVE F-SENS FIRST. BUT DID WE HAVE CORRECT F_SENS...? SEEMS TO MISMATCH ABOVE...
+
+    states_adj = h_debug(sol_adj)
+    xs_adj              = states_adj[:,1:7]
+    Y_adj               = states_adj[:,7]
+    xθs_adj             = states_adj[:,8:14]
+    sens1_adj           = states_adj[:,14:14]
+    int_sens            = states_adj[:,16]/(N*Ts)       # (point 2)
+    adj_sens_1          = states_adj[:,17]/(N*Ts)       # (point 3)
+    adj_sens_2_miss     = states_adj[:,18]              # Must have additional term added to it (point 4)
+    adj_sens_miss       = states_adj[:,19]              # Must have additional term added to it (point 5)
+    remainder           = states_adj[:,20]              # (bonus point)
+    adj_sens_extra_miss = states_adj[:,21]              # (point 3.5)
+    partial_int_miss    = states_adj[:,22]              # (point 6)
+    tue_deb             = states_adj[:,23:29]           # (tuesday debug)
+    b1                  = states_adj[:,30]
     for_dif_est_adj = get_cost_gradient(Y[1:N+1, 1], reshape(Y_adj, length(Y_adj), 1), [sens1_adj], N_trans)
 
     Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
@@ -2397,10 +2456,31 @@ function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::In
     println(xθs_adj[1,:])
     println("Finished printing some stuff")
 
+    # LET'S COMPARE SOME X-REALIZATIONS
+    states_for = h_debug(ad.sols[1])
+    xs_for = states_for[:,1:7]
+
+    @info "WEDNESDAY DEBUGGING!!!!!!!!!!"
+    @info "RHS: $(b1[end])"
+    @info "LHS: $( (sin(N*Ts)^2)*cos( (N*Ts)^3-0.3 ) )"
+    @info "diff: $( b1[end] - (sin(N*Ts)^2)*cos( (N*Ts)^3-0.3 ) )"
+
+    # ad.sols[1]
+
     # @info "sin-thing: $(((N^Ts)^3)*(sin(N*Ts)^2))"
 
+    deb_stuff = (tue_deb, xθs_adj, sens_and_cost_adj, λ_func, xs_adj, xs_for)
+    tue_term = (tue_deb[end,:]')*xθs_adj[end,:] - (tue_deb[1,:]')*xθs_adj[1,:]
+    @info "tue_term: $tue_term"
+    @info "tueend: $(tue_deb[end,:]), $(tue_deb[1,:])"
+    @info "from term: $((λ_func(N*Ts)')*Fdx(xs_adj[end,1], xs_adj[end,2])), $((λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2]))"
+
+    @info "partial_int_miss: $(partial_int_miss[end])"
+    @info "term: $term"
+    @info "Error at adj_2: $(adj_sens_2_miss[end]-partial_int_miss[end])"
+
     println("for_dif_est, int_sens, adj_sens_1, adj_sens_2, adj_sens, Gp, adj_sens_extra, partial_int")
-    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end]-term, partial_int_miss[end]-term
+    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end], partial_int_miss[end]-term, deb_stuff
 end
 
 function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans::Int64=0)
@@ -2438,9 +2518,11 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
 
     ######################### Adjoint part #####################################
 
-    y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    # y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    y_func = linear_interpolation(Y[:,1], Ts)
     dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
-    dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    # dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    dy_func = linear_interpolation(dY_est, Ts)
 
     # ------------- Trying to get hold of our desired λ ------------------------
 
@@ -2476,6 +2558,7 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
     end
 
     ts, λ_der = get_der_est(λs)
+    @info "NOTE: Using cubic interpolation for λ-functions here, since they're only used for debugging purposes"
     λ_func  = get_mvar_cubic(0:Ts:N*Ts, λs)
     dλ_func = get_mvar_cubic(ts, λ_der)
     # λ_func  = t -> [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
@@ -2549,7 +2632,7 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
     # @info "sin-thing: $(((N^Ts)^3)*(sin(N*Ts)^2))"
 
     println("for_dif_est, int_sens, adj_sens_1, adj_sens_2, adj_sens, Gp, adj_sens_extra, partial_int")
-    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end]-term, partial_int_miss[end]-term, ad
+    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end], partial_int_miss[end]-term, ad
     # return for_dif_est[1], adj_sens_miss[end]-term, remainder
     # # return num_dif_est, for_dif_est[1], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
     # # # return num_dif_est, for_dif_est[1], for_dif_est2[1], cost_sens[end], adj_sens_1[end], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
@@ -2780,6 +2863,16 @@ function get_benchmarking_problems(expid::String, N_trans::Int=0)
     return for_prob, adj_prob, trange
 end
 
+# SHOULD BE MUCH MORE EFFICIENT THAN interpolated_signal
+# AND MORE GENERIC THAN mk_interp-FUNCTIONS
+function linear_interpolation(y::AbstractVector, Ts::Float64)
+    max_n = length(y)-2
+    function y_func(t::Float64)
+        n = min(Int(t÷Ts), max_n)
+        return ( ((n+1)*Ts-t)*y[n+1] .+ (t-n*Ts)*y[n+2])./Ts
+    end
+end
+
 function interpolated_signal(out, times)
     @assert (length(out) == length(times)) "out and times signals must have the same length (currently $(length(out)) vs $(length(times)))"
     function func_to_return(t::Float64)::Float64
@@ -2869,6 +2962,11 @@ function simulate_experiment_debug(expid::String, pars::Array{Float64, 1})
     #     end
     # end
 
+    # NOTE: Definition of h_debug has changed from
+    # h_debug(sol) = apply_outputfun(f_debug, sol)
+    # to
+    # h_debug(sol) = apply_outputfun_mvar(f_debug, sol)
+    # since the writing of this function
     Ym_temp = solvew(u, t -> 0.0, pars, 4999 ) |> h_debug
     Ym = zeros(length(Ym_temp), length(Ym_temp[1]))
     for i = 1:length(Ym_temp)
@@ -4419,16 +4517,23 @@ function gridsearch_2distsens_directional(expid::String, N_trans::Int = 0)
     kfix = 6.264040559373865
     cfix = 0.5258645076185884
 
-    a1ref = 0.8
-    a2ref = 16.0
+    a1ref = 0.736#0.8
+    a2ref = 14.4#16.0
     ref = [a1ref, a2ref]
-    dir = [a1ref, -a2ref]
-    ort_dir = [a2ref, a1ref]
+    dir = [1, -20]
+    ort_dir = [20, 1]
+    # dir = [a1ref, -a2ref]
+    # ort_dir = [a2ref, a1ref]
+    max_scale = 0.1
+    num_steps = 3#10
+    step_size = max_scale/num_steps
+    scales     = -max_scale:step_size:max_scale
+    ort_scales = -(1/200):(1/200):(1/200)
 
-    scale = 0.5
-    num_steps = 10
-    scales = -scale:(1/2num_steps):scale
-    ort_scales = -0.02:0.01:0.02
+    # scale = 0.25
+    # num_steps = 10
+    # scales = -scale:(scale/num_steps):scale
+    # ort_scales = -0.01:0.005:0.01
     lenx = length(scales)
     leny = length(ort_scales)
     # Creates matrices, where each column is a vector pointing in the direction
