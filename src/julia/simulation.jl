@@ -466,6 +466,104 @@ function pendulum_sensitivity_L(Φ::Float64, u::Function, w::Function, θ::Array
     end
 end
 
+function pendulum_sensitivity_m(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # the residual function
+        function f!(res, dx, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = dx[1] - x[4] + 2dx[6]*x[1]
+            res[2] = dx[2] - x[5] + 2dx[6]*x[2]
+            res[3] = m*dx[4] - dx[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*dx[5] - dx[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
+            # Sensitivity with respect to m
+            res[8]  = -x[11] + dx[8] + 2x[1]*dx[13] + 2x[8]*dx[6]
+            res[9]  = -x[12] + dx[9] + 2x[2]*dx[13] + 2x[9]*dx[6]
+            res[10] = 2k*x[11]*abs(x[4]) - x[1]*dx[10] + m*dx[11] - x[8]*dx[3] + dx[4]
+            res[11] = 2k*x[12]*abs(x[5]) - x[2]*dx[10] + m*dx[12] - x[9]*dx[3] + g + dx[5]
+            res[12] = -2x[8]*x[1] - 2x[9]*x[2]
+            res[13] = x[11]*x[1] + x[12]*x[2] + x[8]*x[4] + x[9]*x[5]
+            res[14] = x[14] - (x[1]*x[9] - x[2]*x[8])/(L^2)
+
+            # These equations sensitivity are written on the intuitive form. To
+            # obtain form correct for this funciton, do the following replacements:
+            # s[1] -> x[8],  s[2] -> x[9],  s[3] -> x[10]
+            # s[4] -> x[11], s[5] -> x[12], s[6] -> x[13]
+            # t[1] -> x[15],  t[2] -> x[16],  t[3] -> x[17]
+            # t[4] -> x[18], t[5] -> x[19], t[6] -> x[20]
+            # and the corresponding replacements for sp/dx and tp/dx
+
+            # res[8]  = -s[4] + sp[1] + 2x[1]*sp[6] + 2s[1]*dx[6]
+            # res[9]  = -s[5] + sp[2] + 2x[2]*sp[6] + 2s[2]*dx[6]
+            # res[10]  = abs(x[4])*x[4] + 2k*s[4]*abs(x[4]) - x[1]*sp[3] + m*sp[4] - s[1]*dx[3]
+            # res[11] = abs(x[5])*x[5] + 2k*s[5]*abs(x[5]) - x[2]*sp[3] + m*sp[5] - s[2]*dx[3]
+            # res[12] = -2s[1]*x[1] - 2s[2]*x[2]
+            # res[13] = s[4]*x[1] + s[5]*x[2] + s[1]*x[4] + s[2]*x[5]
+            # res[14] = x[14] - (x[1]*s[2] - x[2]*s[1])/(L^2)
+
+            # MATLAB form
+            # res[15]  = tp[1] - t[4] + 2t[1]dx[6] + 2tp[6]x[1]
+            # res[16]  = tp[2] - t[5] + 2t[2]dx[6] + 2tp[6]x[2]
+            # res[17] = 2k*t[4]*abs(x[4]) + m*tp[4] - t[1]dx[3] - tp[3]x[1]
+            # res[18] = 2k*t[5]*abs(x[5]) + m*tp[5] - t[2]dx[3] - tp[3]x[2]
+            # res[19] = 2L -2t[1]x[1] - 2t[2]x[2]
+            # res[20] = t[1]x[4] + t[4]x[1] + t[2]x[5] + t[5]x[2]
+            # res[21] = (x[1]*t[2] - x[2]*t[1])/(L^2)
+
+            # Hand-derived form
+            # res[15]  = -t[4] + tp[1] + 2x[1]*tp[6] + 2t[1]*dx[6]
+            # res[16]  = -t[5] + tp[2] + 2x[2]*tp[6] + 2t[2]*dx[6]
+            # res[17] = 2k*t[4]*abs(x[4]) - x[1]*tp[3] + m*tp[4] - t[1]*dx[3]
+            # res[18] = 2k*t[5]*abs(x[5]) - x[2]*tp[3] + m*tp[5] - t[2]*dx[3]
+            # res[19] = -2t[1]*x[1] - 2t[2]*x[2] + 2*L
+            # res[20] = t[4]*x[1] + t[5]*x[2] + t[1]*x[4] + t[2]*x[5]
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(Φ)
+        x2_0 = -L * cos(Φ)
+        dx3_0 = m*g/x2_0
+        dx4_0 = -g*tan(Φ) + (u0 + w0^2)/m
+
+        pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        pendp0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
+        # pend_dvar = vcat(fill(true, 6))
+        sm0  = zeros(7)
+        smp0 = vcat(zeros(3), [-dx4_0/m, -g/m, 0., 0.])
+        # if x1_0 != 0.0
+        #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(2x1_0*x2_0)], zeros(4))
+        # else
+        #     t0  = vcat([0.0, L/x2_0], zeros(5))
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(x2_0^2)], zeros(4))
+        # end
+
+        x0  = vcat(pend0, sm0)
+        dx0 = vcat(pendp0, smp0)
+        # x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(14))
+        # dx0 = vcat([0., 0., dx3_0, dx4_0], zeros(17))
+
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false])
+
+        r0 = zeros(length(x0))
+        f!(r0, dx0, x0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, dx0, dvars, r0)
+    end
+end
+
 function pendulum_sensitivity_Lk(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
@@ -1877,8 +1975,8 @@ function my_pendulum_adjoint(u::Function, w::Function, θ::Vector{Float64}, T::F
         # Function returning Gp given adjoint solution
         function get_Gp(adj_sol::DAESolution)
             # NOTE: Changes signs to match what I had in my manual calculations, seems correct now
-            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
-            Gp = adj_sol.u[end-N_trans][nx+1:nx+np] + (((adj_sol.u[end][1:nx]')*Fdx(0))*xp0)[:]
+            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0.0))*xp0)[:]
+            Gp = adj_sol.u[end-N_trans][nx+1:nx+np] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[:]
             # return 0.0
         end
 
@@ -1894,15 +1992,15 @@ function my_pendulum_adjoint(u::Function, w::Function, θ::Vector{Float64}, T::F
     end
 end
 
-function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
         @assert (np == 1) "my_pendulum_adjoint_monly is hard-coded to only handle one parameter m, make sure to pass correct xp0"
         nx = size(xp0,1)
-        x  = t -> sol(t)
-        x2 = t -> sol2(t)
+        # x  = t -> sol(t)
+        # x2 = t -> sol2(t)
 
         Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
                     0           2*dx(t)[6]          0   0                   -1          0   0
@@ -1951,38 +2049,20 @@ function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}
         # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
         function f!(res, dz, z, θ, t)
             # TODO: Complete
-            # # Completely unreadabe but most efficient version (still not a huge improvement)
-            # res[1]  = dx(T-t)[3]*z[3] - dz[1] - 2*dx(T-t)[6]*z[1] + 2*z[5]*x(T-t)[1] - z[6]*x(T-t)[4] - (z[7]*x(T-t)[2])/(L^2)
-            # res[2]  = dx(T-t)[3]*z[4] - dz[2] - 2*dx(T-t)[6]*z[2] + 2*z[5]*x(T-t)[2] - z[6]*x(T-t)[5] + (z[7]*x(T-t)[1])/(L^2)
-            # res[3]  = dz[3]*x(T-t)[1] - dx(T-t)[2]*z[4] - dx(T-t)[1]*z[3] + dz[4]*x(T-t)[2]
-            # res[4]  = z[1] - dz[3]*m - z[6]*x(T-t)[1] - 2*k*z[3]*abs(x(T-t)[4])
-            # res[5]  = z[2] - dz[4]*m - z[6]*x(T-t)[2] - 2*k*z[4]*abs(x(T-t)[5])
-            # res[6]  = 2*dx(T-t)[1]*z[1] + 2*dx(T-t)[2]*z[2] - 2*dz[1]*x(T-t)[1] - 2*dz[2]*x(T-t)[2]
-            # res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - z[7]
-            # res[8]  = dz[8] + dz[3]*abs(x(T-t)[4])*x(T-t)[4] + dz[4]*abs(x(T-t)[5])*x(T-t)[5]
+            # Completely unreadabe but most efficient version (still not a huge improvement)
+            res[1]  = dx(T-t)[3]*z[3] - dz[1] - 2*dx(T-t)[6]*z[1] - 2*z[5]*x(T-t)[1] - z[6]*x(T-t)[4] - (z[7]*x(T-t)[2])/(L^2)
+            res[2]  = dx(T-t)[3]*z[4] - dz[2] - 2*dx(T-t)[6]*z[2] - 2*z[5]*x(T-t)[2] - z[6]*x(T-t)[5] + (z[7]*x(T-t)[1])/(L^2)
+            res[3]  = dz[3]*x(T-t)[1] - dx(T-t)[2]*z[4] - dx(T-t)[1]*z[3] + dz[4]*x(T-t)[2]
+            res[4]  = z[1] - dz[3]*m - z[6]*x(T-t)[1] - 2*k*z[3]*abs(x(T-t)[4])
+            res[5]  = z[2] - dz[4]*m - z[6]*x(T-t)[2] - 2*k*z[4]*abs(x(T-t)[5])
+            res[6]  = 2*dx(T-t)[1]*z[1] + 2*dx(T-t)[2]*z[2] - 2*dz[1]*x(T-t)[1] - 2*dz[2]*x(T-t)[2]
+            res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - z[7]
+            res[8]  = dz[8] + dz[3]*dx(T-t)[4] + dz[4]*(dx(T-t)[5]+g)
 
-            # TODO: Complete
-            # # Medium readable but quite efficient version
-            # λ  = z[1:nx]
-            # dλ = dz[1:nx]
-            # β  = z[nx+1:end]
-            # dβ = dz[nx+1:end]
-            # res[1]  = dx(T-t)[3]*λ[3] - dλ[1] - 2*dx(T-t)[6]*λ[1] + 2*λ[5]*x(T-t)[1] - λ[6]*x(T-t)[4] - (λ[7]*x(T-t)[2])/(L^2)
-            # res[2]  = dx(T-t)[3]*λ[4] - dλ[2] - 2*dx(T-t)[6]*λ[2] + 2*λ[5]*x(T-t)[2] - λ[6]*x(T-t)[5] + (λ[7]*x(T-t)[1])/(L^2)
-            # res[3]  = dλ[3]*x(T-t)[1] - dx(T-t)[2]*λ[4] - dx(T-t)[1]*λ[3] + dλ[4]*x(T-t)[2]
-            # res[4]  = λ[1] - dλ[3]*m - λ[6]*x(T-t)[1] - 2*k*λ[3]*abs(x(T-t)[4])
-            # res[5]  = λ[2] - dλ[4]*m - λ[6]*x(T-t)[2] - 2*k*λ[4]*abs(x(T-t)[5])
-            # res[6]  = 2*dx(T-t)[1]*λ[1] + 2*dx(T-t)[2]*λ[2] - 2*dλ[1]*x(T-t)[1] - 2*dλ[2]*x(T-t)[2]
-            # res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - λ[7]
-            # res[8]  = dβ[1] + dλ[3]*abs(x(T-t)[4])*x(T-t)[4] + dλ[4]*abs(x(T-t)[5])*x(T-t)[5]
-            # # Readable but slightly less efficient version
-            # res[1:7] = -(dλ')*Fdx(T-t) + (λ')*(Fddx(T-t)-Fx(T-t)) + gₓ(T-t)
-            # res[8]  = dβ[1]+(λ')*Fp(T-t)
-
-            # Super-readable but less efficient version
-            res[1:7]  = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
-            # res[8:10] = -dz[8:10] - (z[1:7]')*Fp(T-t)
-            res[8] = -dz[8] - (Fp(T-t)')*z[1:7]
+            # # Super-readable but less efficient version
+            # res[1:7]  = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
+            # # res[8:10] = -dz[8:10] - (z[1:7]')*Fp(T-t)
+            # res[8] = -dz[8] - (Fp(T-t)')*z[1:7]
             nothing
         end
 
@@ -2006,8 +2086,8 @@ function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}
         # Function returning Gp given adjoint solution
         function get_Gp(adj_sol::DAESolution)
             # NOTE: Changes signs to match what I had in my manual calculations, seems correct now
-            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
-            Gp = adj_sol.u[end-N_trans][nx+1:nx+np] .+ (((adj_sol.u[end][1:nx]')*Fdx(0))*xp0)
+            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0.0))*xp0)[:]
+            Gp = adj_sol.u[end-N_trans][nx+1:nx+np] .+ (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)
             # return 0.0
         end
 
@@ -2023,15 +2103,15 @@ function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
         @assert (np == 1) "my_pendulum_adjoint_Lonly is hard-coded to only handle one parameter L, make sure to pass correct xp0"
         nx = size(xp0,1)
-        x  = t -> sol(t)
-        x2 = t -> sol2(t)
+        # x  = t -> sol(t)
+        # x2 = t -> sol2(t)
 
         Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
                     0           2*dx(t)[6]          0   0                   -1          0   0
@@ -2079,39 +2159,20 @@ function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}
         # NOTE: Could time-varying coefficients be the problem?? Sure would require more allocations?
         # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
         function f!(res, dz, z, θ, t)
-            # TODO: Complete
-            # # Completely unreadabe but most efficient version (still not a huge improvement)
-            # res[1]  = dx(T-t)[3]*z[3] - dz[1] - 2*dx(T-t)[6]*z[1] + 2*z[5]*x(T-t)[1] - z[6]*x(T-t)[4] - (z[7]*x(T-t)[2])/(L^2)
-            # res[2]  = dx(T-t)[3]*z[4] - dz[2] - 2*dx(T-t)[6]*z[2] + 2*z[5]*x(T-t)[2] - z[6]*x(T-t)[5] + (z[7]*x(T-t)[1])/(L^2)
-            # res[3]  = dz[3]*x(T-t)[1] - dx(T-t)[2]*z[4] - dx(T-t)[1]*z[3] + dz[4]*x(T-t)[2]
-            # res[4]  = z[1] - dz[3]*m - z[6]*x(T-t)[1] - 2*k*z[3]*abs(x(T-t)[4])
-            # res[5]  = z[2] - dz[4]*m - z[6]*x(T-t)[2] - 2*k*z[4]*abs(x(T-t)[5])
-            # res[6]  = 2*dx(T-t)[1]*z[1] + 2*dx(T-t)[2]*z[2] - 2*dz[1]*x(T-t)[1] - 2*dz[2]*x(T-t)[2]
-            # res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - z[7]
-            # res[8]  = dz[8] + dz[3]*abs(x(T-t)[4])*x(T-t)[4] + dz[4]*abs(x(T-t)[5])*x(T-t)[5]
+            # Completely unreadabe but most efficient version (still not a huge improvement)
+            res[1]  = dx(T-t)[3]*z[3] - dz[1] - 2*dx(T-t)[6]*z[1] - 2*z[5]*x(T-t)[1] - z[6]*x(T-t)[4] - (z[7]*x(T-t)[2])/(L^2)
+            res[2]  = dx(T-t)[3]*z[4] - dz[2] - 2*dx(T-t)[6]*z[2] - 2*z[5]*x(T-t)[2] - z[6]*x(T-t)[5] + (z[7]*x(T-t)[1])/(L^2)
+            res[3]  = dz[3]*x(T-t)[1] - dx(T-t)[2]*z[4] - dx(T-t)[1]*z[3] + dz[4]*x(T-t)[2]
+            res[4]  = z[1] - dz[3]*m - z[6]*x(T-t)[1] - 2*k*z[3]*abs(x(T-t)[4])
+            res[5]  = z[2] - dz[4]*m - z[6]*x(T-t)[2] - 2*k*z[4]*abs(x(T-t)[5])
+            res[6]  = 2*dx(T-t)[1]*z[1] + 2*dx(T-t)[2]*z[2] - 2*dz[1]*x(T-t)[1] - 2*dz[2]*x(T-t)[2]
+            res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - z[7]
+            res[8]  = dz[8] - 2*L*z[5]
 
-            # TODO: Complete
-            # # Medium readable but quite efficient version
-            # λ  = z[1:nx]
-            # dλ = dz[1:nx]
-            # β  = z[nx+1:end]
-            # dβ = dz[nx+1:end]
-            # res[1]  = dx(T-t)[3]*λ[3] - dλ[1] - 2*dx(T-t)[6]*λ[1] + 2*λ[5]*x(T-t)[1] - λ[6]*x(T-t)[4] - (λ[7]*x(T-t)[2])/(L^2)
-            # res[2]  = dx(T-t)[3]*λ[4] - dλ[2] - 2*dx(T-t)[6]*λ[2] + 2*λ[5]*x(T-t)[2] - λ[6]*x(T-t)[5] + (λ[7]*x(T-t)[1])/(L^2)
-            # res[3]  = dλ[3]*x(T-t)[1] - dx(T-t)[2]*λ[4] - dx(T-t)[1]*λ[3] + dλ[4]*x(T-t)[2]
-            # res[4]  = λ[1] - dλ[3]*m - λ[6]*x(T-t)[1] - 2*k*λ[3]*abs(x(T-t)[4])
-            # res[5]  = λ[2] - dλ[4]*m - λ[6]*x(T-t)[2] - 2*k*λ[4]*abs(x(T-t)[5])
-            # res[6]  = 2*dx(T-t)[1]*λ[1] + 2*dx(T-t)[2]*λ[2] - 2*dλ[1]*x(T-t)[1] - 2*dλ[2]*x(T-t)[2]
-            # res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - λ[7]
-            # res[8]  = dβ[1] + dλ[3]*abs(x(T-t)[4])*x(T-t)[4] + dλ[4]*abs(x(T-t)[5])*x(T-t)[5]
-            # # Readable but slightly less efficient version
-            # res[1:7] = -(dλ')*Fdx(T-t) + (λ')*(Fddx(T-t)-Fx(T-t)) + gₓ(T-t)
-            # res[8]  = dβ[1]+(λ')*Fp(T-t)
-
-            # Super-readable but less efficient version
-            res[1:7]  = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
-            # res[8:10] = -dz[8:10] - (z[1:7]')*Fp(T-t)
-            res[8] = -dz[8] - (Fp(T-t)')*z[1:7]
+            # # Super-readable but less efficient version
+            # res[1:7]  = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
+            # # res[8:10] = -dz[8:10] - (z[1:7]')*Fp(T-t)
+            # res[8] = -dz[8] - (Fp(T-t)')*z[1:7]
             nothing
         end
 
@@ -2135,9 +2196,9 @@ function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}
         # Function returning Gp given adjoint solution
         function get_Gp(adj_sol::DAESolution)
             # NOTE: Changes signs to match what I had in my manual calculations, seems correct now
-            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
-            # Gp = adj_sol.u[end-N_trans][nx+1:nx+np] + (((adj_sol.u[end][1:nx]')*Fdx(0))*xp0)[:]
-            Gp = adj_sol.u[end-N_trans][nx+1:nx+np] .+ (((adj_sol.u[end][1:nx]')*Fdx(0))*xp0)
+            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0.0))*xp0)[:]
+            # Gp = adj_sol.u[end-N_trans][nx+1:nx+np] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[:]
+            Gp = adj_sol.u[end-N_trans][nx+1:nx+np] .+ (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)
             # return 0.0
         end
 
@@ -2262,8 +2323,8 @@ function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}
         # Function returning Gp given adjoint solution
         function get_Gp(adj_sol::DAESolution)
             # NOTE: Changes signs to match what I had in my manual calculations, seems correct now
-            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
-            # Gp = adj_sol.u[end-N_trans][nx+1:nx+np] + (((adj_sol.u[end][1:nx]')*Fdx(0))*xp0)[:]
+            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0.0))*xp0)[:]
+            # Gp = adj_sol.u[end-N_trans][nx+1:nx+np] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[:]
             Gp = adj_sol.u[end-N_trans][nx+1:nx+np] .+ (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)
             # return 0.0
         end
@@ -2366,7 +2427,7 @@ function pendulum_adj_stepbystep_k(Φ::Float64, u::Function, w::Function, θ::Ar
 
             res[23:29] = dx[23:29] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )[:]
 
-            res[30]    = dx[30] - 2*sin(t)*cos(t)*cos(t-0.3) + (sin(t)^2)*sin(t-0.3)
+            # res[30]    = dx[30] - 2*sin(t)*cos(t)*cos(t-0.3) + (sin(t)^2)*sin(t-0.3)
 
             # This is the equations for my_pendulum_adjoint_konly
             # res[1:7] = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
@@ -2421,16 +2482,16 @@ function pendulum_adj_stepbystep_k(Φ::Float64, u::Function, w::Function, θ::Ar
         partial    = 0.0
         dpartial   = (λ(0.0)')*Fdx(pend0,pendp0)*sp0 + ( (dλ(0.0)')*Fdx(pend0,pendp0) + (λ(0.0)')*Fddx(pend0,pendp0) )*s0
 
-        b1  = 0.0
-        db1 = 0.0
+        # b1  = 0.0
+        # db1 = 0.0
 
         tue_deb    = (λ(0.0)')*Fdx(pend0, pendp0)
         dtue_deb   = (dλ(0.0)')*Fdx(pend0, pendp0) + (λ(0.0)')*Fddx(pend0, pendp0)
 
-        x0   = vcat(pend0, s0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, partial, tue_deb', b1)
-        dx0  = vcat(pendp0, sp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dpartial, dtue_deb', db1)
+        x0   = vcat(pend0, s0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, partial, tue_deb')#, b1)
+        dx0  = vcat(pendp0, sp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dpartial, dtue_deb')#, db1)
 
-        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true, true, true], fill(true, 7), [true])
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true, true, true], fill(true, 7))#, [true])
 
         r0 = zeros(length(x0))
         f!(r0, dx0, x0, [], 0.0)
@@ -2438,26 +2499,6 @@ function pendulum_adj_stepbystep_k(Φ::Float64, u::Function, w::Function, θ::Ar
         # t -> 0.0 is just a dummy function, not to be used
         Model(f!, t -> 0.0, x0, dx0, dvars, r0)
     end
-end
-
-# FOR SOME REASON, IT TELLS ME THIS IS UNSTABLE WHEN i TRY TO SOLVE IT.
-# TODO: Delete me
-function partial_debugging(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
-    function f!(res, dx, x, θ, t)
-        res[1]    = dx[1] - 2*sin(t)*cos(t)*cos(t-0.3) + (sin(t)^2)*sin(t-0.3)
-        nothing
-    end
-
-    x0   = [0.0]
-    dx0  = [0.0]
-
-    dvars = [true]
-
-    r0 = zeros(length(x0))
-    f!(r0, dx0, x0, [], 0.0)
-
-    # t -> 0.0 is just a dummy function, not to be used
-    Model(f!, t -> 0.0, x0, dx0, dvars, r0)
 end
 
 function pendulum_adj_stepbystep_L(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
@@ -2491,7 +2532,7 @@ function pendulum_adj_stepbystep_L(Φ::Float64, u::Function, w::Function, θ::Ar
        gₓ = (x, dx, t) -> [0.; 0.; 0.; 0.; 0.; 0.; 2(x[7]-y(t))/T]
        # λ = [1.; 1.; 1.; 1.; 1.; 1.; 1.]
 
-       #TODO: DON'T PASS T. BUT ALSO DON'T CALL THIS gₓ!!!!
+       #TODO: DON'T PASS T. BUT ALSO DON'T CALL THIS gₓ!!!! EDIT: Why...?
 
         # the residual function
         function f!(res, dx, x, θ, t)
@@ -2506,6 +2547,7 @@ function pendulum_adj_stepbystep_L(Φ::Float64, u::Function, w::Function, θ::Ar
             res[6] = x[4]*x[1] + x[5]*x[2]
             # Angle of pendulum
             res[7] = x[7] - atan(x[1] / -x[2])
+
             # Sensitivity equations for L
             res[8]  = dx[8] - x[11] + 2x[8]dx[6] + 2dx[13]x[1]
             res[9]  = dx[9] - x[12] + 2x[9]dx[6] + 2dx[13]x[2]
@@ -2608,10 +2650,184 @@ function pendulum_adj_stepbystep_L(Φ::Float64, u::Function, w::Function, θ::Ar
 
         r0 = zeros(length(x0))
         f!(r0, dx0, x0, [], 0.0)
+        @info "r0 is $r0"
 
         # t -> 0.0 is just a dummy function, not to be used
         Model(f!, t -> 0.0, x0, dx0, dvars, r0)
     end
+end
+
+function pendulum_adj_stepbystep_m(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+    @warn "pendulum_adj_stepbystep_m only adapted for m-parameter currently, no others"
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # x  = t -> sol(t)
+        Fx = (x, dx) -> [2dx[6]        0               0   -1                  0           0   0
+                          0           2*dx[6]          0   0                   -1          0   0
+                         -dx[3]        0               0   2k*abs(x[4])        0           0   0
+                          0          -dx[3]            0   0               2k*abs(x[5])    0   0
+                          2x[1]       2x[2]            0   0                   0           0   0
+                          x[4]        x[5]             0   x[1]               x[2]         0   0
+                          x[2]/(L^2)  -x[1]/(L^2)      0   0                   0           0   1]
+        # (namely the derivative of F with respect to the variable x_p)
+        Fdx = (x, dx) -> vcat([1   0   0          0   0   2x[1]    0
+                               0   1   0          0   0   2x[2]    0
+                               0   0   -x[1]   m   0   0           0
+                               0   0   -x[2]   0   m   0           0], zeros(3,7))
+        Fddx = (x, dx) -> vcat([  0   0  0            0   0   2dx[1]    0
+                                  0   0  0            0   0   2dx[2]    0
+                                  0   0  -dx[1]    0   0   0            0
+                                  0   0  -dx[2]    0   0   0            0], zeros(3,7))
+        Fp = (x, dx) -> [ .0
+                  .0
+                  dx[4]
+                  dx[5]+g
+                  .0
+                  .0
+                  .0]
+       gₓ = (x, dx, t) -> [0.; 0.; 0.; 0.; 0.; 0.; 2(x[7]-y(t))/T]
+       # λ = [1.; 1.; 1.; 1.; 1.; 1.; 1.]
+
+       #TODO: DON'T PASS T. BUT ALSO DON'T CALL THIS gₓ!!!! EDIT: Why...?
+
+        # the residual function
+        function f!(res, dx, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = dx[1] - x[4] + 2dx[6]*x[1]
+            res[2] = dx[2] - x[5] + 2dx[6]*x[2]
+            res[3] = m*dx[4] - dx[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*dx[5] - dx[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
+
+            # Sensitivity with respect to m
+            res[8]  = -x[11] + dx[8] + 2x[1]*dx[13] + 2x[8]*dx[6]
+            res[9]  = -x[12] + dx[9] + 2x[2]*dx[13] + 2x[9]*dx[6]
+            res[10] = 2k*x[11]*abs(x[4]) - x[1]*dx[10] + m*dx[11] - x[8]*dx[3] + dx[4]
+            res[11] = 2k*x[12]*abs(x[5]) - x[2]*dx[10] + m*dx[12] - x[9]*dx[3] + g + dx[5]
+            res[12] = -2x[8]*x[1] - 2x[9]*x[2]
+            res[13] = x[11]*x[1] + x[12]*x[2] + x[8]*x[4] + x[9]*x[5]
+            res[14] = x[14] - (x[1]*x[9] - x[2]*x[8])/(L^2)
+
+            # res[15] = dx[15] - (y(t) - y(t;θ))^2 (point 1)
+            res[15] = dx[15] - (y(t)-x[7])^2
+            # res[16] = dx[16] - 2(y(t;θ)-y(t))*y_θ(t) (point 2)
+            res[16] = dx[16] - 2(x[7]-y(t))*x[14]
+
+            # # Comment out and just use explicilty
+            # xθ  = x[8:14]
+            # dxθ = dx[8:14]
+            # res[17] = dx[17] - 2(y(t;θ)-y(t))*y_θ(t) - (λ')*(Fx(t)*xθ + Fdx(t)*dxθ + Fp(t)) (point 3)
+            res[17] = dx[17] - 2(x[7]-y(t))*x[14] + (λ(t)')*(Fx(x, dx)*x[8:14] + Fdx(x, dx)*dx[8:14] + Fp(x, dx))
+
+            # res[18] = dx[18] + (λ')*Fp(x, dx) + ( (λ')*(Fx(x,dx)-Fddx(x,dx)) - (dλ')*Fdx(x,dx) - gx(x,dx,t)' )*xθ (point 4)
+            res[18] = dx[18] + (λ(t)')*Fp(x, dx) + ( (λ(t)')*(Fx(x,dx)-Fddx(x,dx)) - (dλ(t)')*Fdx(x,dx) - gₓ(x,dx,t)' )*x[8:14]
+
+            # res[19] = dx[19] + (λ')*Fp(x, dx) (point 5)
+            res[19] = dx[19] + (λ(t)')*Fp(x, dx)
+            # res[20] = dx[20]  + ( (λ')*(Fx(x,dx)-Fddx(x,dx)) - (dλ')*Fdx(x,dx) - gx(x,dx,t)' )*xθ
+            res[20] = dx[20] + ( (λ(t)')*(Fx(x,dx)-Fddx(x,dx)) - (dλ(t)')*Fdx(x,dx) - gₓ(x,dx,t)' )*x[8:14] # (bonus point (remainder?))
+
+            # res[21] = dx[21] - (gx(x,dx,t)')*xθ + (λ(t)')*( Fx(x,dx)*xθ + Fdx(x,dx)*dxθ + Fp(x,dx
+            res[21] = dx[21] - (gₓ(x,dx,t)')*x[8:14] + (λ(t)')*( Fx(x,dx)*x[8:14] + Fdx(x,dx)*dx[8:14] + Fp(x,dx) ) # (point 3.5)
+
+            # res[22] = dx[22] - (λ(t)')*Fdx(t)*dxθ - ( (dλ(t)')*Fdx(t) + (λ(t)')*Fddx(t) )*xθ
+            res[22] = dx[22] - (λ(t)')*Fdx(x,dx)*dx[8:14] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )*x[8:14]     # (point 6)
+
+            res[23:29] = dx[23:29] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )[:]
+
+            # This is the equations for my_pendulum_adjoint_konly
+            # res[1:7] = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
+            # <=> (z[1:7]')*(Fddx(T-t) - Fx(T-t)) - (dz[1:7]')*Fdx(T-t) + gₓ(T-t)
+            # <=> (z[1:7]')*(Fx(T-t) - Fddx(T-t)) + (dz[1:7]')*Fdx(T-t) - gₓ(T-t)
+            # THERE IS A SIGN INCONSISTENCY!!!!!!!!!!!!!!!!
+            # Yes becuase that one is solved backwards you silly...
+
+            # These equations sensitivity are written on the intuitive form. To
+            # obtain form correct for this funciton, do the following replacements:
+            # s[1] -> x[8],  s[2] -> x[9],  s[3] -> x[10]
+            # s[4] -> x[11], s[5] -> x[12], s[6] -> x[13]
+            # and the corresponding replacements for sp and dx
+
+            # res[8]  = -s[4] + sp[1] + 2x[1]*sp[6] + 2s[1]*dx[6]
+            # res[9]  = -s[5] + sp[2] + 2x[2]*sp[6] + 2s[2]*dx[6]
+            # res[10]  = abs(x[4])*x[4] + 2k*s[4]*abs(x[4]) - x[1]*sp[3] + m*sp[4] - s[1]*dx[3]
+            # res[11] = abs(x[5])*x[5] + 2k*s[5]*abs(x[5]) - x[2]*sp[3] + m*sp[5] - s[2]*dx[3]
+            # res[12] = -2s[1]*x[1] - 2s[2]*x[2]
+            # res[13] = s[4]*x[1] + s[5]*x[2] + s[1]*x[4] + s[2]*x[5]
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(Φ)
+        x2_0 = -L * cos(Φ)
+        dx3_0 = m*g/x2_0
+        dx4_0 = -g*tan(Φ) + (u0 + w0^2)/m
+
+        pend0  = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        pendp0 = [0., 0., dx3_0, dx4_0, 0., 0., 0.]
+        sm0  = zeros(7)
+        smp0 = vcat(zeros(3), [-dx4_0/m, -g/m, 0., 0.])
+        G0    = 0.0
+        dG0   = (y(0.0)-pend0[7])^2
+        Gp0   = 0.0
+        dGp0  = 2(pend0[7]-y(0.0))*0.0
+        Gp02  = 0.0
+        dGp02 = dGp0 - (λ(0.)')*(Fx(pend0, pendp0)*sm0 + Fdx(pend0, pendp0)*smp0 + Fp(pend0, pendp0))
+        Gp03  = 0.0
+        dGp03 = -(λ(0.)')*Fp(pend0, pendp0) - ( (λ(0.)')*(Fx(pend0,pendp0)-Fddx(pend0,pendp0)) -(dλ(0.)')*Fdx(pend0,pendp0) - gₓ(pend0,pendp0,0.0)' )*sm0
+        Gp04  = 0.0
+        dGp04 = -(λ(0.)')*Fp(pend0, pendp0)
+        Gp04b  = 0.0
+        dGp04b = - ( (λ(0.)')*(Fx(pend0,pendp0)-Fddx(pend0,pendp0)) -(dλ(0.)')*Fdx(pend0,pendp0) - gₓ(pend0,pendp0,0.0)' )*sm0
+        Gp035  = 0.0
+        dGp035 = (gₓ(pend0,pendp0,0.0)')*sm0 - (λ(0.0)')*( Fx(pend0,pendp0)*sm0 + Fdx(pend0,pendp0)*smp0 + Fp(pend0,pendp0) )
+        partial    = 0.0
+        dpartial   = (λ(0.0)')*Fdx(pend0,pendp0)*smp0 + ( (dλ(0.0)')*Fdx(pend0,pendp0) + (λ(0.0)')*Fddx(pend0,pendp0) )*sm0
+
+        tue_deb    = (λ(0.0)')*Fdx(pend0, pendp0)
+        dtue_deb   = (dλ(0.0)')*Fdx(pend0, pendp0) + (λ(0.0)')*Fddx(pend0, pendp0)
+
+        x0   = vcat(pend0, sm0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, partial, tue_deb')
+        dx0  = vcat(pendp0, smp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dpartial, dtue_deb')
+
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true, true, true], fill(true, 7))
+
+        r0 = zeros(length(x0))
+        f!(r0, dx0, x0, [], 0.0)
+        @info "r0 is $r0"
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, dx0, dvars, r0)
+    end
+end
+
+# FOR SOME REASON, IT TELLS ME THIS IS UNSTABLE WHEN i TRY TO SOLVE IT.
+# TODO: Delete me
+function partial_debugging(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+    function f!(res, dx, x, θ, t)
+        res[1]    = dx[1] - 2*sin(t)*cos(t)*cos(t-0.3) + (sin(t)^2)*sin(t-0.3)
+        nothing
+    end
+
+    x0   = [0.0]
+    dx0  = [0.0]
+
+    dvars = [true]
+
+    r0 = zeros(length(x0))
+    f!(r0, dx0, x0, [], 0.0)
+
+    # t -> 0.0 is just a dummy function, not to be used
+    Model(f!, t -> 0.0, x0, dx0, dvars, r0)
 end
 
 function model_mohamed(Φ::Float64, u::Function, w::Function, θ::Array{Float64,1})
@@ -2727,7 +2943,7 @@ function mohamed_adjoint_new(u::Function, w::Function, p::Array{Float64, 1}, T::
     end
 
     function get_Gp(adj_sol::DAESolution)
-        Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0))*xp0)[:]
+        Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0.0))*xp0)[:]
     end
 
     λ0  = λT[:]

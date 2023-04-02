@@ -1,5 +1,6 @@
 using LsqFit, LaTeXStrings, Dates, Interpolations
 using StatsPlots # Commented out since it breaks 3d-plotting in Julia 1.5.3
+using QuadGK
 include("simulation.jl")
 include("noise_interpolation_multivar.jl")
 include("noise_generation.jl")
@@ -251,17 +252,17 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [L]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = [m]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
-    get_all_θs(pars::Array{Float64,1}) = [m, pars[1], g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.1 1e4];#[0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [1.0]#[0.1, 1.0, 1.0, 0.01, 0.1, 0.01]
-    model_sens_to_use = pendulum_sensitivity_k#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    model_sens_to_use = pendulum_sensitivity_m#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
-    model_adj_to_use = my_pendulum_adjoint_konly
-    model_stepbystep = pendulum_adj_stepbystep_k
+    model_adj_to_use = my_pendulum_adjoint_monly
+    model_stepbystep = pendulum_adj_stepbystep_m
 elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
@@ -1877,7 +1878,7 @@ end
 
 # Ultimate deterministic adjoint debugging function
 function debug_adjoint_deterministic(expid::String, N_trans::Int=0)
-    Random.seed!(12453)
+    Random.seed!(123)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
@@ -2025,6 +2026,7 @@ function debug_adjoint_deterministic(expid::String, N_trans::Int=0)
     term = (λ_func(N*Ts)')*Fdx(x_for[end,1], x_for[end,2])*xθ_for[end,:] - (λ_func(0.)')*Fdx(x_for[1,1], x_for[1,2])*xθ_for[1,:]
     Gp_alt = βs[1] - term
     # End of DEBUG: Alternative way to compute Gp
+    @info "β: $(βs[1]), term: $term"
 
     return num_est, for_dif_est, Gp, Gp_alt#, debug_thing, term#, λs
 end
@@ -2383,7 +2385,7 @@ function debug_adjoint_semistochastic_mvar(expid::String, N_trans::Int=0)
 end
 
 function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::Int=0)
-    Random.seed!(123)
+    # Random.seed!(1234)    # Perhaps no point in fixing random seed here, we want it to be different than solve_adjoint_deterministic? Or most likely doesn't matter
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
@@ -2425,6 +2427,7 @@ function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::In
     my_xs_adj = sens_and_cost_adj[:, 6:7]
     my_xθs_adj = sens_and_cost_adj[:, 8:14]        # NOTE: IS THIS RLY RIGHT? YEAH, IF WE HAVE F-SENS FIRST. BUT DID WE HAVE CORRECT F_SENS...? SEEMS TO MISMATCH ABOVE...
 
+    # TODO: Implement this approach, with h_debug, for other debugging functions as well
     states_adj = h_debug(sol_adj)
     xs_adj              = states_adj[:,1:7]
     Y_adj               = states_adj[:,7]
@@ -2438,7 +2441,7 @@ function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::In
     adj_sens_extra_miss = states_adj[:,21]              # (point 3.5)
     partial_int_miss    = states_adj[:,22]              # (point 6)
     tue_deb             = states_adj[:,23:29]           # (tuesday debug)
-    b1                  = states_adj[:,30]
+    # b1                  = states_adj[:,30]
     for_dif_est_adj = get_cost_gradient(Y[1:N+1, 1], reshape(Y_adj, length(Y_adj), 1), [sens1_adj], N_trans)
 
     Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
@@ -2460,16 +2463,16 @@ function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::In
     states_for = h_debug(ad.sols[1])
     xs_for = states_for[:,1:7]
 
-    @info "WEDNESDAY DEBUGGING!!!!!!!!!!"
-    @info "RHS: $(b1[end])"
-    @info "LHS: $( (sin(N*Ts)^2)*cos( (N*Ts)^3-0.3 ) )"
-    @info "diff: $( b1[end] - (sin(N*Ts)^2)*cos( (N*Ts)^3-0.3 ) )"
+    # @info "WEDNESDAY DEBUGGING!!!!!!!!!!"
+    # @info "RHS: $(b1[end])"
+    # @info "LHS: $( (sin(N*Ts)^2)*cos( (N*Ts)^3-0.3 ) )"
+    # @info "diff: $( b1[end] - (sin(N*Ts)^2)*cos( (N*Ts)^3-0.3 ) )"
 
     # ad.sols[1]
 
     # @info "sin-thing: $(((N^Ts)^3)*(sin(N*Ts)^2))"
 
-    deb_stuff = (tue_deb, xθs_adj, sens_and_cost_adj, λ_func, xs_adj, xs_for)
+    deb_stuff = (tue_deb, xθs_adj, sens_and_cost_adj, λ_func, dλ_func, xs_adj, xs_for)
     tue_term = (tue_deb[end,:]')*xθs_adj[end,:] - (tue_deb[1,:]')*xθs_adj[1,:]
     @info "tue_term: $tue_term"
     @info "tueend: $(tue_deb[end,:]), $(tue_deb[1,:])"
@@ -2479,8 +2482,8 @@ function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::In
     @info "term: $term"
     @info "Error at adj_2: $(adj_sens_2_miss[end]-partial_int_miss[end])"
 
-    println("for_dif_est, int_sens, adj_sens_1, adj_sens_2, adj_sens, Gp, adj_sens_extra, partial_int")
-    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end], partial_int_miss[end]-term, deb_stuff
+    println("for_dif_est, int_sens, adj_sens_1, adj_sens_2, adj_sens, adj_sens_extra, partial_int")
+    return for_dif_est_adj[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, adj_sens_extra_miss[end], partial_int_miss[end]-term, deb_stuff
 end
 
 function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans::Int64=0)
@@ -2619,7 +2622,7 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
                             0   0   -x1      0.3   0   0      0
                             0   0   -x2      0   0.3   0      0], zeros(3,7))
     term = (λ_func(N*Ts)')*Fdx(xs_adj[end,1], xs_adj[end,2])*xθs_adj[end,:] - (λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2])*xθs_adj[1,:]
-    @info "This term: $term"
+    @info "This term: $term, left: $((λ_func(N*Ts)')*Fdx(xs_adj[end,1], xs_adj[end,2])*xθs_adj[end,:]), right: $((λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2])*xθs_adj[1,:])"
     println("Let's print some stuff:")
     println(λ_func(N*Ts))
     println(Fdx(xs_adj[end,1], xs_adj[end,2]))
@@ -2632,7 +2635,7 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
     # @info "sin-thing: $(((N^Ts)^3)*(sin(N*Ts)^2))"
 
     println("for_dif_est, int_sens, adj_sens_1, adj_sens_2, adj_sens, Gp, adj_sens_extra, partial_int")
-    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end], partial_int_miss[end]-term, ad
+    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end], partial_int_miss[end]-term, ad, partial_int_miss
     # return for_dif_est[1], adj_sens_miss[end]-term, remainder
     # # return num_dif_est, for_dif_est[1], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
     # # # return num_dif_est, for_dif_est[1], for_dif_est2[1], cost_sens[end], adj_sens_1[end], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
@@ -2769,6 +2772,76 @@ function debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans::Int
     # return for_dif_est[1], adj_sens_miss[end]-term, remainder
     # # return num_dif_est, for_dif_est[1], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
     # # # return num_dif_est, for_dif_est[1], for_dif_est2[1], cost_sens[end], adj_sens_1[end], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
+end
+
+function darn_partial(ad::AdjointData)
+    @warn "Hard-coded N"
+    N = 4999
+
+    function get_der_est(sol)
+        der_est = (sol.u[2:end]-sol.u[1:end-1])/Ts
+        # ts = sol.t[1:end-1]
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+    end
+    function get_der_est(vals::Matrix{Float64})
+        # Rows of matrix are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        der_est = (vals[2:end,:]-vals[1:end-1,:])/Ts
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+        # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
+    end
+    function get_mvar_cubic(ts, der_est::Vector{Vector{Float64}})
+        temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
+        t -> [temp[i](t) for i=1:length(temp)]
+        # return [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)]) for j=1:length(der_est[1])]
+    end
+    function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
+    end
+
+    all_states = h_debug(ad.sols[1])
+    x   = all_states[:, 1:7]
+    xθ  = all_states[:, 8:14]
+    tsd, dx  = get_der_est(x)
+    _, dxθ = get_der_est(xθ)
+
+    ts = 0:Ts:N*Ts
+    # x_func[1] and dx_func[1] at least seem good, haven't rly checked the others
+    x_func   = get_mvar_cubic(ts, x)
+    dx_func  = get_mvar_cubic(tsd, dx)
+    xθ_func  = get_mvar_cubic(ts, xθ)
+    dxθ_func = get_mvar_cubic(tsd, dxθ)
+
+    # # THIS MAKES INTEGRAL SLIGHTLY CLOSER TO ZERO, BUT NOT MUCH, LIKE A FACTOR 1/2
+    # # # This seems to fix a slight phaze-error between x[1] and dx[1]
+    # # dx_func_new(t) = dx_func(t-0.058)
+    # # # Seems to do the same for xθ[1] and dxθ[1]
+    # # dxθ_func_new(t) = dxθ_func(t-0.058)
+    # dx_func(t)  = dx_func1(t-0.058)
+    # dxθ_func(t) = dxθ_func1(t-0.058)
+
+    # return ts, x_func, dx_func, xθ_func, dxθ_func
+
+    λ_func = ad.λ_func
+    dλ_func = ad.dλ_func
+    Fdx = t -> vcat([1   0   0               0    0   2x_func(t)[1]    0
+                     0   1   0               0    0   2x_func(t)[2]    0
+                     0   0   -x_func(t)[1]   m    0   0                0
+                     0   0   -x_func(t)[2]   0    m   0                0], zeros(3,7))
+    Fddx = t -> vcat([0   0  0                0   0   2dx_func(t)[1]    0
+                      0   0  0                0   0   2dx_func(t)[2]    0
+                      0   0  -dx_func(t)[1]   0   0   0                 0
+                      0   0  -dx_func(t)[2]   0   0   0                 0], zeros(3,7))
+
+    integrand =  t -> (λ_func(t)')*Fdx(t)*dxθ_func(t) + ( (dλ_func(t)')*Fdx(t) + (λ_func(t)')*Fddx(t) )*xθ_func(t)
+    integral, err = quadgk(integrand, 0.0, N*Ts, rtol=1e-8)
 end
 
 # Ultimate benchmarkin problem generating function
