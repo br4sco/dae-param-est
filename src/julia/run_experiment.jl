@@ -4445,7 +4445,7 @@ function gridsearch_2distsens_ultimate(expid::String, N_trans::Int = 0)
                     pars = [mfix, Lfix, kfix, my_a1, my_a2, cfix]
                     Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
                     # cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-                    cost_vals[e][i1, i2] = 0.0#mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
+                    cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
                     @info "Completed computing cost for e = $e, ia=$i1/$na1, ik=$i2/$na2. WARN: Using e=3 instead of default"
                 end
                 ind += 1
@@ -4501,7 +4501,7 @@ function gridsearch_2distsens_ultimate(expid::String, N_trans::Int = 0)
                     pars = [mfix, Lfix, kfix, dist_pars[1], dist_pars[2], cfix]
                     Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
                     # cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-                    cost_vals2[e][ix, iy] = 0.1#mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
+                    cost_vals2[e][ix, iy] = mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
                     @info "Completed computing cost for e = $e, ix=$ix, iy=$iy out of ($lenx, $leny). WARN: Using e=3 instead of default"
                 end
                 # ind += 1
