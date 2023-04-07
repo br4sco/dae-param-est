@@ -252,17 +252,17 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = [k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.1 1e4];#[0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [1.0]#[0.1, 1.0, 1.0, 0.01, 0.1, 0.01]
-    model_sens_to_use = pendulum_sensitivity_m#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    model_sens_to_use = pendulum_sensitivity_k#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
-    model_adj_to_use = my_pendulum_adjoint_monly
-    model_stepbystep = pendulum_adj_stepbystep_m
+    model_adj_to_use = my_pendulum_adjoint_konly
+    model_stepbystep = pendulum_adj_stepbystep_k
 elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
@@ -1740,7 +1740,7 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
 end
 
 function solve_adjoint_deterministic(expid::String, N_trans::Int=0)
-    Random.seed!(123)
+    Random.seed!(1)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
@@ -2389,10 +2389,10 @@ function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::In
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    λ_func = ad.λ_func
-    dλ_func = ad.dλ_func
-    # λ_func  = t -> [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-    # dλ_func = t -> [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    # λ_func = ad.λ_func
+    # dλ_func = ad.dλ_func
+    λ_func  = t -> [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    dλ_func = t -> [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     N = ad.N
     Ts = ad.Ts
@@ -2529,20 +2529,6 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
 
     # ------------- Trying to get hold of our desired λ ------------------------
 
-    # # @warn "Using lambdas2 instead of lambdas"
-    # if isfile("data/results/adjoint_test/lambdas.csv")
-    #     λs = readdlm("data/results/adjoint_test/lambdas.csv", ',')
-    #     @info "Loaded λs from file"
-    # else
-    #     @info "Generating new λs"
-    #     # TODO: Surely we can have a better function to call here? Or not?
-    #     _, _, Gp, _, λs, _, _ = debug_adj_and_forward(expid, 0.01, N_trans)
-    #     writedlm("data/results/adjoint_test/lambdas.csv", λs, ',')
-    #     @info "Finished λs generation"
-    # end
-    # # λs need to be reversed, since they're solved backwards
-    # λs = λs[end:-1:1, :]
-
     function get_der_est(vals::Matrix{Float64})
         # Rows of matrix are assumed to be different values of t, columns of
         # matrix are assumed to be different elements of the vector-valued process
@@ -2561,32 +2547,10 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
     end
 
     ts, λ_der = get_der_est(λs)
-    @info "NOTE: Using cubic interpolation for λ-functions here, since they're only used for debugging purposes"
     λ_func  = get_mvar_cubic(0:Ts:N*Ts, λs)
     dλ_func = get_mvar_cubic(ts, λ_der)
     # λ_func  = t -> [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     # dλ_func = t -> [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-
-    # # ---------------- For step 3 -------------------
-    # dmdl_adj = pendulum_adj_step3(φ0, exp_data.u, wmm(1), p, y_func, λ_func, dλ_func)
-    # prob_adj = problem(dmdl_adj, N, Ts)
-    # sol_adj  = solve(prob_adj, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
-    #     maxiters = maxiters)
-    # Y_adj, sens_and_cost_adj = h_int_2(sol_adj)  #h_int_2 is the same as h_int_3 would be
-    # adj_cost_sens = sens_and_cost_adj[:,5]/(N*Ts)
-
-
-    # struct AdjointData
-    #     wmm::Function
-    #     y_func::Function
-    #     dy_func::Function
-    #     u::Function
-    #     sols::Array{DAESolution,1}
-    #     N::Int
-    #     Ts::Float64 # TODO: No need to pass this I think, Ts already global?
-    #     p::Array{Float64,1}
-    #     xp0::Matrix{Float64}
-    # end
 
     ad = AdjointData(wmm, y_func, dy_func, λ_func, dλ_func, exp_data.u, [sol_for], N, Ts, p, fill(NaN, (3,3)))
 
@@ -2595,26 +2559,44 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
     prob_adj = problem(dmdl_adj, ad.N, ad.Ts)
     sol_adj  = solve(prob_adj, saveat = 0:ad.Ts:ad.N*ad.Ts, abstol = abstol, reltol = reltol,
         maxiters = maxiters)
-    # dmdl_adj = model_stepbystep(φ0, exp_data.u, wmm(1), p, y_func, λ_func, dλ_func, N*Ts)
-    # prob_adj = problem(dmdl_adj, N, Ts)
-    # sol_adj  = solve(prob_adj, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
-    #     maxiters = maxiters)
-    Y_adj, sens_and_cost_adj = h_int(sol_adj)
-    int_sens      = sens_and_cost_adj[:,3]/(N*Ts)   # col 3  -> x[16] (h_int) (point 2)
-    adj_sens_1    = sens_and_cost_adj[:,4]/(N*Ts)   # col 4  -> x[17] (h_int) (point 3)
-    adj_sens_2_miss = sens_and_cost_adj[:,5]        # col 5  -> x[18] (h_int) # Must have additional term added to it (point 4)
-    adj_sens_miss = sens_and_cost_adj[:,15]         # col 15 -> x[19] (h_int) # Must have additional term added to it (point 5)
-    remainder     = sens_and_cost_adj[:,16]         # col 16 -> x[20] (h_int) (bonus point)
-    adj_sens_extra_miss = sens_and_cost_adj[:,17]   # col 17 -> x[21] (h_int) (point 3.5)
-    partial_int_miss = sens_and_cost_adj[:,18]       # col 18 -> x[22] (h_int) (point 6)
+    # # dmdl_adj = model_stepbystep(φ0, exp_data.u, wmm(1), p, y_func, λ_func, dλ_func, N*Ts)
+    # # prob_adj = problem(dmdl_adj, N, Ts)
+    # # sol_adj  = solve(prob_adj, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+    # #     maxiters = maxiters)
+    # Y_adj, sens_and_cost_adj = h_int(sol_adj)
+    # int_sens      = sens_and_cost_adj[:,3]/(N*Ts)   # col 3  -> x[16] (h_int) (point 2)
+    # adj_sens_1    = sens_and_cost_adj[:,4]/(N*Ts)   # col 4  -> x[17] (h_int) (point 3)
+    # adj_sens_2_miss = sens_and_cost_adj[:,5]        # col 5  -> x[18] (h_int) # Must have additional term added to it (point 4)
+    # adj_sens_miss = sens_and_cost_adj[:,15]         # col 15 -> x[19] (h_int) # Must have additional term added to it (point 5)
+    # remainder     = sens_and_cost_adj[:,16]         # col 16 -> x[20] (h_int) (bonus point)
+    # adj_sens_extra_miss = sens_and_cost_adj[:,17]   # col 17 -> x[21] (h_int) (point 3.5)
+    # partial_int_miss = sens_and_cost_adj[:,18]       # col 18 -> x[22] (h_int) (point 6)
+    states_adj = h_debug(sol_adj)
+    xs_adj              = states_adj[:,1:7]
+    Y_adj               = states_adj[:,7]
+    xθs_adj             = states_adj[:,8:14]
+    sens1_adj           = states_adj[:,14:14]
+    int_sens            = states_adj[:,16]/(N*Ts)       # (point 2)
+    adj_sens_1          = states_adj[:,17]/(N*Ts)       # (point 3)
+    adj_sens_2_miss     = states_adj[:,18]              # Must have additional term added to it (point 4)
+    adj_sens_miss       = states_adj[:,19]              # Must have additional term added to it (point 5)
+    remainder           = states_adj[:,20]              # (bonus point)
+    adj_sens_extra_miss = states_adj[:,21]              # (point 3.5)
+    partial_int_miss    = states_adj[:,22]              # (point 6)
+    common              = states_adj[:,23]              # shared between 3.5 and 4
+    extra35             = states_adj[:,24]              # extra tern for 3.5
+    extra4              = states_adj[:,25]              # extra tern for 4
+    partrepL            = states_adj[:,26]              # partial replacement term, Left
+    partrepR            = states_adj[:,27]              # partial replacement term, Right
+    # we should have 3.5 = common+extra35, 4 = common+extra4
+    @info "common: $(common[end]), 3.5 case: $(common[end]+extra35[end]), 4 case: $(common[end]+extra4[end])"
 
-    # NOTE: PERHAPS TOO MANY DIVISIONS BY T????
 
-    sens1_adj = sens_and_cost_adj[:,1:1]
-    int_cost_adj = sens_and_cost_adj[:,2]/(N*Ts)
-    cost_sens_adj = sens_and_cost_adj[:,3]/(N*Ts)
-    xs_adj = sens_and_cost_adj[:, 6:7]
-    xθs_adj = sens_and_cost_adj[:, 8:14]
+    # sens1_adj = sens_and_cost_adj[:,1:1]
+    # int_cost_adj = sens_and_cost_adj[:,2]/(N*Ts)
+    # cost_sens_adj = sens_and_cost_adj[:,3]/(N*Ts)
+    # xs_adj = sens_and_cost_adj[:, 6:7]
+    # xθs_adj = sens_and_cost_adj[:, 8:14]
     for_dif_est_adj = get_cost_gradient(Y[1:N+1, 1], reshape(Y_adj, length(Y_adj), 1), [sens1_adj], N_trans)
 
     Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
@@ -2631,11 +2613,10 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
     println(Fdx(xs_adj[1,1], xs_adj[1,2]))
     println(xθs_adj[1,:])
     println("Finished printing some stuff")
-
-    # @info "sin-thing: $(((N^Ts)^3)*(sin(N*Ts)^2))"
+    super_debug = (common, extra35, extra4, partrepL, partrepR)
 
     println("for_dif_est, int_sens, adj_sens_1, adj_sens_2, adj_sens, Gp, adj_sens_extra, partial_int")
-    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end], partial_int_miss[end]-term, ad, partial_int_miss
+    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end], partial_int_miss[end]-term, ad, partial_int_miss, super_debug
     # return for_dif_est[1], adj_sens_miss[end]-term, remainder
     # # return num_dif_est, for_dif_est[1], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
     # # # return num_dif_est, for_dif_est[1], for_dif_est2[1], cost_sens[end], adj_sens_1[end], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)

@@ -2057,7 +2057,7 @@ function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}
             res[5]  = z[2] - dz[4]*m - z[6]*x(T-t)[2] - 2*k*z[4]*abs(x(T-t)[5])
             res[6]  = 2*dx(T-t)[1]*z[1] + 2*dx(T-t)[2]*z[2] - 2*dz[1]*x(T-t)[1] - 2*dz[2]*x(T-t)[2]
             res[7]  = (2*(x2(T-t)[7] - y(T-t)))/T - z[7]
-            res[8]  = dz[8] + dz[3]*dx(T-t)[4] + dz[4]*(dx(T-t)[5]+g)
+            res[8]  = dz[8] + z[3]*dx(T-t)[4] + z[4]*(dx(T-t)[5]+g)
 
             # # Super-readable but less efficient version
             # res[1:7]  = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
@@ -2425,7 +2425,21 @@ function pendulum_adj_stepbystep_k(Φ::Float64, u::Function, w::Function, θ::Ar
             res[22] = dx[22] - (λ(t)')*Fdx(x,dx)*dx[8:14] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )*x[8:14]
             # res[22] = dx[22] - 2*sin(t)*cos(t)*(t^3) - (sin(t)^2)*3*t^2
 
-            res[23:29] = dx[23:29] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )[:]
+            # res[23:29] = dx[23:29] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )[:]
+
+            # Shared between 3.5 and 4
+            res[23] = dx[23] - (gₓ(x,dx,t)')*x[8:14] + (λ(t)')*( Fx(x,dx)*x[8:14] + Fp(x,dx) )
+            # Extra for 3.5 (for m and k only)
+            res[24] = dx[24] + (λ(t)')*Fdx(x,dx)*dx[8:14]
+            # Extra for 4 (for m and k only)
+            res[25] = dx[25] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )*x[8:14]
+
+            # NOTE: LoL, these are just negated versions of the above, clearly not very equal!
+            # For replacement using partial integration
+            # LHS
+            res[26] = dx[26] - (λ(t)')*Fdx(x,dx)*dx[8:14]
+            # RHS (without term, assumed zero, which is the case for m and correct λ)
+            res[27] = dx[27] + ((dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )*x[8:14]
 
             # res[30]    = dx[30] - 2*sin(t)*cos(t)*cos(t-0.3) + (sin(t)^2)*sin(t-0.3)
 
@@ -2482,16 +2496,29 @@ function pendulum_adj_stepbystep_k(Φ::Float64, u::Function, w::Function, θ::Ar
         partial    = 0.0
         dpartial   = (λ(0.0)')*Fdx(pend0,pendp0)*sp0 + ( (dλ(0.0)')*Fdx(pend0,pendp0) + (λ(0.0)')*Fddx(pend0,pendp0) )*s0
 
+        # NOTE: ONLY MAKE SENSE FOR k AND m SINCE ONLY THEN APPROPRIATE QUANTITIES ARE ZERO
+        common   = 0.0
+        dcommon  = (gₓ(pend0,pendp0,0.0)')*s0 - (λ(0.)')*( Fx(pend0,pendp0)*s0 + Fp(pend0,pendp0) )
+        extra35  = 0.0
+        dextra35 = -(λ(0.)')*Fdx(pend0,pendp0)*sp0
+        extra4   = 0.0
+        dextra4  = ( (dλ(0.0)')*Fdx(pend0,pendp0) + (λ(0.0)')*Fddx(pend0,pendp0) )*s0
+
+        partrepL  = 0.0
+        dpartrepL = (λ(0.)')*Fdx(pend0,pendp0)*sp0
+        partrepR  = 0.0
+        dpartrepR = -((dλ(0.)')*Fdx(pend0,pendp0) + (λ(0.)')*Fddx(pend0,pendp0) )*s0
+
         # b1  = 0.0
         # db1 = 0.0
 
-        tue_deb    = (λ(0.0)')*Fdx(pend0, pendp0)
-        dtue_deb   = (dλ(0.0)')*Fdx(pend0, pendp0) + (λ(0.0)')*Fddx(pend0, pendp0)
+        # tue_deb    = (λ(0.0)')*Fdx(pend0, pendp0)
+        # dtue_deb   = (dλ(0.0)')*Fdx(pend0, pendp0) + (λ(0.0)')*Fddx(pend0, pendp0)
 
-        x0   = vcat(pend0, s0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, partial, tue_deb')#, b1)
-        dx0  = vcat(pendp0, sp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dpartial, dtue_deb')#, db1)
+        x0   = vcat(pend0, s0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, partial, common, extra35, extra4, partrepL, partrepR)#, b1)
+        dx0  = vcat(pendp0, sp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dpartial, dcommon, dextra35, dextra4, dpartrepL, dpartrepR)#, db1)
 
-        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true, true, true], fill(true, 7))#, [true])
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true, true, true], fill(true, 5))#, [true])
 
         r0 = zeros(length(x0))
         f!(r0, dx0, x0, [], 0.0)
@@ -2738,7 +2765,20 @@ function pendulum_adj_stepbystep_m(Φ::Float64, u::Function, w::Function, θ::Ar
             # res[22] = dx[22] - (λ(t)')*Fdx(t)*dxθ - ( (dλ(t)')*Fdx(t) + (λ(t)')*Fddx(t) )*xθ
             res[22] = dx[22] - (λ(t)')*Fdx(x,dx)*dx[8:14] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )*x[8:14]     # (point 6)
 
-            res[23:29] = dx[23:29] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )[:]
+            # res[23:29] = dx[23:29] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )[:]
+
+            # Shared between 3.5 and 4
+            res[23] = dx[23] - (gₓ(x,dx,t)')*x[8:14] + (λ(t)')*( Fx(x,dx)*x[8:14] + Fp(x,dx) )
+            # Extra for 3.5 (for m and k only)
+            res[24] = dx[24] + (λ(t)')*Fdx(x,dx)*dx[8:14]
+            # Extra for 4 (for m and k only)
+            res[25] = dx[25] - ( (dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )*x[8:14]
+
+            # For replacement using partial integration
+            # LHS
+            res[26] = dx[26] - (λ(t)')*Fdx(x,dx)*dx[8:14]
+            # RHS (without term, assumed zero, which is the case for m and correct λ)
+            res[27] = dx[27] + ((dλ(t)')*Fdx(x,dx) + (λ(t)')*Fddx(x,dx) )*x[8:14]
 
             # This is the equations for my_pendulum_adjoint_konly
             # res[1:7] = (-dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
@@ -2793,13 +2833,25 @@ function pendulum_adj_stepbystep_m(Φ::Float64, u::Function, w::Function, θ::Ar
         partial    = 0.0
         dpartial   = (λ(0.0)')*Fdx(pend0,pendp0)*smp0 + ( (dλ(0.0)')*Fdx(pend0,pendp0) + (λ(0.0)')*Fddx(pend0,pendp0) )*sm0
 
-        tue_deb    = (λ(0.0)')*Fdx(pend0, pendp0)
-        dtue_deb   = (dλ(0.0)')*Fdx(pend0, pendp0) + (λ(0.0)')*Fddx(pend0, pendp0)
+        # tue_deb    = (λ(0.0)')*Fdx(pend0, pendp0)
+        # dtue_deb   = (dλ(0.0)')*Fdx(pend0, pendp0) + (λ(0.0)')*Fddx(pend0, pendp0)
+        # NOTE: ONLY MAKE SENSE FOR k AND m SINCE ONLY THEN APPROPRIATE QUANTITIES ARE ZERO
+        common   = 0.0
+        dcommon  = (gₓ(pend0,pendp0,0.0)')*sm0 - (λ(0.)')*( Fx(pend0,pendp0)*sm0 + Fp(pend0,pendp0) )
+        extra35  = 0.0
+        dextra35 = -(λ(0.)')*Fdx(pend0,pendp0)*smp0
+        extra4   = 0.0
+        dextra4  = ( (dλ(0.0)')*Fdx(pend0,pendp0) + (λ(0.0)')*Fddx(pend0,pendp0) )*sm0
 
-        x0   = vcat(pend0, sm0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, partial, tue_deb')
-        dx0  = vcat(pendp0, smp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dpartial, dtue_deb')
+        partrepL  = 0.0
+        dpartrepL = (λ(0.)')*Fdx(pend0,pendp0)*smp0
+        partrepR  = 0.0
+        dpartrepR = -((dλ(0.)')*Fdx(pend0,pendp0) + (λ(0.)')*Fddx(pend0,pendp0) )*sm0
 
-        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true, true, true], fill(true, 7))
+        x0   = vcat(pend0, sm0, G0, Gp0, Gp02, Gp03, Gp04, Gp04b, Gp035, partial, common, extra35, extra4, partrepL, partrepR)
+        dx0  = vcat(pendp0, smp0, dG0, dGp0, dGp02, dGp03, dGp04, dGp04b, dGp035, dpartial, dcommon, dextra35, dextra4, dpartrepL, dpartrepR)
+
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false, true, true, true, true, true, true, true, true], fill(true, 5))
 
         r0 = zeros(length(x0))
         f!(r0, dx0, x0, [], 0.0)
