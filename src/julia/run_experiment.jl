@@ -4514,23 +4514,94 @@ function gridsearch_2distsens_ultimate(expid::String, N_trans::Int = 0)
         end
     end
 
-    # NOTE DO NOT DELETE!!!!!!!!!!
-    # n1 = size(cost_vals[1],1);
-    # n2 = size(cost_vals[1],2);
-    # X = zeros(n1*n2);
-    # Y = zeros(n1*n2);
-    # Z = zeros(n1*n2);
-    # ind = 1;
-    # for i = 1:n1
-    #     for j = 1:n2
-    #         X[ind] = par_vals[i,j][1];
-    #         Y[ind] = par_vals[i,j][2];
-    #         Z[ind] = cost_vals[1][i,j];
-    #         ind += 1;
-    #     end
-    # end
+    n1 = size(cost_vals2[1],1)
+    n2 = size(cost_vals2[1],2)
+    X = zeros(n1*n2)
+    Y = zeros(n1*n2)
+    Z = zeros(n1*n2)
+    ind = 1
+    for i = 1:n1
+        for j = 1:n2
+            X[ind] = par_vals[i,j][1];
+            Y[ind] = par_vals[i,j][2];
+            Z[ind] = cost_vals2[1][i,j];
+            ind += 1;
+        end
+    end
+    scatter_data = (X, Y, Z)
 
-    return a1vals, a2vals, cost_vals, par_vals, cost_vals2#, duration
+    return a1vals, a2vals, cost_vals, par_vals, cost_vals2, scatter_data
+end
+
+function plot_along_parametric_curve(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
+
+    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # NOTE: All parameters have to be set as free for this functions,
+    # so that we can set m, L, k, and c to their fixed values
+    # Taken from from_Alsvin/20k_hugest_differentadam/2000its_biasstart
+    # mean starting from iteration 500 forward, of all parameters that were
+    # relatively constant (so should be close to minimum)
+    mfix = 0.2980673022654188
+    Lfix = 6.288208419671489
+    kfix = 6.264040559373865
+    cfix = 0.5258645076185884
+
+    # ----------------- DIRECTIONAL PLOTTING -----------------------
+    a1ref = 0.736#0.8
+    a2ref = 14.4#16.0
+
+    const_val = 4(a1ref^2)*a2ref - a1ref^4
+    a1_vals = 0.4:0.05:1.0
+    par_log = zeros(2, length(a1_vals))
+    cost_vals = fill(NaN, (length(a1_vals), E))
+    # ref = [a1ref, a2ref]
+
+    try
+        for (i, a1) = enumerate(a1_vals)
+            for e = 1:E
+                a2 = (const_val + a1^4)/(4(a1^2))
+                pars = [mfix, Lfix, kfix, a1, a2, cfix]
+                par_log[:,i] = [a1,a2]
+                Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+                # cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+                cost_vals[i, e] = mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
+                @info "Completed computing cost for e = $e, i=$i out of $(length(a1_vals)). WARN: Using e=3 instead of default"
+            end
+        end
+    finally
+        writedlm(joinpath(data_dir, "tmp/curve_parvals.csv"), par_log, ',')
+        writedlm(joinpath(data_dir, "tmp/cost_vals_curve.csv"), cost_vals, ',')
+    end
+
+    # Made for a single e
+    X = par_log[1,:]
+    Y = par_log[2,:]
+    Z = cost_vals[:,1]
+    scatter_data = (X, Y, Z)
+
+    return par_log, cost_vals, scatter_data
 end
 
 function gridsearch_2distsens_directional(expid::String, N_trans::Int = 0)
