@@ -1992,7 +1992,7 @@ function my_pendulum_adjoint(u::Function, w::Function, θ::Vector{Float64}, T::F
     end
 end
 
-function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function NEGATED_my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -2102,7 +2102,7 @@ function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function FORWARD_my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -2208,7 +2208,7 @@ function FORWARD_my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{
     end
 end
 
-function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function NEGATED_my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -2318,7 +2318,7 @@ function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function FORWARD_my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -2424,7 +2424,7 @@ function FORWARD_my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{
 end
 
 # NOTE Assumes free dynamical parameters are only k
-function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function NEGATED_my_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -2550,7 +2550,7 @@ function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}
 end
 
 # NOTE Assumes free dynamical parameters are only k
-function FORWARD_my_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
