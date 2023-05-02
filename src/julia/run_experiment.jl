@@ -4337,7 +4337,8 @@ function gridsearch_2distsens(expid::String, N_trans::Int = 0)
     # DEBUG
     E = 1
     @warn "Using E = 1 right now, instead of something larger"
-    Zm = [randn(Nw, n_tot) for m = 1:M]
+    @warn "SAMPLING FROM UNIFORM DISTRIBUTION INSTEAD OF GAUSSIAN DISTRIBUTION"
+    Zm = [2*rand(Nw, n_tot).-1 for m = 1:M]
 
     # NOTE: All parameters have to be set as free for this functions,
     # so that we can set m, L, k, and c to their fixed values
@@ -4355,8 +4356,29 @@ function gridsearch_2distsens(expid::String, N_trans::Int = 0)
     δ1 = a1ref/50
     δ2 = a2ref/50
     num_steps = 10
-    a1vals = a1ref-num_steps*δ1:δ1:a1ref+num_steps*δ1
-    a2vals = a2ref-num_steps*δ2:δ2:a2ref+num_steps*δ2
+    # # a1vals = a1ref-num_steps*δ1:δ1:a1ref+num_steps*δ1
+    # # a2vals = a2ref-num_steps*δ2:δ2:a2ref+num_steps*δ2
+    # a1vals = a1ref-(num_steps+10)*δ1:δ1:a1ref+(num_steps+2)*δ1
+    # # # a2vals = a2ref-(num_steps+19)*δ2:δ2:a2ref+(num_steps+9)*δ2
+    # # a2vals = a2ref+(num_steps+9+1)*δ2:δ2:a2ref+(num_steps+9+30)*δ2
+    # a2vals = a2ref+(num_steps+9+30+1)*δ2:δ2:a2ref+(num_steps+9+30+51)*δ2
+
+    # # # a1vals = a1ref-num_steps*δ1:δ1:a1ref+num_steps*δ1
+    # # # a2vals = a2ref-num_steps*δ2:δ2:a2ref+num_steps*δ2
+    # # a1vals = a1ref-(num_steps+10)*δ1:δ1:a1ref+(num_steps+2)*δ1
+    # a1vals = a1ref-(num_steps+28)*δ1:δ1:a1ref-(num_steps+16)*δ1
+    # # a1vals = a1ref-(num_steps+15)*δ1:δ1:a1ref-(num_steps+11)*δ1
+    # # # # a2vals = a2ref-(num_steps+19)*δ2:δ2:a2ref+(num_steps+9)*δ2
+    # # # a2vals = a2ref+(num_steps+9+1)*δ2:δ2:a2ref+(num_steps+9+30)*δ2
+    # # a2vals = a2ref+(num_steps+9+30+1)*δ2:δ2:a2ref+(num_steps+9+30+51)*δ2
+    # a2vals = a2ref-(num_steps+19)*δ2:δ2:a2ref+(num_steps+9+30+51)*δ2
+
+    # The complete investigated intervals (I think)
+    a1vals = a1ref-(num_steps+28)*δ1:δ1:a1ref+(num_steps+2)*δ1
+    a2vals = a2ref-(num_steps+19)*δ2:δ2:a2ref+(num_steps+9+30+51)*δ2
+
+    len1 = length(a1vals)
+    len2 = length(a2vals)
 
     # cost_vals = [zeros(length(avals), length(kvals)) for e=1:E]
     cost_vals = [fill(NaN, (length(a1vals), length(a2vals))) for e=1:E]
@@ -4370,7 +4392,7 @@ function gridsearch_2distsens(expid::String, N_trans::Int = 0)
                     Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
                     # cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
                     cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
-                    @info "Completed computing cost for e = $e, ia=$i1, ik=$i2. WARN: Using e=3 instead of default"
+                    @info "Completed computing cost for e = $e, i1=$i1, i2=$i2 out of $len1 and $len2. WARN: Using e=3 instead of default"
                 end
                 ind += 1
             end
