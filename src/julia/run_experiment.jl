@@ -1,6 +1,6 @@
 using LsqFit, LaTeXStrings, Dates, Interpolations
 using StatsPlots # Commented out since it breaks 3d-plotting in Julia 1.5.3
-# using QuadGK
+using QuadGK
 include("simulation.jl")
 include("noise_interpolation_multivar.jl")
 include("noise_generation.jl")
@@ -254,17 +254,17 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = Array{Float64}(undef, 0)#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Array{Float64,1}) = [m, L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.1 1e4];#[0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [1.0]#[0.1, 1.0, 1.0, 0.01, 0.1, 0.01]
-    model_sens_to_use = pendulum_sensitivity_m#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    model_sens_to_use = pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
-    model_adj_to_use = my_pendulum_adjoint_monly
-    model_stepbystep = pendulum_adj_stepbystep_m
+    model_adj_to_use = my_pendulum_adjoint_deb
+    model_stepbystep = pendulum_adj_stepbystep_deb
 elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
@@ -1883,7 +1883,7 @@ function DEBUG_DELETENOW(expid::String, N_trans::Int=0)
     # return Gp, λs, βs, sol_for, wmm, Gp_alt, term, deb_stuff
 end
 
-function solve_adjoint_deterministic(expid::String, N_trans::Int=0)
+function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=1)
     Random.seed!(123)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
@@ -1910,14 +1910,37 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0)
     # --------------------------------------------------------------------------
     dmdl_true = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
 
-    @info "HERE COMES THE DISTURBANCE MODEL: "
-    println(get_ct_disturbance_model(η, nx, n_out))
-    @info "and η: $η"
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl_true, Zm)
     wmm(m::Int) = mk_noise_interp(dmdl_true.Cd, XWm, m, δ)
 
     sol_for = solvew_sens(u, wmm(1), free_dyn_pars_true, N)
+
+    #
+    mdl_deb = pendulum_sensitivity_deb_0p01(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true))
+    prob_deb = problem(mdl_deb, N, Ts)
+    sol_deb  = solve(prob_deb, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
+        maxiters = maxiters)
+    # Y2 = h(sol_deb)
+    x_deb = h_debug(sol_deb)
+    x_org = h_debug(sol_for)
+    num_est = (x_deb-x_org)./0.01
+
+    Yfor = h(sol_for)
+    Ydeb = h(sol_deb)
+    # @info "type: $(type(Y[:,1])), $(type(Yfor[:,1:1])), $(size(Yfor))"
+    cost_for = get_cost_value(Y[:,1], Yfor[:,1:1])
+    cost_deb = get_cost_value(Y[:,1], Ydeb[:,1:1])
+    cost_num_est = (cost_deb - cost_for)/0.01
+    #
+
+    # # DEBUG: If we also want numerical approximation
+    # sol_for2 = solvew_sens(u, wmm(1), free_dyn_pars_true.+0.01, N)
+    Y1 = h(sol_for)
+    # Y2 = h(sol_for2)
+    # cost1 = get_cost_value(Y[:,1], Y1[:,1:1])
+    # cost2 = get_cost_value(Y[:,1], Y2[:,1:1])
+    # num_est = (cost2-cost1)/0.01
 
     # --------------------------------------------------------------------------
     # ------------- Solution of adjoint system (backwards) ---------------------
@@ -1996,11 +2019,11 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0)
     pre2 = now()
     # const abstol = 1e-8#1e-9
     # const reltol = 1e-5#1e-6
-    @warn "FIddling with solver tolerances here"
-    # adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol =  abstol, reltol = reltol,
-    #     maxiters = maxiters)
-    adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = 1e-10, reltol = 1e-7,
+    # @warn "FIddling with solver tolerances here"
+    adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol =  abstol, reltol = reltol,
         maxiters = maxiters)
+    # adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = 1e-10, reltol = 1e-7,
+    #     maxiters = maxiters)
 
     Gp = first(get_Gp(adj_sol))
 
@@ -2035,15 +2058,13 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0)
     Gp_alt = βs[1] - term
     # End of DEBUG: Alternative way to compute Gp
 
-    println("Let's also print things in here")
-    println((λ_func(N*Ts)'))
-    println(Fdx(x_for[end,1], x_for[end,2]))
-    println(xθ_for[end,:])
-    println(λ_func(0.))
-    println(Fdx(x_for[1,1], x_for[1,2]))
-    println(xθ_for[1,:])
-    println("Finished also printing things in here")
-    deb_stuff = (λs[:,1], y_func, dy_func, x_func, dx)
+    all_x_funcs = (t->x_func(t)[1],t->x_func(t)[2],t->x_func(t)[3],t->x_func(t)[4],t->x_func(t)[5],t->x_func(t)[6],t->x_func(t)[7],t->x_func(t)[8],t->x_func(t)[9],t->x_func(t)[10],t->x_func(t)[11],t->x_func(t)[12],t->x_func(t)[13],t->x_func(t)[14])
+    all_dx_funcs = (t->dx(t)[1],t->dx(t)[2],t->dx(t)[3],t->dx(t)[4],t->dx(t)[5],t->dx(t)[6],t->dx(t)[7],t->dx(t)[8],t->dx(t)[9],t->dx(t)[10],t->dx(t)[11],t->dx(t)[12],t->dx(t)[13],t->dx(t)[14])
+    # (myx1, myx2, myx3, myx4, myx5, myx6, myx7, myxθ1, myxθ2, myxθ3, myxθ4, myxθ5, myxθ6, myxθ7)
+    # (mydx1, mydx2, mydx3, mydx4, mydx5, mydx6, mydx7, mydxθ1, mydxθ2, mydxθ3, mydxθ4, mydxθ5, mydxθ6, mydxθ7)
+    y_smooth  = cubic_spline_interpolation(0.0:Ts:N*Ts, Y[:,1], extrapolation_bc=Line())
+    other_lam_func, other_λint_func, other_lam_func2, debug6s, quad_λint = solve_accurate_adjoint2(N, Ts, x_func, dx, x_func, y_func, my_ind)
+    deb_stuff = (λs[:,1], y_func, dy_func, x_func, dx, all_x_funcs, all_dx_funcs, y_smooth, num_est, cost_num_est, other_lam_func, other_λint_func, other_lam_func2, debug6s, quad_λint)
 
     return Gp, λs, βs, sol_for, wmm, Gp_alt, term, deb_stuff
 end
@@ -2595,7 +2616,7 @@ function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::In
     adj_sens_2_miss     = states_adj[:,18]              # Must have additional term added to it (point 4)
     adj_sens_miss       = states_adj[:,19]              # Must have additional term added to it (point 5)
     remainder           = states_adj[:,20]              # (bonus point)
-    adj_sens_extra_miss = states_adj[:,21]              # (point 3.5)
+    adj_sens_extra = states_adj[:,21]              # (point 3.5)
     partial_int_miss    = states_adj[:,22]              # (point 6)
     tue_deb             = states_adj[:,23:29]           # (tuesday debug)
     # b1                  = states_adj[:,30]
@@ -2640,7 +2661,239 @@ function ad_debug_adjoint_stepbystep(expid::String, ad::AdjointData, N_trans::In
     @info "Error at adj_2: $(adj_sens_2_miss[end]-partial_int_miss[end])"
 
     println("for_dif_est, int_sens, adj_sens_1, adj_sens_2, adj_sens, adj_sens_extra, partial_int")
-    return for_dif_est_adj[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, adj_sens_extra_miss[end], partial_int_miss[end]-term, deb_stuff
+    return for_dif_est_adj[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, adj_sens_extra[end], partial_int_miss[end]-term, deb_stuff
+end
+
+# TODO: FINISH!
+function ultimate_adjoint_debug(expid::String, δp::Float64=0.01, N_trans::Int64=0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    u = exp_data.u
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    p = get_all_parameters(free_dyn_pars_true)
+    θ = p[1:dθ]
+    η = p[dθ+1: dθ+dη]
+    # C = reshape(η[nx+1:end], (n_out, n_tot))
+
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # ####### Obtaining cost derivative using forward sensitivity analysis #######
+    # dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    # XWm = simulate_noise_process_mangled(dmdl, Zm)
+    # wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+
+    # sol = solvew_sens(exp_data.u, wmm(1), free_dyn_pars_true, N)
+    my_ind = 2
+    Gp, λs, βs, sol_for, wmm, Gp_alt, adj_term, deb_stuff = solve_adjoint_deterministic(expid, 0, my_ind)
+    Y1, sens1 = h_comp(sol_for)
+    for_dif_est = get_cost_gradient(Y[1:N+1, 1], reshape(Y1, length(Y1), 1), [sens1], N_trans)
+    β_DAE       = Interpolations.linear_interpolation(sol_for.t, βs)
+
+    ######################### Adjoint part #####################################
+
+    # y_func  = interpolated_signal(Y[:,1], 0:Ts:(size(Y,1)-1)*Ts)
+    y_func = linear_interpolation(Y[:,1], Ts)
+    dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
+    # dy_func = interpolated_signal(dY_est, 0:Ts:(size(dY_est,1)-1)*Ts)
+    dy_func = linear_interpolation(dY_est, Ts)
+
+    # ------------- Trying to get hold of our desired λ ------------------------
+
+    function get_der_est(vals::Matrix{Float64})
+        # Rows of matrix are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        der_est = (vals[2:end,:]-vals[1:end-1,:])/Ts
+        ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+        # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
+    end
+    function get_mvar_cubic(ts, der_est::Matrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
+    end
+    function get_mvar_linear(ts, der_est::Matrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [Interpolations.linear_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
+    end
+
+    ts, λ_der = get_der_est(λs)
+    λ_func  = get_mvar_cubic(0:Ts:N*Ts, λs)
+    dλ_func = get_mvar_cubic(ts, λ_der)
+
+    # TODO: Not needed? These very short experiments are quite quick!
+    ad = AdjointData(wmm, y_func, dy_func, λ_func, dλ_func, exp_data.u, [sol_for], N, Ts, p, fill(NaN, (3,3)))
+
+    # ----------------- For step by step --------------------
+    dmdl_adj = model_stepbystep(φ0, ad.u, ad.wmm(1), ad.p, ad.y_func, ad.λ_func, ad.dλ_func, ad.N*ad.Ts)
+    prob_adj = problem(dmdl_adj, ad.N, ad.Ts)
+    sol_adj  = solve(prob_adj, saveat = 0:ad.Ts:ad.N*ad.Ts, abstol = abstol, reltol = reltol,
+        maxiters = maxiters)
+
+    states_adj = h_debug(sol_adj)
+    xs_adj              = states_adj[:,1:7]
+    Y_adj               = states_adj[:,7]
+    xθs_adj             = states_adj[:,8:14]
+    sens1_adj           = states_adj[:,14:14]
+    int_sens            = states_adj[:,16]/(N*Ts)       # (point 2)
+    adj_sens_1          = states_adj[:,17]/(N*Ts)       # (point 3)
+    adj_sens_2_miss     = states_adj[:,18]              # Must have additional term added to it (point 4)
+    adj_sens_miss       = states_adj[:,19]              # Must have additional term added to it (point 5)
+    remainder           = states_adj[:,20]              # (bonus point)
+    adj_sens_extra      = states_adj[:,21]              # (point 3.5)
+    partial_int_miss    = states_adj[:,22]              # (point 6)
+    common              = states_adj[:,23]              # shared between 3.5 and 4
+    extra35             = states_adj[:,24]              # extra term for 3.5
+    extra4              = states_adj[:,25]              # extra term for 4
+    partrepL            = states_adj[:,26]              # partial replacement term, Left
+    partrepR            = states_adj[:,27]              # partial replacement term, Right
+    oscdeb              = states_adj[:,28]              # (point 3.9, essentially rearranged point 4)
+    res29               = states_adj[:,29]              # Terms1 added to point 4 that I think are responsible for oscillations
+    res30               = states_adj[:,30]              # Terms2 added to point 4 that I think are responsible for oscillations
+    int_sens_unscaled   = states_adj[:,16]
+    adj_sens_1_unscaled = states_adj[:,17]
+    int_func  = Interpolations.linear_interpolation(sol_adj.t, int_sens)            # 2
+    adj_func1 = Interpolations.linear_interpolation(sol_adj.t, adj_sens_1)          # 3
+    adj_func_extra = Interpolations.linear_interpolation(sol_adj.t, adj_sens_extra) # 3.5
+    adj_func2_ = Interpolations.linear_interpolation(sol_adj.t, adj_sens_2_miss)    # 4, here starts oscillating
+    adj_func_  = Interpolations.linear_interpolation(sol_adj.t, adj_sens_miss)
+    osc_func   = Interpolations.linear_interpolation(sol_adj.t, oscdeb)
+    xs_adj_func  = get_mvar_linear(sol_adj.t, xs_adj)
+    xθs_adj_func = get_mvar_linear(sol_adj.t, xθs_adj)
+
+
+    # NOTE: We shouldn't need this, should be (pretty much) exactly the same as original for_dig_est
+    for_dif_est_adj = get_cost_gradient(Y[1:N+1, 1], reshape(Y_adj, length(Y_adj), 1), [sens1_adj], N_trans)
+
+    # ax_func, ay_func are x- and y-functions passed into adjoint system for solving
+    (_, ay_func, ady_func, ax_func, adx_func, all_x_funcs, all_dx_funcs, y_smooth, num_est, cost_num_est, λ_func_exact, λint_exact_ODE, λ_func_exact2, debug6s, quad_λint) = deb_stuff
+
+    integrand1(t) = 2*(ax_func(t)[7]-ay_func(t))*ax_func(t)[14]
+    integrand2(t) = 2*(xs_adj_func(t)[7]-y_func(t))*xθs_adj_func(t)[7]
+    int_sens_quad  = quadgk(integrand1, 0.0, N*Ts, rtol=1e-10)[1]/(N*Ts)
+    int_sens_quad2 = quadgk(integrand2, 0.0, N*Ts, rtol=1e-10)[1]/(N*Ts)    # Seems to match int_sens_quad just fine :)
+
+    # Trying with ODE integration
+    ode_eq(z,p,t) = 2*(ax_func(t)[7]-ay_func(t))*ax_func(t)[14]
+    # ode_eq(z,p,t) = dz[1] - 2*(xs_adj_func(t)[7]-y_func(t))*xθs_adj_func(t)[7]
+    myprob = ODEProblem(ode_eq, 0.0, (0,N*Ts), [])
+    mysol = DifferentialEquations.solve(myprob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    vals = [mysol.u[i][1] for i=eachindex(mysol.u)]
+    @warn "and vals: $(vals[end])"
+
+
+    Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
+                            0   1   0          0   0   2x2    0
+                            0   0   -x1      0.3   0   0      0
+                            0   0   -x2      0   0.3   0      0], zeros(3,7))
+    term = (λ_func(N*Ts)')*Fdx(xs_adj[end,1], xs_adj[end,2])*xθs_adj[end,:] - (λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2])*xθs_adj[1,:]
+    my_term(t) = (λ_func(t)')*Fdx(ax_func(t)[1], ax_func(t)[2])*ax_func(t)[8:14] - (λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2])*xθs_adj[1,:]
+
+    mpt1_ = (λ, x, xθ) -> λ[1]*(xθ[1] + 2x[1]*xθ[6])
+    mpt2_ = (λ, x, xθ) -> λ[2]*(xθ[2] + 2x[2]*xθ[6])
+    mpt3_improved_ = (λ, x, xθ) -> λ[3]*(0.3*xθ[4])
+    mpt4_improved_ = (λ, x, xθ) -> λ[4]*(0.3*xθ[5])
+    mpt1(t) = mpt1_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    mpt2(t) = mpt2_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    mpt3_improved(t) = mpt3_improved_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    mpt4_improved(t) = mpt4_improved_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    improved_term(t) = mpt1(t) + mpt2(t) + mpt3_improved(t) + mpt4_improved(t) - mpt1(0.0) - mpt2(0.0) - mpt3_improved(0.0) - mpt4_improved(0.0)
+
+    # for deb, comparing numerical sensitivity with forward sensitivity
+    ret1 = num_est[:,1:7]
+    ret2 = zeros(N+1,7)
+    myxθs_func(t) = ax_func(t)[8:end]
+    for i=1:N+1
+        ret2[i,:] = myxθs_func((i-1)*Ts)
+    end
+
+    # TODO: THESE AREN'T REALLY ΒS SINCE THEY ARE INTEGRATED FROM ZERO TO T!!!!!
+    # Using quadgk to integrate originally obtained lambdas instead of
+    # integrating them using DAE formulation
+    λint_DAE_quads = zeros(7)
+    for ind = 1:7
+        λint_DAE_quads[ind] = quadgk(t -> -λ_func(t)[ind], 0.0, N*Ts, rtol=1e-10)[1]
+    end
+
+    λint_exact_quads = zeros(7)
+    for ind = 1:7
+        λint_exact_quads[ind] = quadgk(t -> -λ_func_exact(t)[ind], 0.0, N*Ts, rtol=1e-10)[1]
+    end
+
+    temp_best_term(t) = λ_func_exact(t)[1]*ax_func(t)[8] + λ_func_exact(t)[2]*ax_func(t)[9] + m*λ_func_exact(t)[3]*ax_func(t)[11] + m*λ_func_exact(t)[4]*ax_func(t)[12]
+    best_term(t) = temp_best_term(t) - temp_best_term(0.0)
+    other_λint_func_improved(t) = other_λint_func(t) - best_term(t)#improved_term(t)
+    adj_func2(t) = adj_func2_(t) - my_term(t)
+    adj_func(t) = adj_func_(t) - my_term(t)
+    adj_func_best(t) = adj_func_(t) - best_term(t)
+
+    # TODO: How are these actually different from β_func? Well, they're obtained from stepbystep I guess!!! But make it clear!!!!
+    adj_func2_improved(t) = adj_func2_(t) - improved_term(t)
+    adj_func_improved(t) = adj_func_(t) - improved_term(t)
+
+    @warn "quad_λint - best_term: $(quad_λint - best_term(N*Ts))"
+
+
+    # ------------------------ TEMPORARY DEBUGS -------------------------------
+    dmdl_deb = deleteme_stepbystep_deb(φ0, ad.u, ad.wmm(1), ad.p, ad.y_func, ad.λ_func, ad.dλ_func, ad.N*ad.Ts)
+    prob_deb = problem(dmdl_deb, ad.N, ad.Ts)
+    sol_deb  = solve(prob_deb, saveat = 0:ad.Ts:ad.N*ad.Ts, abstol = abstol, reltol = reltol,
+        maxiters = maxiters)
+    states_adj = h_debug(sol_deb)
+    xs_deb              = states_adj[:,1:7]
+    xθs_deb             = states_adj[:,8:14]
+    int_sens_deb        = states_adj[:, 16]
+
+
+    λint_DAE(t) = β_DAE(0.0)-β_DAE(t)# - my_term(t)
+    # β_DAE and adj_func have been generated using the same quantities, thus we should have:
+    # adj_func(t) = β_DAE(0.0)-β_DAE(t) - my_term(t) = λint_DAE(t) - my_term(t)
+    # (Since β(t) integrates t->T and adj_func(t) integrates 0->t)
+    # (Detailed conversion: adj_func(t) = t-> β_DAE(0.0)-β_DAE(t) - my_term(t) )  # THIS WORKS :D
+
+    # TODO: Rename into more sensical names
+    return λ_func, λ_func_exact, λint_DAE, λint_DAE_quads, λint_exact_ODE, λint_exact_quads, my_term, best_term, int_func, int_sens_quad, cost_num_est, for_dif_est, adj_func, adj_func_best, Ts, N#, λsens_DAE, βs, adj_sens_miss, sensquad1, sensquad2, int_sens_deb
+
+    #= Return values
+    λ_func:                 λ1(t)-λ7(t) solved using DAE formulation. Cubic interpolation
+    λ_func_exact:           λ1(t)-λ7(t) solved using more exact ODE formulation. Cubic interpolation
+    λsens_DAE:              Gradient equivalent to integral of λ, computed using β(t) for my_ind, from adjoint DAE formulation, integrated using IDA
+    λint_DAE_quads:         Gradient computed as integral of λ. For all indices, using λ_func, integrated using QuadGK
+    λint_exact_ODE:         Gradient computed as integral of λ. For all indices, using λ_func_exact, integrated using IDA
+    λint_exact_quads:       Gradient computed as integral of λ. For all indices, using λ_func_exact, integrated using QuadGK
+    int_func:               Gradient obtained through integration using IDA
+    int_sens_quad:          Gradient obtained through integration using QuadGK
+    cost_num_est:           Numerical estimate of gradient from solve_adjoint_deterministic()
+    for_dif_est:            Forward sensitivity gradient, obtained from forward problem is solve_adjoint_deterministic()
+    adj_func:               integral(t)-my_term(t),   where integral(t) is obtained from stepbystep using λ_func (just integrating -(λ(t)')*Fp(x, dx))
+    adj_func_exact:         integral(t)-best_term(t), where integral(t) is obtained from stepbystep using λ_func (just integrating -(λ(t)')*Fp(x, dx))
+    =#
+
+    #= Flow of logic
+    Forward sensitivty analysis -> int_sens -> adj_func or λ_int-term
+
+    β_DAE and adj_func have been generated using the same quantities, thus we should have:
+    adj_func(t) = β_DAE(0.0)-β_DAE(t) - my_term(t)
+    (Since β(t) integrates t->T and adj_func(t) integrates 0->t)
+    (Detailed conversion: adj_func(t) = t-> β_DAE(0.0)-β_DAE(t) - my_term(t) )  # THIS WORKS :D
+    =#
 end
 
 function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans::Int64=0)
@@ -2671,10 +2924,12 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
     # wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
 
     # sol = solvew_sens(exp_data.u, wmm(1), free_dyn_pars_true, N)
-    Gp, λs, βs, sol_for, wmm, Gp_alt, adj_term, deb_stuff = solve_adjoint_deterministic(expid, 0)
+    my_ind = 2
+    Gp, λs, βs, sol_for, wmm, Gp_alt, adj_term, deb_stuff = solve_adjoint_deterministic(expid, 0, my_ind)
     Y1, sens1 = h_comp(sol_for)
     for_dif_est = get_cost_gradient(Y[1:N+1, 1], reshape(Y1, length(Y1), 1), [sens1], N_trans)
     @info "Gp: $Gp, Gp_alt: $Gp_alt, term: $adj_term"
+    deleteme = (Y[1:N+1, 1], reshape(Y1, length(Y1), 1), [sens1])
 
     ######################### Adjoint part #####################################
 
@@ -2698,6 +2953,14 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
         # Rows of der_est are assumed to be different values of t, columns of
         # matrix are assumed to be different elements of the vector-valued process
         temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
+    end
+    function get_mvar_linear(ts, der_est::Matrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [Interpolations.linear_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
         # temp = [t->t for i=1:size(der_est,2)]
         return t -> [temp[i](t) for i=eachindex(temp)]
         # Returns a function mapping time to the vector-value of the function at that time
@@ -2727,15 +2990,39 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
     adj_sens_2_miss     = states_adj[:,18]              # Must have additional term added to it (point 4)
     adj_sens_miss       = states_adj[:,19]              # Must have additional term added to it (point 5)
     remainder           = states_adj[:,20]              # (bonus point)
-    adj_sens_extra_miss = states_adj[:,21]              # (point 3.5)
+    adj_sens_extra      = states_adj[:,21]              # (point 3.5)
     partial_int_miss    = states_adj[:,22]              # (point 6)
     common              = states_adj[:,23]              # shared between 3.5 and 4
-    extra35             = states_adj[:,24]              # extra tern for 3.5
-    extra4              = states_adj[:,25]              # extra tern for 4
+    extra35             = states_adj[:,24]              # extra term for 3.5
+    extra4              = states_adj[:,25]              # extra term for 4
     partrepL            = states_adj[:,26]              # partial replacement term, Left
     partrepR            = states_adj[:,27]              # partial replacement term, Right
+    oscdeb              = states_adj[:,28]              # (point 3.9, essentially rearranged point 4)
+    res29               = states_adj[:,29]              # Terms1 added to point 4 that I think are responsible for oscillations
+    res30               = states_adj[:,30]              # Terms2 added to point 4 that I think are responsible for oscillations
+    int_sens_unscaled   = states_adj[:,16]
+    adj_sens_1_unscaled = states_adj[:,17]
     # we should have 3.5 = common+extra35, 4 = common+extra4
     @info "common: $(common[end]), 3.5 case: $(common[end]+extra35[end]), 4 case: $(common[end]+extra4[end])"
+    int_func  = Interpolations.linear_interpolation(sol_adj.t, int_sens)            # 2
+    adj_func1 = Interpolations.linear_interpolation(sol_adj.t, adj_sens_1)          # 3
+    adj_func_extra = Interpolations.linear_interpolation(sol_adj.t, adj_sens_extra) # 3.5
+    adj_func2_ = Interpolations.linear_interpolation(sol_adj.t, adj_sens_2_miss)    # 4, here starts oscillating
+    adj_func_  = Interpolations.linear_interpolation(sol_adj.t, adj_sens_miss)
+    osc_func   = Interpolations.linear_interpolation(sol_adj.t, oscdeb)
+    xs_adj_func  = get_mvar_linear(sol_adj.t, xs_adj)
+    xθs_adj_func = get_mvar_linear(sol_adj.t, xθs_adj)
+    β_func       = Interpolations.linear_interpolation(sol_for.t, βs[end:-1:1])
+    extra35_func = Interpolations.linear_interpolation(sol_adj.t, extra35)
+    extra4_func  = Interpolations.linear_interpolation(sol_adj.t, extra4)
+    res29_func = Interpolations.linear_interpolation(sol_adj.t, res29)
+    res30_func = Interpolations.linear_interpolation(sol_adj.t, res30)
+    eps = 1e-9
+    # NOTE: I think these are pointless, I made them due to a bit of confusion
+    int_func_new = Interpolations.linear_interpolation(sol_adj.t, int_sens_unscaled./(eps.+(0.0:Ts:N*Ts)))
+    adj_func1_new = Interpolations.linear_interpolation(sol_adj.t, adj_sens_1_unscaled./(eps.+(0.0:Ts:N*Ts)))
+    # int_func_new = Interpolations.linear_interpolation(sol_adj.t, int_sens_unscaled)
+    # adj_func1_new = Interpolations.linear_interpolation(sol_adj.t, adj_sens_1_unscaled)
 
 
     # sens1_adj = sens_and_cost_adj[:,1:1]
@@ -2759,19 +3046,340 @@ function new_debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans:
     println(Fdx(xs_adj[1,1], xs_adj[1,2]))
     println(xθs_adj[1,:])
     println("Finished printing some stuff")
-    (_, ay_func, ady_func, ax_func, adx_func) = deb_stuff
+    (_, ay_func, ady_func, ax_func, adx_func, all_x_funcs, all_dx_funcs, y_smooth, num_est, cost_num_est, other_lam_func, other_λint_func, other_lam_func2, debug6s, quad_λint) = deb_stuff
     # Integrand for pendulum m:
     mint(t) = λ_func(t)[3]*adx_func(t)[4] + λ_func(t)[4]*(adx_func(t)[5]+9.81)
+    term_comps(t) = [λ_func(t)[1]*ax_func(t)[8]
+                     λ_func(t)[2]*ax_func(t)[9]
+                     - (λ_func(t)[3]*ax_func(t)[1] + λ_func(t)[4]*ax_func(t)[2])*ax_func(t)[10]
+                     m*λ_func(t)[3]*ax_func(t)[1]
+                     m*λ_func(t)[4]*ax_func(t)[12]
+                     2(λ_func(t)[1]*ax_func(t)[1] + λ_func(t)[2]*ax_func(t)[2])*ax_func(t)[13]]
 
-    my_term(t) = (λ_func(t)')*Fdx(x_func(t)[1], x_func(t)[2])*x_func(t)[8:14] - (λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2])*xθs_adj[1,:]
-    # super_debug = (common, extra35, extra4, partrepL, partrepR, ad.λ_func, ad.dλ_func, ax_func, adx_func, mint)
-    super_debug = (ad.λ_func, ad.dλ_func, ax_func, adx_func, mint, int_sens, adj_sens_miss, my_term)
+    should_equal_term = sum(term_comps(N*Ts))-sum(term_comps(0.0))
+    @info "term is $term, comps give: $should_equal_term"
+
+    # ------------------------- A LITTLE DEBUG BLOCK ---------------------------
+    Fx = (x, dx) -> [2dx[6]        0               0   -1                  0           0   0
+                      0           2*dx[6]          0   0                   -1          0   0
+                     -dx[3]        0               0   2k*abs(x[4])        0           0   0
+                      0          -dx[3]            0   0               2k*abs(x[5])    0   0
+                      2x[1]       2x[2]            0   0                   0           0   0
+                      x[4]        x[5]             0   x[1]               x[2]         0   0
+                      x[2]/(L^2)  -x[1]/(L^2)      0   0                   0           0   1]
+    # if free_dyn_pars_true[1] == 0.3
+    if get_all_θs([-1.0]) == [-1.0, L, g, k]
+        # m is parameter
+        Fp = (x,dx) -> [ .0
+                        .0
+                        dx[4]
+                        dx[5]+g
+                        .0
+                        .0
+                        .0]
+    elseif get_all_θs([-1.0]) == [m, -1.0, g, k]
+        # L is parameter
+        Fp = (x,dx) -> [0
+                        0
+                        0
+                        0
+                        -2L
+                        0
+                        0]
+    elseif get_all_θs([-1.0]) == [m, L, g, -1.0]
+        # k is parameter
+        Fp = (x, dx) -> [0
+                        0
+                        abs(x[4])*x[4]
+                        abs(x[5])*x[5]
+                        0
+                        0
+                        0]
+    elseif get_all_θs([-1.0]) == [m, L, -1.0, k]
+        # k is parameter
+        Fp = (x, dx) -> [0
+                        0
+                        0
+                        m
+                        0
+                        0
+                        0]
+    end
+    Fdx_xθ = (x, xθ) -> [xθ[1] + 2x[1]*xθ[6]
+                         xθ[2] + 2x[2]*xθ[6]
+                         -x[1]*xθ[3] + 0.3*xθ[4]
+                         -x[2]*xθ[3] + 0.3*xθ[5]
+                         0.
+                         0.
+                         0.]
+    λ_Fdx_xθ = (λ, x, xθ) -> λ[1]*(xθ[1] + 2x[1]*xθ[6]) + λ[2]*(xθ[2] + 2x[2]*xθ[6]) + λ[3]*(-x[1]*xθ[3] + 0.3*xθ[4]) + λ[4]*(-x[2]*xθ[3] + 0.3*xθ[5])
+    culprit0(t) = - 2(ax_func(t)[7]-ay_func(t))*ax_func(t)[14]
+    culprit1(t) = (λ_func(t)')*(Fx(ax_func(t), adx_func(t))*ax_func(t)[8:14] + Fdx(ax_func(t)[1], adx_func(t)[2])*adx_func(t)[8:14] + Fp(ax_func(t), adx_func(t)))
+    # NOTE: Plotting these doesn't seem to match at all with conclusion of looking at plots
+    # int_func, adj_func1, adj_func2. There, it seems like integrating just culprit0 gives nice and smooth descent,
+    # but integrating culprit0 together with culprit1 gives a very ostcillating result.
+    # However, now plotting the culprits separately seems to imply that culprit1 is completely
+    # negligible compared to culprit0, so how on earth could it impact the integration so heavily?
+
+    # ---------------------- END OF ABOVE DEBUG BLOCK --------------------------
+
+    # term =     (λ_func(N*Ts)')*Fdx(xs_adj[end,1], xs_adj[end,2])*xθs_adj[end,:] - (λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2])*xθs_adj[1,:]
+    my_term(t) = (λ_func(t)')*Fdx(ax_func(t)[1], ax_func(t)[2])*ax_func(t)[8:14] - (λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2])*xθs_adj[1,:]
+    my_part_term(t) = (λ_func(t)')*Fdx(ax_func(t)[1], ax_func(t)[2])*ax_func(t)[8:14]
+    my_part_term2(t) = (λ_func(t)')*Fdx_xθ(ax_func(t)[1:7], ax_func(t)[8:14])
+    my_part_term3(t) = λ_Fdx_xθ(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    mpt1_ = (λ, x, xθ) -> λ[1]*(xθ[1] + 2x[1]*xθ[6])
+    mpt2_ = (λ, x, xθ) -> λ[2]*(xθ[2] + 2x[2]*xθ[6])
+    mpt3_ = (λ, x, xθ) -> λ[3]*(-x[1]*xθ[3] + 0.3*xθ[4])
+    mpt4_ = (λ, x, xθ) -> λ[4]*(-x[2]*xθ[3] + 0.3*xθ[5])
+    # # NOTE: These version below have part that should analytically be zero removed!
+    mpt3_improved_ = (λ, x, xθ) -> λ[3]*(0.3*xθ[4])
+    mpt4_improved_ = (λ, x, xθ) -> λ[4]*(0.3*xθ[5])
+    test1_ = (λ, x, xθ) -> -x[1]*xθ[3] + 0.3*xθ[4]
+    test2_ = (λ, x, xθ) -> -x[2]*xθ[3] + 0.3*xθ[5]
+    λ3(t) = λ_func(t)[3]
+    λ4(t) = λ_func(t)[4]
+    mpt1(t) = mpt1_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    mpt2(t) = mpt2_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    mpt3(t) = mpt3_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    mpt4(t) = mpt4_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    mpt3_improved(t) = mpt3_improved_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    mpt4_improved(t) = mpt4_improved_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    test1(t) = test1_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    test2(t) = test2_(λ_func(t), ax_func(t)[1:7], ax_func(t)[8:14])
+    improved_term(t) = mpt1(t) + mpt2(t) + mpt3_improved(t) + mpt4_improved(t) - mpt1(0.0) - mpt2(0.0) - mpt3_improved(0.0) - mpt4_improved(0.0)
+    adj_func2_improved(t) = adj_func2_(t) - improved_term(t)
+    adj_func_improved(t) = adj_func_(t) - improved_term(t)
+
+    # int_func and adj_func are, respectively, obtained by integrating the following expressions:
+    # - 2(x[7]-y(t))*x[14] ( divided by N*Ts also!!)
+    # + (λ(t)')*Fp(x, dx)
+    # Let's try to look at them (plot them)
+    my_int1(t) = -2(ax_func(t)[7]-y_func(t))*ax_func(t)[14]/(N*Ts)
+    my_int2(t) = (λ_func(t)')*Fp(ax_func(t), adx_func(t))
+    # THEY LOOK INCOMPREHENSIVELY NOISY! And veeeery different scale...
+
+    # for deb, comparing numerical sensitivity with forward sensitivity
+    ret1 = num_est[:,1:7]
+    ret2 = zeros(N+1,7)
+    myxθs_func(t) = ax_func(t)[8:end]
+    for i=1:N+1
+        ret2[i,:] = myxθs_func((i-1)*Ts)
+    end
+
+    # COMPUTING ADJOINT RESIDUALS!
+    residuals, implicit_6 = get_adjoint_residuals(λ_func, dλ_func, ax_func, adx_func, y_func, N, Ts, my_ind)
+    @warn "And here, DELETEME, $(typeof(implicit_6)), s: $(size(implicit_6))"
+
+    # Using quadgk to integrate originally obtained lambdas instead of
+    # integrating them using DAE formulation
+    DAE_quads = zeros(7)
+    for ind = 1:7
+        DAE_quads[ind] = quadgk(t -> -λ_func(t)[ind], 0.0, N*Ts, rtol=1e-10)[1]
+    end
+
+    # (myx1, myx2, myx3, myx4, myx5, myx6, myx7, myxθ1, myxθ2, myxθ3, myxθ4, myxθ5, myxθ6, myxθ7)
+    # (mydx1, mydx2, mydx3, mydx4, mydx5, mydx6, mydx7, mydxθ1, mydxθ2, mydxθ3, mydxθ4, mydxθ5, mydxθ6, mydxθ7)
+    temp_best_term(t) = other_lam_func(t)[1]*ax_func(t)[8] + other_lam_func(t)[2]*ax_func(t)[9] + m*other_lam_func(t)[3]*ax_func(t)[11] + m*other_lam_func(t)[4]*ax_func(t)[12]
+    best_term(t) = temp_best_term(t) - temp_best_term(0.0)
+    term_debug = (temp_best_term(0.0), mpt1(0.0) + mpt2(0.0) + mpt3_improved(0.0) + mpt4_improved(0.0), (λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2])*xθs_adj[1,:])
+    other_λint_func_improved(t) = other_λint_func(t) - best_term(t)#improved_term(t)
+    mpts = (mpt1, mpt2, mpt3, mpt4, test1, test2, λ3, λ4, improved_term, best_term, adj_func2_improved, adj_func_improved, my_int1, my_int2, ay_func, all_x_funcs, all_dx_funcs, Y, y_smooth, int_func_new, adj_func1_new, num_est, deleteme, ret1, ret2, residuals, implicit_6, other_lam_func, other_λint_func, other_λint_func_improved, other_lam_func2, term_debug, debug6s, DAE_quads)
+    adj_func2(t) = adj_func2_(t) - my_term(t)
+    adj_func(t) = adj_func_(t) - my_term(t)
+    # # super_debug = (common, extra35, extra4, partrepL, partrepR, ad.λ_func, ad.dλ_func, ax_func, adx_func, mint)
+    # super_debug = (ad.λ_func, ad.dλ_func, ax_func, adx_func, mint, int_sens, adj_sens_miss, my_term)
+    super_debug = (N, Ts, ad.λ_func, ad.dλ_func, ax_func, adx_func, mint, int_sens, int_func, adj_func1, adj_func_extra, adj_func2, adj_func, my_term, my_part_term, adj_func2_, adj_func_, term_comps, xs_adj_func, xθs_adj_func, culprit0, culprit1, osc_func, my_term, β_func, extra35_func, extra4_func, res29_func, res30_func, my_part_term2, my_part_term3, mpts)
+
+    @warn "quad_λint - best_term: $(quad_λint - best_term(N*Ts))"
 
     println("for_dif_est,              int_sens,                   adj_sens_1,            adj_sens_2,             adj_sens,                   Gp,                adj_sens_extra,         partial_int")
-    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end], partial_int_miss[end]-term, ad, partial_int_miss, super_debug
-    # return for_dif_est[1], adj_sens_miss[end]-term, remainder
-    # # return num_dif_est, for_dif_est[1], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
-    # # # return num_dif_est, for_dif_est[1], for_dif_est2[1], cost_sens[end], adj_sens_1[end], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
+    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra[end], partial_int_miss[end]-term, ad, partial_int_miss, super_debug
+end
+
+function solve_accurate_adjoint(N::Int, Ts::Float64, x::Function, dx::Function, x2::Function, y_func::Function, my_ind::Int)
+    ode_eq(z,p,t) = [-dx(t)[3]*z[2] + (2*x(t)[2]/(T*L^2))*(x2(t)[7]-y_func(t));
+                     (-z[1] + 2*k*abs(x(t)[4])*z[2])/m]
+
+     # ode_eq2(z,p,t) = [2*dx(t)[6]*z[1] - dx(t)[3]*z[2] + 2x(t)[1]*lamfun(t)[5] + x(t)[4]*lamfun(t)[6] + (2*x(t)[2]/(T*L^2))*(x2(t)[7]-y_func(t));
+     #                   -z[1] + 2*k*abs(x(t)[4])*z[2]]
+
+    ode_eq2(z,p,t) = [2*dx(t)[6]*z[1] - dx(t)[3]*z[2] + (2*x(t)[2]/(T*L^2))*(x2(t)[7]-y_func(t));
+                      -z[1] + 2*k*abs(x(t)[4])*z[2]]
+
+    T = N*Ts
+    span = (T, 0.0)
+    zT = zeros(2)
+    prob = ODEProblem(ode_eq, zT, span, [])
+    prob2 = ODEProblem(ode_eq2, zT, span, [])
+    sol = DifferentialEquations.solve(prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    sol2 = DifferentialEquations.solve(prob2, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    λ1 = [sol.u[end-i+1][1] for i=eachindex(sol.u)]
+    λ3 = [sol.u[end-i+1][2] for i=eachindex(sol.u)]
+    λ1_func = cubic_spline_interpolation(0.0:Ts:N*Ts, λ1, extrapolation_bc=Line())
+    λ3_func = cubic_spline_interpolation(0.0:Ts:N*Ts, λ3, extrapolation_bc=Line())
+    λ_func(t)  = [  λ1_func(t);
+                    -(x(t)[1]/x(t)[2])*λ1_func(t);
+                    λ3_func(t);
+                    -(x(t)[1]/x(t)[2])*λ3_func(t);
+                    0.0;
+                    0.0;
+                    (2/T)*(x2(t)[7]-y_func(t))]
+
+    # FOR 2
+    λ12 = [sol2.u[end-i+1][1] for i=eachindex(sol2.u)]
+    λ32 = [sol2.u[end-i+1][2] for i=eachindex(sol2.u)]
+    λ1_func2 = cubic_spline_interpolation(0.0:Ts:N*Ts, λ12, extrapolation_bc=Line())
+    λ3_func2 = cubic_spline_interpolation(0.0:Ts:N*Ts, λ32, extrapolation_bc=Line())
+    λ_func2(t)  = [  λ1_func2(t);
+                    -(x(t)[1]/x(t)[2])*λ1_func2(t);
+                    λ3_func2(t);
+                    -(x(t)[1]/x(t)[2])*λ3_func2(t);
+                    0.0;
+                    0.0;
+                    (2/T)*(x2(t)[7]-y_func(t))]
+
+    # -------- Let's also compute β for some i -----------
+    i = my_ind
+    λint_eq(x,p,t) = -λ_func(t)[i]
+    λint_prob = ODEProblem(λint_eq, 0.0, (0.0, T), [])
+    λint_sol  = DifferentialEquations.solve(λint_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    λint_vec  = [λint_sol.u[i][1] for i=eachindex(λint_sol)]
+    λint_func = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec, extrapolation_bc=Line())
+
+    return λ_func, λint_func, λ_func2
+end
+
+function solve_accurate_adjoint2(N::Int, Ts::Float64, x::Function, dx::Function, x2::Function, y_func::Function, my_ind::Int)
+    l2(x,dx,z,t) = (-x(t)[1]/x(t)[2])*z[1]
+    l4(x,dx,z,t) = (-x(t)[1]/x(t)[2])*z[2]
+    # l6(x,dx,z,t) = (-x(t)[1]/(L^2))*(-z[1] + 2k*abs(x(t)[4])*z[2]) - (x(t)[2]/(L^2))*(-l2(x,dx,z,t) + 2k*abs(x(t)[5])*l4(x,dx,z,t)) - (m/(L^2))*(dx(t)[1]*z[2] + dx(t)[2]*l4(x,dx,z,t))
+    # Two terms that should cancel removed
+    # l6(x,dx,z,t) = (-x(t)[1]/(L^2))*2k*abs(x(t)[4])*z[2] - (x(t)[2]/(L^2))*2k*abs(x(t)[5])*l4(x,dx,z,t) - (m/(L^2))*(dx(t)[1]*z[2] + dx(t)[2]*l4(x,dx,z,t))
+    l6(x,dx,z,t) = (-x(t)[1]*2k*abs(x(t)[4])*z[2] - x(t)[2]*2k*abs(x(t)[5])*l4(x,dx,z,t) - m*(dx(t)[1]*z[2] + dx(t)[2]*l4(x,dx,z,t)))/(L^2)
+    # l5(x,dx,z,t) = ( x(t)[1]*dx(t)[3]*z[2] + x(t)[2]*dx(t)[3]*l4(x,dx,z,t) - dx(t)[1]*z[1] - dx(t)[2]*l2(x,dx,z,t) - (x(t)[1]*x(t)[4]+x(t)[2]*x(t)[5])*l6(x,dx,z,t) )/(2*L^2)
+    # Two terms that should cancel removed
+    l5(x,dx,z,t) = ( - dx(t)[1]*z[1] - dx(t)[2]*l2(x,dx,z,t) - (x(t)[1]*x(t)[4]+x(t)[2]*x(t)[5])*l6(x,dx,z,t) )/(2*L^2)
+
+    l6_2(x,dx,z,t) = (-(2k*x(t)[1]*abs(x(t)[4]) + m*dx(t)[1])*z[2] - (2k*x(t)[2]*abs(x(t)[5]) + m*dx(t)[2])*l4(x,dx,z,t))/(L^2)
+    l5_2(x,dx,z,t) = -(dx(t)[1]*z[1] + dx(t)[2]*l2(x,dx,z,t) + (x(t)[1]*x(t)[4] + x(t)[2]*x(t)[5])*l6_2(x,dx,z,t))/(2*L^2)
+
+    # TODO: 6 pretty much good now, I don't think we need these anymore
+    # parts6_1a(x,dx,z,t) = (-x(t)[1]/(L^2))
+    # parts6_1b(x,dx,z,t) = -z[1]
+    # parts6_1c(x,dx,z,t) = 2k*abs(x(t)[4])*z[2]
+    # parts6_1d(x,dx,z,t) = 2k*abs(x(t)[4])
+    # parts6_1e(x,dx,z,t) = z[2]
+    # debug6_1(x,dx,z,t) = (-x(t)[1]/(L^2))*(-z[1] + 2k*abs(x(t)[4])*z[2])
+    # debug6_2(x,dx,z,t) = - (x(t)[2]/(L^2))*(-l2(x,dx,z,t) + 2k*abs(x(t)[5])*l4(x,dx,z,t))
+    # debug6_3(x,dx,z,t) = - (m/(L^2))*(dx(t)[1]*z[2] + dx(t)[2]*l4(x,dx,z,t))
+
+    # # OLD, THEORETICALLY INCORRECT BUT SOMEHOW WORKING BETTER
+    # ode_eq(z,p,t) = [-dx(t)[3]*z[2] + (2*x(t)[2]/(T*L^2))*(x2(t)[7]-y_func(t));
+    #                  (-z[1] + 2*k*abs(x(t)[4])*z[2])/m]
+
+    # THEORETICALLY CORRECT VERSION
+    ode_eq(z,p,t) = [-dx(t)[3]*z[2] + 2*x(t)[1]*l5(x,dx,z,t) + x(t)[4]*l6(x,dx,z,t)     + (2*x(t)[2]/(T*L^2))*(x2(t)[7]-y_func(t));
+                     (-z[1] + 2*k*abs(x(t)[4])*z[2] + x(t)[1]*l6(x,dx,z,t))/m]
+
+    # USING l6_2 AND l5_2
+    ode_eq2(z,p,t) = [-dx(t)[3]*z[2] + 2*x(t)[1]*l5_2(x,dx,z,t) + x(t)[4]*l6_2(x,dx,z,t)     + (2*x(t)[2]/(T*L^2))*(x2(t)[7]-y_func(t));
+                     (-z[1] + 2*k*abs(x(t)[4])*z[2] + x(t)[1]*l6_2(x,dx,z,t))/m]
+
+    # #l5 = 0 and l6 = 0 inserted?
+    # ode_eq2(z,p,t) = [2*dx(t)[6]*z[1] - dx(t)[3]*z[2] + (2*x(t)[2]/(T*L^2))*(x2(t)[7]-y_func(t));
+    #                   -z[1] + 2*k*abs(x(t)[4])*z[2]]
+
+    T = N*Ts
+    span = (T, 0.0)
+    zT = zeros(2)
+    prob = ODEProblem(ode_eq, zT, span, [])
+    prob2 = ODEProblem(ode_eq2, zT, span, [])
+    sol = DifferentialEquations.solve(prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    sol2 = DifferentialEquations.solve(prob2, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    λ1 = [sol.u[end-i+1][1] for i=eachindex(sol.u)]
+    λ3 = [sol.u[end-i+1][2] for i=eachindex(sol.u)]
+    λ1_func = cubic_spline_interpolation(0.0:Ts:N*Ts, λ1, extrapolation_bc=Line())
+    λ3_func = cubic_spline_interpolation(0.0:Ts:N*Ts, λ3, extrapolation_bc=Line())
+    # λ_func(t)  = [  λ1_func(t);
+    #                 -(x(t)[1]/x(t)[2])*λ1_func(t);
+    #                 λ3_func(t);
+    #                 -(x(t)[1]/x(t)[2])*λ3_func(t);
+    #                 0.0;
+    #                 0.0;
+    #                 (2/T)*(x2(t)[7]-y_func(t))]
+    λ_func(t)  = [  λ1_func(t);
+                    l2(x,dx,[λ1_func(t);λ3_func(t)],t);
+                    λ3_func(t);
+                    l4(x,dx,[λ1_func(t);λ3_func(t)],t);
+                    l5(x,dx,[λ1_func(t);λ3_func(t)],t);
+                    l6(x,dx,[λ1_func(t);λ3_func(t)],t);
+                    (2/T)*(x2(t)[7]-y_func(t))]
+
+    # FOR 2
+    λ12 = [sol2.u[end-i+1][1] for i=eachindex(sol2.u)]
+    λ32 = [sol2.u[end-i+1][2] for i=eachindex(sol2.u)]
+    λ1_func2 = cubic_spline_interpolation(0.0:Ts:N*Ts, λ12, extrapolation_bc=Line())
+    λ3_func2 = cubic_spline_interpolation(0.0:Ts:N*Ts, λ32, extrapolation_bc=Line())
+    λ_func2(t)  = [  λ1_func2(t);
+                    -(x(t)[1]/x(t)[2])*λ1_func2(t);
+                    λ3_func2(t);
+                    -(x(t)[1]/x(t)[2])*λ3_func2(t);
+                    l5_2(x,dx,[λ1_func2(t);λ3_func2(t)],t);
+                    l6_2(x,dx,[λ1_func2(t);λ3_func2(t)],t);
+                    (2/T)*(x2(t)[7]-y_func(t))]
+
+    # TODO: I think we can delete these now
+    # fdebug6_1(t) = debug6_1(x,dx,[λ1_func(t);λ3_func(t)],t)
+    # fdebug6_2(t) = debug6_2(x,dx,[λ1_func(t);λ3_func(t)],t)
+    # fdebug6_3(t) = debug6_3(x,dx,[λ1_func(t);λ3_func(t)],t)
+    # fparta(t)    = parts6_1a(x,dx,[λ1_func(t);λ3_func(t)],t)
+    # fpartb(t)    = parts6_1b(x,dx,[λ1_func(t);λ3_func(t)],t)
+    # fpartc(t)    = parts6_1c(x,dx,[λ1_func(t);λ3_func(t)],t)
+    # fpartd(t)    = parts6_1d(x,dx,[λ1_func(t);λ3_func(t)],t)
+    # fparte(t)    = parts6_1e(x,dx,[λ1_func(t);λ3_func(t)],t)
+
+    # -------- Let's also compute β for some i -----------
+    i = my_ind
+    λint_eq(x,p,t) = -λ_func(t)[i]
+    λint_prob = ODEProblem(λint_eq, 0.0, (0.0, T), [])
+    λint_sol  = DifferentialEquations.solve(λint_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    λint_vec  = [λint_sol.u[i][1] for i=eachindex(λint_sol)]
+    λint_func = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec, extrapolation_bc=Line())
+    quad_λint = quadgk(t -> -λ_func(t)[i], 0.0, N*Ts, rtol=1e-10)[1]
+
+    λint_funcs, quad_λints = temp_func_julia_weird(λ_func, T, N, Ts)
+    temp1 = reshape([λint_funcs[i](N*Ts) for i=eachindex(λint_funcs)], 7, 1)
+    temp2 = reshape(quad_λints, 7, 1)
+    # @warn "Comp ODEs and quads:"
+    # println(temp1)
+    # println(temp2)
+
+    λint_funcs2, quad_λints2 = temp_func_julia_weird(λ_func2, T, N, Ts)
+    temp1_2 = reshape([λint_funcs2[i](N*Ts) for i=eachindex(λint_funcs2)], 7, 1)
+    temp2_2 = reshape(quad_λints2, 7, 1)
+    # @warn "Comp2 ODEs2 and quads2:"
+    # println(temp1_2)
+    # println(temp2_2)
+
+    debug6s = (λint_funcs, λint_funcs2)
+
+    return λ_func, λint_func, λ_func2, debug6s, quad_λint
+end
+
+function temp_func_julia_weird(λ_func, T, N, Ts)
+    λint_funcs = Array{Any}(undef, 7)
+    quad_λints = Array{Float64}(undef, 7)
+    for loop_ind = 1:7
+        λint_eq(x,p,t) = -λ_func(t)[loop_ind]
+        λint_prob = ODEProblem(λint_eq, 0.0, (0.0, T), [])
+        λint_sol  = DifferentialEquations.solve(λint_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+        λint_vec  = [λint_sol.u[i][1] for i=eachindex(λint_sol)]
+        # β_func = cubic_spline_interpolation(0.0:Ts:N*Ts, β_vec, extrapolation_bc=Line())
+        λint_funcs[loop_ind] = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec, extrapolation_bc=Line())
+        quad_λints[loop_ind] = quadgk(t -> -λ_func(t)[loop_ind], 0.0, N*Ts, rtol=1e-10)[1]
+    end
+    return λint_funcs, quad_λints
 end
 
 function new_debug_adjoint_stepbystep_MOH(expid::String, δp::Float64=0.01, N_trans::Int64=0)
@@ -2870,7 +3478,7 @@ function new_debug_adjoint_stepbystep_MOH(expid::String, δp::Float64=0.01, N_tr
     adj_sens_2_miss     = states_adj[:,8]              # Must have additional term added to it (point 4)
     adj_sens_miss       = states_adj[:,9]              # Must have additional term added to it (point 5)
     remainder           = states_adj[:,10]              # (bonus point)
-    adj_sens_extra_miss = states_adj[:,11]              # (point 3.5)
+    adj_sens_extra = states_adj[:,11]              # (point 3.5)
     partial_int_miss    = states_adj[:,12]              # (point 6)
     common              = states_adj[:,13]              # shared between 3.5 and 4
     extra35             = states_adj[:,14]              # extra tern for 3.5
@@ -2882,6 +3490,10 @@ function new_debug_adjoint_stepbystep_MOH(expid::String, δp::Float64=0.01, N_tr
     scalar_rem1         = states_adj[:,20]
     # we should have 3.5 = common+extra35, 4 = common+extra4
     @info "common: $(common[end]), 3.5 case: $(common[end]+extra35[end]), 4 case: $(common[end]+extra4[end])"
+    int_func  = Interpolations.linear_interpolation(sol_adj.t, int_sens)
+    adj_func1 = Interpolations.linear_interpolation(sol_adj.t, adj_sens_1)
+    adj_func2_ = Interpolations.linear_interpolation(sol_adj.t, adj_sens_2_miss)
+    adj_func_  = Interpolations.linear_interpolation(sol_adj.t, adj_sens_miss)
 
     # TODO: DELETE
     # my_cost = get_cost_value(Y[:,1], Y1[:,1:1])
@@ -2910,11 +3522,16 @@ function new_debug_adjoint_stepbystep_MOH(expid::String, δp::Float64=0.01, N_tr
     println(xθs_adj[1,:])
     println("Finished printing some stuff")
 
+    (_, ay_func, ady_func, ax_func, adx_func) = deb_stuff
+    my_term(t) = (λ_func(t)')*Fdx(ax_func(t)[1], ax_func(t)[2])*ax_func(t)[3:4] - (λ_func(0.)')*Fdx(xs_adj[1,1], xs_adj[1,2])*xθs_adj[1,:]
+    adj_func2(t) = adj_func2_(t) - my_term(t)
+    adj_func(t) = adj_func_(t) - my_term(t)
+
     # (debλs, orgλs, myy_func, mydy_func) = adj_deb
-    super_debug = (common, extra35, extra4, partrepL, partrepR, λ_func, dλ_func, N, Ts, x_func, dx, y_func)
+    super_debug = (common, extra35, extra4, partrepL, partrepR, λ_func, dλ_func, N, Ts, x_func, dx, y_func, int_func, adj_func1, adj_func2, adj_func)
 
     println("for_dif_est, int_sens, adj_sens_1, adj_sens_2, adj_sens, Gp, adj_sens_extra, partial_int")
-    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end], partial_int_miss[end]-term, ad, partial_int_miss, super_debug, rem1, rem2, scalar_rem1
+    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra[end], partial_int_miss[end]-term, ad, partial_int_miss, super_debug, rem1, rem2, scalar_rem1
     # return for_dif_est[1], adj_sens_miss[end]-term, remainder
     # # return num_dif_est, for_dif_est[1], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
     # # # return num_dif_est, for_dif_est[1], for_dif_est2[1], cost_sens[end], adj_sens_1[end], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
@@ -3207,7 +3824,7 @@ function debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans::Int
     adj_sens_2_miss     = states_adj[:,18]              # Must have additional term added to it (point 4)
     adj_sens_miss       = states_adj[:,19]              # Must have additional term added to it (point 5)
     remainder           = states_adj[:,20]              # (bonus point)
-    adj_sens_extra_miss = states_adj[:,21]              # (point 3.5)
+    adj_sens_extra = states_adj[:,21]              # (point 3.5)
     partial_int_miss    = states_adj[:,22]              # (point 6)
 
     sens1_adj = sens_and_cost_adj[:,1:1]
@@ -3235,10 +3852,33 @@ function debug_adjoint_stepbystep(expid::String, δp::Float64=0.01, N_trans::Int
     # @info "sin-thing: $(((N^Ts)^3)*(sin(N*Ts)^2))"
 
     println("for_dif_est,              int_sens,                   adj_sens_1,            adj_sens_2,             adj_sens,                   Gp,                adj_sens_extra,         partial_int")
-    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra_miss[end]-term, partial_int_miss[end]-term
+    return for_dif_est[1], int_sens[end], adj_sens_1[end], adj_sens_2_miss[end]-term, adj_sens_miss[end]-term, Gp, adj_sens_extra[end]-term, partial_int_miss[end]-term
     # return for_dif_est[1], adj_sens_miss[end]-term, remainder
     # # return num_dif_est, for_dif_est[1], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
     # # # return num_dif_est, for_dif_est[1], for_dif_est2[1], cost_sens[end], adj_sens_1[end], adj_sens_2[end]-term/(N*Ts), adj_sens_3[end]-term3/(N*Ts)
+end
+
+function get_adjoint_residuals(λ::Function, dλ::Function, x::Function, dx::Function, y::Function, N::Int, Ts::Float64, my_ind::Int)
+    i = my_ind
+    T = N*Ts
+    residuals = zeros(7, N)
+    implicit_6 = zeros(N)
+    for i=1:N
+        t = i*Ts
+        residuals[1,i]  = dλ(t)[1] - 2*dx(t)[6]*λ(t)[1] + dx(t)[3]*λ(t)[3] - 2*x(t)[1]*λ(t)[5] - x(t)[4]*λ(t)[6] - (x(t)[2]*λ(t)[7])/(L^2)
+        residuals[2,i]  = dλ(t)[2] - 2*dx(t)[6]*λ(t)[2] + dx(t)[3]*λ(t)[4] - 2*x(t)[2]*λ(t)[5] - x(t)[5]*λ(t)[6] + (x(t)[1]*λ(t)[7])/(L^2)
+        residuals[3,i]  = -x(t)[1]*dλ(t)[3] - x(t)[2]*dλ(t)[4] - dx(t)[1]*λ(t)[3] - dx(t)[2]*λ(t)[4]
+        residuals[4,i]  = m*dλ(t)[3] + λ(t)[1] - 2*k*abs(x(t)[4])*λ(t)[3] - x(t)[1]*λ(t)[6]
+        residuals[5,i]  = m*dλ(t)[4] + λ(t)[2] - 2*k*abs(x(t)[5])*λ(t)[4] - x(t)[2]*λ(t)[6]
+        residuals[6,i]  = 2*x(t)[1]*dλ(t)[1] + 2*x(t)[2]*dλ(t)[2] + 2*dx(t)[1]*λ(t)[1] + 2*dx(t)[2]*λ(t)[2]
+        residuals[7,i]  = (2*(x(t)[7] - y(t)))/T - λ(t)[7]
+        implicit_6[i]   = 2*x(t)[1]*λ(t)[1] + 2*x(t)[2]*λ(t)[2]
+        # Would need a log of \dot{β} for this
+        # residuals[8,i]  = dλ(t)[8] - λ(t)[i]
+    end
+
+    @warn "type: $(typeof(implicit_6)), size: $(size(implicit_6)), DELETEME"
+    return residuals, implicit_6
 end
 
 function darn_partial(ad::AdjointData)
