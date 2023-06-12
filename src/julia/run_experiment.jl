@@ -258,8 +258,8 @@ if model_id == PENDULUM
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1, 1.0, 1.0, 0.01, 0.1, 0.01]
-    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [0.1, 1.0, 1.0, 0.01, 0.1]#, 0.01]
+    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_2#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly
     model_stepbystep = pendulum_adj_stepbystep_k
@@ -293,7 +293,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 if model_id == PENDULUM
     f(x::Array{Float64,1}) = x[7]               # applied on the state at each step
     # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]#, x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
-    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
+    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42]]
     f_int(x::Vector{Float64})  = [x[15], x[16], x[17], x[18], x[1], x[2], x[8], x[9], x[10], x[11], x[12], x[13], x[14], x[19], x[20], x[21], x[22]]
     f_sens_deb(x::Vector{Float64}) = x[8:14]
     f_deb(x::Vector{Float64}) = vcat(f_sens(x), f_int(x))
