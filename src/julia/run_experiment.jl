@@ -1,5 +1,6 @@
 using LsqFit, LaTeXStrings, Dates, Interpolations
 using StatsPlots # Commented out since it breaks 3d-plotting in Julia 1.5.3
+using Distributions     # Only for debugging
 include("simulation.jl")
 include("noise_interpolation_multivar.jl")
 include("noise_generation.jl")
@@ -576,10 +577,10 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
     # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
-    free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
+    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
-    # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
+    free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
@@ -605,6 +606,34 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     Nw = min(size(XW, 1)÷n_tot, size(input, 1)÷n_in)
     N = Int((Nw - N_margin)*δ÷Ts)     # Number of steps we can take
     W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds)
+
+
+    # @warn "Not loading XW, but generating anew instead!!!"
+    # # Well actually also loading to get Nw, but overloading later
+    # For generating XW anew instead of using loaded version. Comment out if you want to load XW instead
+    # # --------------------------------------------------------------------------
+    # @warn "GENERATING XW FROM MIXTURE MODEL DISTRIBUTION INSTEAD OF GAUSSIAN DISTRIBUTION"
+    # d = MixtureModel(Normal[
+    #     Normal(-2.0, 1.2),
+    #     Normal(0.0, 1.0),
+    #     Normal(2.0, 2.5)], [0.3, 0.4, 0.3])
+    # Zm = [rand(d, Nw, n_tot) for m = 1:M]
+    #
+    # # W_meta = exp_data.W_meta
+    # # nx = W_meta.nx
+    # # # n_in = W_meta.n_in
+    # # n_out = W_meta.n_out
+    # # # n_tot = nx*n_in
+    # # # dη = length(W_meta.η)
+    # # N = size(exp_data.Y, 1)-1
+    # # # dist_par_inds = W_meta.free_par_inds
+    # #
+    # η = η_true#get_all_ηs(free_pars)
+    # dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, free_par_inds)
+    # XW = simulate_noise_process_mangled(dmdl, Zm)
+    # # wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+    # # --------------------------------------------------------------------------
+
 
     # Exact interpolation
     mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
@@ -4337,8 +4366,17 @@ function gridsearch_2distsens(expid::String, N_trans::Int = 0)
     # DEBUG
     E = 1
     @warn "Using E = 1 right now, instead of something larger"
-    @warn "SAMPLING FROM UNIFORM DISTRIBUTION INSTEAD OF GAUSSIAN DISTRIBUTION"
-    Zm = [2*rand(Nw, n_tot).-1 for m = 1:M]
+    # Zm = [randn(Nw, n_tot) for m = 1:M]
+    # @warn "SAMPLING FROM UNIFORM DISTRIBUTION INSTEAD OF GAUSSIAN DISTRIBUTION"
+    # Zm = [2*rand(Nw, n_tot).-1 for m = 1:M]
+    # @warn "SAMPLING FROM CAUCHY DISTRIBUTION INSTEAD OF GAUSSIAN DISTRIBUTION"
+    # d = Cauchy()
+    @warn "SAMPLING FROM MIXTURE MODEL DISTRIBUTION INSTEAD OF GAUSSIAN DISTRIBUTION"
+    d = MixtureModel(Normal[
+        Normal(-2.0, 1.2),
+        Normal(0.0, 1.0),
+        Normal(2.0, 2.5)], [0.3, 0.4, 0.3])
+    Zm = [rand(d, Nw, n_tot) for m = 1:M]
 
     # NOTE: All parameters have to be set as free for this functions,
     # so that we can set m, L, k, and c to their fixed values
