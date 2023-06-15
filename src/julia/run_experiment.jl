@@ -56,7 +56,11 @@ model_id = PENDULUM
 # The relationship between number of data samples N and number of noise samples
 # Nw is given by Nw >= (Ts/δ)*N
 const δ = 0.01                  # noise sampling time
-const Ts = 0.1                  # step-size
+const Ts = 0.01                  # step-size
+const Tsλ = 0.01
+const Tso = 0.01
+# const δ = 0.001                  # noise sampling time
+# const Ts = 0.001                  # step-size
 const M = 10#00       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
@@ -338,6 +342,14 @@ const maxiters = Int64(1e8)
 solvew_sens(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
   realize_model_sens(u, w, free_dyn_pars, N),
   saveat = 0:Ts:(N*Ts),
+  abstol = abstol,
+  reltol = reltol,
+  maxiters = maxiters;
+  kwargs...,
+)
+solvew_sens_varyingstep(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
+  realize_model_sens(u, w, free_dyn_pars, N),
+  saveat = 0:Tsλ:(N*Ts-0.00001),
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
@@ -1915,8 +1927,8 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=
     wmm(m::Int) = mk_noise_interp(dmdl_true.Cd, XWm, m, δ)
 
     sol_for = solvew_sens(u, wmm(1), free_dyn_pars_true, N)
+    sol_for_var = solvew_sens_varyingstep(u, wmm(1), free_dyn_pars_true, N)
 
-    #
     mdl_deb = pendulum_sensitivity_deb_0p01(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true))
     prob_deb = problem(mdl_deb, N, Ts)
     sol_deb  = solve(prob_deb, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol,
@@ -1970,6 +1982,15 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=
         end
         return der_est
     end
+    function get_der_est(vals::Matrix{Float64}, T::Float64, myTs::Float64)
+        # Rows of matrix are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        der_est = (vals[2:end,:]-vals[1:end-1,:])/myTs
+        # Subtracting myTs/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        ts = 0:myTs:T - myTs/2
+        return ts, der_est
+        # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
+    end
     function get_mvar_cubic(ts, der_est::Vector{Vector{Float64}})
         temp = [cubic_spline_interpolation(ts, [der_est[i][j] for i=1:length(der_est)], extrapolation_bc=Line()) for j=1:length(der_est[1])]
         t -> [temp[i](t) for i=1:length(temp)]
@@ -1979,6 +2000,15 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=
         # Rows of der_est are assumed to be different values of t, columns of
         # matrix are assumed to be different elements of the vector-valued process
         temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
+    end
+    function get_mvar_cubic2(ts, der_est::AbstractMatrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        nodes = (ts,)
+        temp = [extrapolate(interpolate(nodes, der_est[:,i], Gridded(Linear())), Line()) for i=1:size(der_est,2)]
         # temp = [t->t for i=1:size(der_est,2)]
         return t -> [temp[i](t) for i=eachindex(temp)]
         # Returns a function mapping time to the vector-value of the function at that time
@@ -1993,18 +2023,44 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=
     # NOTE: It is not recommended to access sol.u directly!!
     # x_func = linear_interpolation(sol_for.u, Ts)
     # DEBUG
-    xmat = zeros(length(sol_for.u), length(sol_for.u[1]))
+    @warn "WARNING: Replacing sol_for with sol_for_var here!!!"
+    sol_for_org = sol_for
+    sol_for = sol_for_var   # DEBUG
+    xmat = zeros(length(sol_for.u), length(sol_for.u[1]))#
     for i = 1:length(sol_for.u)
         xmat[i,:] = sol_for.u[i]
     end
-    x_func = get_mvar_cubic(0.0:Ts:N*Ts, xmat)
+    x_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xmat)#ORIGINAL:x_func = get_mvar_cubic(0.0:Ts:N*Ts, xmat)#DEBUGTsλ:x_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xmat)#DEBUGvar:x_func = get_mvar_cubic2(sol_for_var.t, xmat)
     # TODO: Use interpolated x_func to estimate dx????? Even smoother???
+    der_est = get_der_est(sol_for.t, x_func)
+    # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+    dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)#ORIGINAL:dx = get_mvar_cubic(0.0:Ts:(N-1)*Ts, der_est)#DebugTsλ:dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ, der_est)#DEBUGvar:dx = get_mvar_cubic2(sol_for_var.t[1:end-1], der_est)
 
-    der_est = get_der_est(0.0:Ts:N*Ts, x_func)
-    dx = get_mvar_cubic(0.0:Ts:(N-1)*Ts, der_est)
-    # _, der_est = get_der_est(sol_for)
-    # dx = get_mvar_cubic(ts, der_est)
-    # # dx = linear_interpolation(der_est, Ts)
+    # TODO: Delete if all works
+    # # -------------------- OLD ORIGINAL VERSION -----------------------
+    # # NOTE: It is not recommended to access sol.u directly!!
+    # # x_func = linear_interpolation(sol_for.u, Ts)
+    # # DEBUG
+    # xmat = zeros(length(sol_for.u), length(sol_for.u[1]))
+    # for i = 1:length(sol_for.u)
+    #     xmat[i,:] = sol_for.u[i]
+    # end
+    # x_func = get_mvar_cubic(0.0:Ts:N*Ts, xmat)
+    # # TODO: Use interpolated x_func to estimate dx????? Even smoother???
+    # der_est = get_der_est(0.0:Ts:N*Ts, x_func)
+    # dx = get_mvar_cubic(0.0:Ts:(N-1)*Ts, der_est)
+    # # ----------------- NEW VERSION USING DYNAMIC STEPS ----------------
+    # # NOTE: It is not recommended to access sol.u directly!!
+    # # x_func = linear_interpolation(sol_for.u, Ts)
+    # # DEBUG
+    # xmat = zeros(length(sol_for_var.u), length(sol_for_var.u[1]))
+    # for i = 1:length(sol_for_var.u)
+    #     xmat[i,:] = sol_for_var.u[i]
+    # end
+    # x_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xmat)#x_func = get_mvar_cubic2(sol_for_var.t, xmat)
+    # # TODO: Use interpolated x_func to estimate dx????? Even smoother???
+    # der_est = get_der_est(sol_for_var.t, x_func)
+    # dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ, der_est)#dx = get_mvar_cubic(0.0:Tsλ:(N-1)*Ts, der_est)# dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ, der_est)#dx = get_mvar_cubic2(sol_for_var.t[1:end-1], der_est)
 
     # Computing xp0, initial conditions of derivative of x wrt to p
     mdl = model_to_use(φ0, u, wmm(1), p)
@@ -2020,14 +2076,35 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=
     # const abstol = 1e-8#1e-9
     # const reltol = 1e-5#1e-6
     # @warn "FIddling with solver tolerances here"
-    adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol =  abstol, reltol = reltol,
+    adj_sol = solve(adj_prob, saveat = 0:Tso:N*Ts, abstol =  abstol, reltol = reltol,
         maxiters = maxiters)
     # adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = 1e-10, reltol = 1e-7,
     #     maxiters = maxiters)
+    post2 = now()
+    @warn "This super duration was $(post2-pre2)"
+
+    # Okay, so while we changed Ts for forward solution, much code that uses the
+    # returned forward solution builds on it having sampling time exactly Ts
+    # Thus, we need to overwrite these quantities below with ones using Ts, to
+    # not break the things using sol_for later. In the long run, a less hacky
+    # fix should probably be used!!!!
+    # -------------------- OLD ORIGINAL VERSION -----------------------
+    # NOTE: It is not recommended to access sol.u directly!!
+    # x_func = linear_interpolation(sol_for.u, Ts)
+    # DEBUG
+    sol_for = sol_for_org
+    xmat = zeros(length(sol_for.u), length(sol_for.u[1]))
+    for i = 1:length(sol_for.u)
+        xmat[i,:] = sol_for.u[i]
+    end
+    x_func = get_mvar_cubic(0.0:Ts:N*Ts, xmat)
+    # TODO: Use interpolated x_func to estimate dx????? Even smoother???
+    der_est = get_der_est(0.0:Ts:N*Ts, x_func)
+    dx = get_mvar_cubic(0.0:Ts:(N-1)*Ts, der_est)
 
     Gp = first(get_Gp(adj_sol))
 
-    solmat = zeros(N+1,8)
+    solmat = zeros(length(adj_sol.u),8)
     for i=eachindex(adj_sol.u)
         for j=eachindex(adj_sol.u[1])
             solmat[i,j] = adj_sol.u[i][j]
@@ -2039,8 +2116,8 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=
 
     # DEBUG: Alternative way to compute Gp, just to compare
     x_for, xθ_for = h_sens_deb(sol_for)
-    ts, λ_der = get_der_est(λs)
-    λ_func  = get_mvar_cubic(0:Ts:N*Ts, λs)
+    ts, λ_der = get_der_est(λs, N*Ts, Tso)
+    λ_func  = get_mvar_cubic(0:Tso:N*Ts, λs)
     dλ_func = get_mvar_cubic(ts, λ_der)
 
     term = 0.0
@@ -2064,7 +2141,7 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=
     # (mydx1, mydx2, mydx3, mydx4, mydx5, mydx6, mydx7, mydxθ1, mydxθ2, mydxθ3, mydxθ4, mydxθ5, mydxθ6, mydxθ7)
     y_smooth  = cubic_spline_interpolation(0.0:Ts:N*Ts, Y[:,1], extrapolation_bc=Line())
     other_lam_func, other_λint_func, other_lam_func2, debug6s, quad_λint = solve_accurate_adjoint2(N, Ts, x_func, dx, x_func, y_func, my_ind)
-    deb_stuff = (λs[:,1], y_func, dy_func, x_func, dx, all_x_funcs, all_dx_funcs, y_smooth, num_est, cost_num_est, other_lam_func, other_λint_func, other_lam_func2, debug6s, quad_λint)
+    deb_stuff = (λs[:,1], y_func, dy_func, x_func, dx, all_x_funcs, all_dx_funcs, y_smooth, num_est, cost_num_est, other_lam_func, other_λint_func, other_lam_func2, debug6s, quad_λint, sol_for_var)
 
     return Gp, λs, βs, sol_for, wmm, Gp_alt, term, deb_stuff
 end
@@ -2697,7 +2774,9 @@ function ultimate_adjoint_debug(expid::String, δp::Float64=0.01, N_trans::Int64
     Gp, λs, βs, sol_for, wmm, Gp_alt, adj_term, deb_stuff = solve_adjoint_deterministic(expid, 0, my_ind)
     Y1, sens1 = h_comp(sol_for)
     for_dif_est = get_cost_gradient(Y[1:N+1, 1], reshape(Y1, length(Y1), 1), [sens1], N_trans)
-    β_DAE       = Interpolations.linear_interpolation(sol_for.t, βs)
+    β_DAE       = Interpolations.linear_interpolation(0.0:Tso:N*Ts, βs)#OLD,NOT SURE IF EVEN CORRECT ANYMORE:Interpolations.linear_interpolation(sol_for.t, βs)
+    # ax_func, ay_func are x- and y-functions passed into adjoint system for solving
+    (_, ay_func, ady_func, ax_func, adx_func, all_x_funcs, all_dx_funcs, y_smooth, num_est, cost_num_est, λ_func_exact, λint_exact_ODE, λ_func_exact2, debug6s, quad_λint) = deb_stuff
 
     ######################### Adjoint part #####################################
 
@@ -2714,6 +2793,15 @@ function ultimate_adjoint_debug(expid::String, δp::Float64=0.01, N_trans::Int64
         # matrix are assumed to be different elements of the vector-valued process
         der_est = (vals[2:end,:]-vals[1:end-1,:])/Ts
         ts = 0:Ts:(N-1)*Ts
+        return ts, der_est
+        # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
+    end
+    function get_der_est(vals::Matrix{Float64}, T::Float64, myTs::Float64)
+        # Rows of matrix are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        der_est = (vals[2:end,:]-vals[1:end-1,:])/myTs
+        # Subtracting myTs/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        ts = 0:myTs:T-myTs/2
         return ts, der_est
         # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
     end
@@ -2734,8 +2822,8 @@ function ultimate_adjoint_debug(expid::String, δp::Float64=0.01, N_trans::Int64
         # Returns a function mapping time to the vector-value of the function at that time
     end
 
-    ts, λ_der = get_der_est(λs)
-    λ_func  = get_mvar_cubic(0:Ts:N*Ts, λs)
+    ts, λ_der = get_der_est(λs, N*Ts, Tso)
+    λ_func  = get_mvar_cubic(0:Tso:N*Ts, λs)
     dλ_func = get_mvar_cubic(ts, λ_der)
 
     # TODO: Not needed? These very short experiments are quite quick!
@@ -2781,9 +2869,6 @@ function ultimate_adjoint_debug(expid::String, δp::Float64=0.01, N_trans::Int64
 
     # NOTE: We shouldn't need this, should be (pretty much) exactly the same as original for_dig_est
     for_dif_est_adj = get_cost_gradient(Y[1:N+1, 1], reshape(Y_adj, length(Y_adj), 1), [sens1_adj], N_trans)
-
-    # ax_func, ay_func are x- and y-functions passed into adjoint system for solving
-    (_, ay_func, ady_func, ax_func, adx_func, all_x_funcs, all_dx_funcs, y_smooth, num_est, cost_num_est, λ_func_exact, λint_exact_ODE, λ_func_exact2, debug6s, quad_λint) = deb_stuff
 
     integrand1(t) = 2*(ax_func(t)[7]-ay_func(t))*ax_func(t)[14]
     integrand2(t) = 2*(xs_adj_func(t)[7]-y_func(t))*xθs_adj_func(t)[7]
@@ -2848,9 +2933,6 @@ function ultimate_adjoint_debug(expid::String, δp::Float64=0.01, N_trans::Int64
     adj_func2_improved(t) = adj_func2_(t) - improved_term(t)
     adj_func_improved(t) = adj_func_(t) - improved_term(t)
 
-    @warn "quad_λint - best_term: $(quad_λint - best_term(N*Ts))"
-
-
     # ------------------------ TEMPORARY DEBUGS -------------------------------
     dmdl_deb = deleteme_stepbystep_deb(φ0, ad.u, ad.wmm(1), ad.p, ad.y_func, ad.λ_func, ad.dλ_func, ad.N*ad.Ts)
     prob_deb = problem(dmdl_deb, ad.N, ad.Ts)
@@ -2867,6 +2949,9 @@ function ultimate_adjoint_debug(expid::String, δp::Float64=0.01, N_trans::Int64
     # adj_func(t) = β_DAE(0.0)-β_DAE(t) - my_term(t) = λint_DAE(t) - my_term(t)
     # (Since β(t) integrates t->T and adj_func(t) integrates 0->t)
     # (Detailed conversion: adj_func(t) = t-> β_DAE(0.0)-β_DAE(t) - my_term(t) )  # THIS WORKS :D
+
+    @info "forward: $(for_dif_est[1]), int_sens: $(int_sens_quad), adj_func: $(adj_func_best(N*Ts))"
+    @info "λint_DAE: $(λint_DAE_quads[my_ind]), λint_exact_quads: $(λint_exact_quads[my_ind])"
 
     # TODO: Rename into more sensical names
     return λ_func, λ_func_exact, λint_DAE, λint_DAE_quads, λint_exact_ODE, λint_exact_quads, my_term, best_term, int_func, int_sens_quad, cost_num_est, for_dif_est, adj_func, adj_func_best, Ts, N#, λsens_DAE, βs, adj_sens_miss, sensquad1, sensquad2, int_sens_deb
