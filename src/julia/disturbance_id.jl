@@ -34,7 +34,7 @@ function generate_w(z::Matrix{Float64}, dmdl::DT_SS_Model, nx::Int)
     return w_vec
 end
 
-function generate_ws_in_parallel(zs::Array{Matrix{Float64}},  dmdl::DT_SS_Model, nx::Int, irange::UnitRange{Int64})
+function generate_ws_in_parallel(zs::Array{Matrix{Float64}}, dmdl::DT_SS_Model, nx::Int, irange::UnitRange{Int64})
     len = length(irange)
     p = Progress(len, 1, "Running $len simulations...", 50)
     ws = zeros(Nw, len)
@@ -231,6 +231,7 @@ function get_2par_costs(exp_id::String)
     maxw2 = 10.295
     f_a1_to_a2_w(a1) = maxw2 + (a1^2)/2
 
+    # Curve of constant stationary variance, I think
     myvar = (0.6^2)/(2*2.9*14.5)
     f_a1_to_a2_σ(a1) = (0.6^2)/(myvar*2*a1)
 
@@ -248,7 +249,7 @@ function get_2par_costs(exp_id::String)
 
     # - Computing parameter curve where we expect the minima to be from theory -
     mysum = mean(w_meas.^2)
-    f_a1_to_a2_opt(a1) = 3*(0.6^2)/(2*a1*mysum)
+    f_a1_to_a2_opt(a1) = 3*(0.6^2)/(mysum*2*a1)
     # y4 = f_a1_to_a2_opt.(a1range);
     # z4 = 0.0064*ones(size(y4));
     # scatter!(a1range, y4, z4)
