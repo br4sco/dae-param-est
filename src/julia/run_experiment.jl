@@ -2552,29 +2552,13 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
 
     # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
     mdl_sens = model_sens_to_use(φ0, u, wmm(1), p)
-    # In case model_sens_to_use computes multuple sensitivities, we only pick the first one
-    # TODO: The above comment is not true anymore. Maybe it should be? Should we just pick out element [1]?
-    xp0 = f_sens_deb(mdl_sens.x0)   # TODO: Doesn't this contain both x0 and xp0?? So the comment above is just straight up wrong?????????????????????????????????????????!!!
+    xp0 = f_sens_deb(mdl_sens.x0)
 
+    # --------------------- Actually solving adjoint problem -----------------------------
     mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
     adj_prob = problem_reverse(mdl_adj, N, Ts)
     adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
         maxiters = maxiters)
-
-    # # TODO: WHY DO WE STILL HAVE THIS? THEY SHOULD MATCH, IF THEY DO THEN WE CAN REMOVE THIS!
-    # # -------------------- OLD ORIGINAL VERSION -----------------------
-    # # NOTE: It is not recommended to access sol.u directly!!
-    # xmat = zeros(length(sol_for.u), length(sol_for.u[1]))
-    # for i = 1:length(sol_for.u)
-    #     xmat[i,:] = sol_for.u[i]
-    # end
-    # # x_func = linear_interpolation(sol_for.u, Ts)
-    # x_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xmat)
-    # # TODO: Use interpolated x_func to estimate dx????? Even smoother???
-    # der_est = get_der_est(0.0:Tsλ:N*Ts, x_func)
-    # dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ, der_est)
-
-    # # ----------------- END OF OLD ORIGINAL VERSION ----------------------
 
     Gp = first(get_Gp(adj_sol))
 
@@ -2588,17 +2572,13 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     λs = solmat[end:-1:1,1:num_dyn_vars]
     βs = solmat[end:-1:1,num_dyn_vars+1]
 
-    # DEBUG: Alternative way to compute Gp, just to compare
     x_for, xθ_for = h_sens_deb(sol_for)
     ts, λ_der = get_der_est(λs, N*Ts, Tso)
     λs_DAE  = get_mvar_cubic(0:Tso:N*Ts, λs)
+    β_DAE   = cubic_spline_interpolation(0:Tso:N*Ts, βs[:,1], extrapolation_bc=Line())
     dλs_DAE = get_mvar_cubic(ts, λ_der)
 
-    λint_eq(x,p,t) = -λs_DAE(t)[my_ind]
-    λint_prob = ODEProblem(λint_eq, 0.0, (0.0, N*Ts), [])
-    λint_sol  = DifferentialEquations.solve(λint_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
-    λint_vec  = [λint_sol.u[i][1] for i=eachindex(λint_sol)]
-    λint_DAE = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec, extrapolation_bc=Line())
+    λsint_DAE = integrate_lambdas(λs_DAE, N, N*Ts)
 
     term = 0.0
     if model_id == PENDULUM
@@ -2615,7 +2595,7 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     Gp_alt = βs[1] - term
     # End of DEBUG: Alternative way to compute Gp
 
-    λs_ODE, λint_ODE = solve_accurate_adjoint(N, Ts, x_func, dx, x_func, y_func, my_ind)
+    λs_ODE, λsint_ODE = solve_accurate_adjoint(N, Ts, x_func, dx, x_func, y_func, my_ind)
     # Integrating λ*F_θ for different choices of θ
     int_m(z,p,t) = dx(t)[4]*λs_ODE(t)[1] + dx(t)[5]*λs_ODE(t)[2]
     int_L(z,p,t) = -2L*λs_ODE(t)[3]
@@ -2639,30 +2619,29 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     λFk_int = cubic_spline_interpolation(0.0:Ts:N*Ts, k_vec, extrapolation_bc=Line())
     λFθ_ints = [λFm_int, λFL_int, λFg_int, λFk_int]
 
-    # num_est, for_dif_est, int_sens, β_DAE, λs_DAE, λs_ODE, β_ODE_IDA, β_ODE_quad, term_DAE, term_exact
-    # Okay, it's a lot. Priority: for_dif_est, β_DAE, β_ODE_IDA, β_ODE_quad, term_DAE, term_exact
+    # Converts function β(t) to int_0^t λ*F_θ dt, so that it can be compared to λFθ_ints, which is the same function but computed using ODE instead
+    λFθ_DAE(t) = β_DAE(t) - β_DAE(0.0)
 
-    #= What we want:
-        - Forward estimate, for_dif_est (function of t...?)
-        - QuadGK integral of cost sensitivity, should be equivakent to for_dif_est, for_sens_int maybe?
-        - DAE adjoint beta
-        - QuadGK integral of DAE λ
-        - ODE IDA integral of λ
-        - ODE QuadGK integral of λ
-        - DAE term
-        - Analytical term
-        - lambda integrals? Of different types???
+    # TODO: TERMS???? WHAT DO WE DO WITH THEM???? MAYBE WE DON'T NEED THEM, NOT IF COMPARING λFθ_ints
+    # NOTE: But we might need smarter comparison once we introduce alternative adjoint system. Let's see
 
-        - WE ALSO WANT TO COMPARE ANALYTICAL LAMBDAS (ODE) TO DAE LAMBDAS!
+    #= -------------------------- INSTRUCTIONS ---------------------------------
+    1. First step to checking adjoint method is to see if it matches forward sensitivity analysis for this particular choice.
+       Adjoint result is given in Gp, forward sensitivity in for_dif_est, and numerical estimate (debug model with pᵢ only) is given by cost_num_est.
 
-        Then for_dif_est, for_sens_int, and all betas - terms should give same answers. How many functions of t can we get? 
+    2. If one suspects that something might be wrong, it's worthwile to see if the λs obtained by solving the DAE match the more exact ODE solution.
+       Compare λs_ODE to λs_DAE. Both are functions of t returning a 7-element vector.
+
+    3. Even if the λs look similar, small differences might accumulate since Gp is computed by integrating the λs. Compare then integrals of all λs.
+       Compare λsint_ODE to λsint_DAE. Both are functions of t returning a 7-element vector.
+
+    4. To e.g. compare other adjoint systems used to compute the same sensitivity, comparing the λs might not work since the λs might have different meaning.
+       We should then compare the obtained parameter sensitivity value. λFθ_ints contains adjoint ODE sensitivities for parameters m, L, g, and k.
+       λFθ_DAE contains the DAE sensitivity for whatever parameter have been chosen as free in the problem specification at the top of the page (usually it's k).
+
     =#
 
-    # Can we get integrals of beta...? Beta is integral already, but yeah can we get that as a function?
-    # Maybe call it Fλ_int, since it's not quite equal to β
-
-    return Gp, for_dif_est, cost_num_est, λs_ODE, λint_ODE, λs_DAE, λint_DAE, λFθ_ints
-    # return Gp, λs, βs, sol_for, wmm, Gp_alt, term, deb_stuff
+    return Gp, for_dif_est, cost_num_est, λs_ODE, λsint_ODE, λs_DAE, λsint_DAE, λFθ_ints, λFθ_DAE
 end
 
 # TODO: FINISH!
@@ -2936,15 +2915,38 @@ function solve_accurate_adjoint(N::Int, Ts::Float64, x::Function, dx::Function, 
     # TODO: Is this really the best place to do this integration?
     # Wouldn't it be better to do it in ultimate_adjoint_debug???
     # Then we can get rid of the my_int-argument too!
-    # -------- Let's also compute λint for some i -----------
-    i = my_ind
-    λint_eq(x,p,t) = -λ_func(t)[i]
-    λint_prob = ODEProblem(λint_eq, 0.0, (0.0, T), [])
-    λint_sol  = DifferentialEquations.solve(λint_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
-    λint_vec  = [λint_sol.u[i][1] for i=eachindex(λint_sol)]
-    λint_func = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec, extrapolation_bc=Line())
+    # -------- Let's also compute λsint -----------
+    λsint_func = integrate_lambdas(λ_func, N, N*Ts)
+    # i = my_ind
+    # λint_eq(x,p,t) = -λ_func(t)[i]
+    # λint_prob = ODEProblem(λint_eq, 0.0, (0.0, T), [])
+    # λint_sol  = DifferentialEquations.solve(λint_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    # λint_vec  = [λint_sol.u[i][1] for i=eachindex(λint_sol)]
+    # λint_func = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec, extrapolation_bc=Line())
 
-    return λ_func, λint_func
+    return λ_func, λsint_func
+end
+
+function integrate_lambdas(λs_func, N, T)
+    λint_eq(x,p,t) = -λs_func(t)
+    λint_prob = ODEProblem(λint_eq, zeros(7), (0.0, T), [])
+    λint_sol  = DifferentialEquations.solve(λint_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    λint_vec1 = [λint_sol.u[i][1] for i=eachindex(λint_sol)]
+    λint_vec2 = [λint_sol.u[i][2] for i=eachindex(λint_sol)]
+    λint_vec3 = [λint_sol.u[i][3] for i=eachindex(λint_sol)]
+    λint_vec4 = [λint_sol.u[i][4] for i=eachindex(λint_sol)]
+    λint_vec5 = [λint_sol.u[i][5] for i=eachindex(λint_sol)]
+    λint_vec6 = [λint_sol.u[i][6] for i=eachindex(λint_sol)]
+    λint_vec7 = [λint_sol.u[i][7] for i=eachindex(λint_sol)]
+    λint_func1 = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec1, extrapolation_bc=Line())
+    λint_func2 = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec2, extrapolation_bc=Line())
+    λint_func3 = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec3, extrapolation_bc=Line())
+    λint_func4 = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec4, extrapolation_bc=Line())
+    λint_func5 = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec5, extrapolation_bc=Line())
+    λint_func6 = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec6, extrapolation_bc=Line())
+    λint_func7 = cubic_spline_interpolation(0.0:Ts:N*Ts, λint_vec7, extrapolation_bc=Line())
+    λsint_func(t) = [λint_func1(t); λint_func2(t); λint_func3(t); λint_func4(t); λint_func5(t); λint_func6(t); λint_func7(t)]
+    return λsint_func
 end
 
 # Ultimate benchmarkin problem generating function
