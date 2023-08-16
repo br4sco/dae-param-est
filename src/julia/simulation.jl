@@ -3084,8 +3084,8 @@ function crazystab_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{F
 
         ###################### INITIALIZING ADJOINT SYSTEM ####################
         # Indices 1-4 are differential (d), while 5-7 are algebraic (a)
-        zT  = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, (2*x2(T)[7]-y(T))/T] # z = [λ1, λ2, λ3, λ4, λ5, d1, λ7]
-        dzT = [0.0, 0.0, 0.0, x(T)[2]*zT[7]/(L^2), -x(T)[1]*λT[7]/(L^2), -x(t)[2]*zT[7]/(m*L^2), 2(dx2(T)[7]-dy(T))/T]
+        zT  = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2*(x2(T)[7]-y(T))/T] # z = [λ1, λ2, λ3, λ4, λ5, d1, λ7]
+        dzT = [0.0, 0.0, 0.0, x(T)[2]*zT[7]/(L^2), -x(T)[1]*zT[7]/(L^2), -x(T)[2]*zT[7]/(m*L^2), 2(dx2(T)[7]-dy(T))/T]
 
         # the residual function
         # NOTE: Could time-varying coefficients be the problem?? Sure would require more allocations?
@@ -3125,10 +3125,10 @@ function crazystab_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{F
         end
 
         z0  = vcat(zT[:], zeros(np))
-        dz0 = vcat(dzT[:], (zT')*Fp(T))   # For some reason (λT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
+        dz0 = vcat(dzT[:], (zT')*Fp(T))   # For some reason (zT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
         # TODO: Can we delete these rows below here perhaps?
         # z0  = vcat(λ0, 0.0)
-        # dz0 = vcat(dλ0, λ0[1])   # For some reason (λT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
+        # dz0 = vcat(dλ0, λ0[1])   # For some reason (zT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
 
         if N_trans > 0
             @warn "The returned function get_Gp() doesn't fully support N_trans > 0, as sensitivity of internal variables not known at any other time than t=0. A non-rigorous approximation is used instead."
@@ -3146,8 +3146,153 @@ function crazystab_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{F
         # dvars = vcat(fill(true, 4), fill(false, 3))
 
         r0 = zeros(length(z0))
-        f!(r0, dz0, z0, [], 0.0)
-        # @info "r0 is: $r0 here, λ0: $λ0, dλ0: $dλ0"
+        f!(r0, dz0, z0, [], T)
+        @info "r0 is: $r0"  # NOTE: Passed t=T since this problem is meant to be solved backwards in time
+
+        # t -> 0.0 is just a dummy function, not to be used
+        return Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
+    end
+end
+
+# NOTE Assumes free dynamical parameters are only k
+# This one I'm more confident has actually index-1 adjoint system
+function crazystab2_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+    # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
+    # But good enough for now, just should be different in final version perhaps
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        np = size(xp0,2)
+        @assert (np == 1) "crazystab_pendulum_adjoint_konly is hard-coded to only handle one parameter k, make sure to pass correct xp0"
+        nx = size(xp0,1)
+        # x  = t -> sol(t)
+        # x2 = t -> sol2(t)
+
+        # NOTE: Convention is used that derivatives wrt to θ stack along cols
+        # while derivatives wrt to x stack along rows
+
+        Fp = t -> [abs(x(t)[4])*x(t)[4]; abs(x(t)[5])*x(t)[5]; .0; .0; .0; .0; .0]  # NOTE: Actually not quite right, since it only should have 6 elements and not 7, but doesn't matter in this particular case
+
+        ###################### INITIALIZING ADJOINT SYSTEM ####################
+        # Indices 1-4 are differential (d), while 5-7 are algebraic (a)
+        zT  = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2(x2(T)[7]-y(T))/T] # z = [λ1, λ2, λ3, λ4, λ5, d2, λ7]
+        dzT = [0.0, 0.0, 0.0, x(T)[2]*zT[7]/(L^2), -x(T)[1]*zT[7]/(L^2), 0.0, 2(dx2(T)[7]-dy(T))/T]
+
+        # the residual function
+        # NOTE: Could time-varying coefficients be the problem?? Sure would require more allocations?
+        # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
+        function f!(res, dz, z, θ, t)
+            # NEW
+            res[1]  = dz[4] + x(t)[3]*z[1] - 2*x(t)[1]*z[3] - x(t)[2]*z[7]/(L^2)
+            res[2]  = dz[5] + x(t)[3]*z[2] - 2*x(t)[2]*z[3] + x(t)[1]*z[7]/(L^2)
+            res[3]  = z[1]*x(t)[1] + z[2]*x(t)[2] + dz[6]
+            res[4]  = z[4] + m*dz[1] - 2*k*abs(x(t)[4])*z[1] - 2*k*abs(x(t)[5])*z[2]
+            res[5]  = m*dz[2] + z[5]
+            res[6]  = z[1]*x(t)[4] + z[2]*x(t)[5] + x(t)[2]*dz[2] + x(t)[1]*dz[1]
+            res[7]  = -z[7] + 2(x(t)[7]-y(t))/T
+            res[8]  = dz[8] - z[1]*abs(x(t)[4])*x(t)[4] - z[2]*abs(x(t)[5])*x(t)[5]
+
+            # # # Super-readable but less efficient version
+            # # res[1:7] = (dz[1:7]')*Fdx(t) + (z[1:7]')*(Fddx(t) - Fx(t)) + gₓ(t)
+            # # res[8]   = dz[8] - (z[1:7]')*Fp(t)
+            nothing
+        end
+
+        z0  = vcat(zT[:], zeros(np))
+        dz0 = vcat(dzT[:], (zT')*Fp(T))   # For some reason (zT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
+        
+
+        if N_trans > 0
+            @warn "The returned function get_Gp() doesn't fully support N_trans > 0, as sensitivity of internal variables not known at any other time than t=0. A non-rigorous approximation is used instead."
+        end
+        # Function returning Gp given adjoint solution
+        function get_Gp(adj_sol::DAESolution)
+            # NOTE: Changes signs to match what I had in my manual calculations, seems correct now
+            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0.0))*xp0)[:]
+            # Gp = adj_sol.u[end-N_trans][nx+1:nx+np] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[:]
+            Gp = adj_sol.u[end-N_trans][nx+1:nx+np] .+ (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)
+            # return 0.0
+        end
+
+        dvars = vcat([false, true, false, true, true, false, false], fill(true, np))
+        # dvars = vcat(fill(true, 4), fill(false, 3))
+
+        r0 = zeros(length(z0))
+        f!(r0, dz0, z0, [], T)
+        @info "r0 is: $r0" # NOTE: Passed t=T since this problem is meant to be solved backwards in time
+
+        # t -> 0.0 is just a dummy function, not to be used
+        return Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
+    end
+end
+
+# NOTE Assumes free dynamical parameters are only k
+# In contrast to all the other crazystabs, this one is actually correct as well as index 1
+function crazystab3_pendulum_adjoint_konly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+    # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
+    # But good enough for now, just should be different in final version perhaps
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        np = size(xp0,2)
+        @assert (np == 1) "crazystab_pendulum_adjoint_konly is hard-coded to only handle one parameter k, make sure to pass correct xp0"
+        nx = size(xp0,1)
+        # x  = t -> sol(t)
+        # x2 = t -> sol2(t)
+
+        # NOTE: Convention is used that derivatives wrt to θ stack along cols
+        # while derivatives wrt to x stack along rows
+
+        Fp = t -> [abs(x(t)[4])*x(t)[4]; abs(x(t)[5])*x(t)[5]; .0; .0; .0; .0; .0; .0; .0; .0; .0]  # NOTE: Actually not quite right, since it only should have 6 elements and not 7, but doesn't matter in this particular case
+
+        ###################### INITIALIZING ADJOINT SYSTEM ####################
+        # Indices 1-4 are differential (d), while 5-7 are algebraic (a) NOTE: I don't think this is correct any longer, old comment from other function
+
+        #       1  2  3  4  5  6  7   8    9  10  11
+        # z = [λ1 λ2 λ3 λ4 λ5 λ7 dλ1 dλ2 dλ4 dλ5 ddλ1]
+        λ7 = 2(x2(T)[7]-y(T))/T
+        zT  = [0.0, 0.0, 0.0, 0.0, 0.0, λ7, 0.0, 0.0, x(T)[2]*λ7/(L^2), -x(T)[1]*λ7/(L^2), -x(T)[2]*λ7/(m*L^2)] # z = [λ1, λ2, λ3, λ4, λ5, d2, λ7]
+        dzT = [0.0, 0.0, 0.0, x(T)[2]*λ7/(L^2), -x(T)[1]*λ7/(L^2), 2(dx2(T)[7]-dy(T))/T, 0.0, 0.0, 0.0, 0.0, -2k*abs(x(T)[4])*x(T)[2]*λ7/((m^2)*(L^2))]
+
+
+        # the residual function
+        # NOTE: Could time-varying coefficients be the problem?? Sure would require more allocations?
+        # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
+        function f!(res, dz, z, θ, t)
+            res[1]  = z[9] + z[1]*x(t)[3] - 2*z[3]*x(t)[1] - (z[6]*x(t)[2])/L^2
+            res[2]  = z[10] + z[2]*x(t)[3] - 2*z[3]*x(t)[2] + (z[6]*x(t)[1])/L^2
+            res[3]  = z[1]*x(t)[1] + z[2]*x(t)[2]
+            res[4]  = z[4] + m*z[7] - 2*k*abs(x(t)[4])*z[1]
+            res[5]  = z[5] + m*z[8] - 2*k*abs(x(t)[5])*z[2]
+            res[6]  = - z[6] - 2*(y(t) - x(t)[7])/T
+            res[7]  = z[1]*dx(t)[1] + z[2]*dx(t)[2] + z[7]*x(t)[1] + z[8]*x(t)[2] # NOTE: Could replace by x4 and x5
+            res[8]  = z[11]*x(t)[1] + z[1]*dx(t)[4] + z[2]*dx(t)[5] + 2*z[7]*dx(t)[1] + 2*z[8]*dx(t)[2] + x(t)[2]*dz[8]
+            res[9]  = z[9] + m*z[11] - 2*k*abs(x(t)[4])*z[7] - 2*k*sign(x(t)[4])*z[1]*dx(t)[4]
+            res[10] = z[10] + m*dz[8] - 2*k*abs(x(t)[5])*z[8] - 2*k*sign(x(t)[5])*z[2]*dx(t)[5]
+            res[11] = z[8] - dz[2]
+            res[12]  = dz[12] - z[1]*abs(x(t)[4])*x(t)[4] - z[2]*abs(x(t)[5])*x(t)[5]
+
+            nothing
+        end
+
+        z0  = vcat(zT[:], zeros(np))
+        dz0 = vcat(dzT[:], (zT')*Fp(T))   # For some reason (zT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
+        
+
+        if N_trans > 0
+            @warn "The returned function get_Gp() doesn't fully support N_trans > 0, as sensitivity of internal variables not known at any other time than t=0. A non-rigorous approximation is used instead."
+        end
+        # Function returning Gp given adjoint solution
+        function get_Gp(adj_sol::DAESolution)
+            # NOTE: Changes signs to match what I had in my manual calculations, seems correct now
+            # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0.0))*xp0)[:]
+            # Gp = adj_sol.u[end-N_trans][nx+1:nx+np] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[:]
+            Gp = adj_sol.u[end-N_trans][nx+1:nx+np] .+ (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)
+            # return 0.0
+        end
+
+        dvars = vcat([false, true], fill(false, 5), [true], fill(false, 3), fill(true, np))
+        # dvars = vcat(fill(true, 4), fill(false, 3))
+
+        r0 = zeros(length(z0))
+        f!(r0, dz0, z0, [], T)
+        @info "r0 is: $r0" # NOTE: Passed t=T since this problem is meant to be solved backwards in time
 
         # t -> 0.0 is just a dummy function, not to be used
         return Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp

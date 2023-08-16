@@ -2572,7 +2572,6 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     λs = solmat[end:-1:1,1:num_dyn_vars]
     βs = solmat[end:-1:1,num_dyn_vars+1]
 
-    x_for, xθ_for = h_sens_deb(sol_for)
     ts, λ_der = get_der_est(λs, N*Ts, Tso)
     λs_DAE  = get_mvar_cubic(0:Tso:N*Ts, λs)
     β_DAE   = cubic_spline_interpolation(0:Tso:N*Ts, βs[:,1], extrapolation_bc=Line())
@@ -2580,20 +2579,18 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
 
     λsint_DAE = integrate_lambdas(λs_DAE, N, N*Ts)
 
-    term = 0.0
-    if model_id == PENDULUM
-        Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
-                                0   1   0          0   0   2x2    0
-                                0   0   -x1      0.3   0   0      0
-                                0   0   -x2      0   0.3   0      0], zeros(3,7))
-    elseif model_id == MOH_MDL
-        Fdx = (x1, x2) -> [1.0 0.0; 0.0 0.0]
-    end
-    # TODO: I should be able to obtain these from the forward problem!
-    # NOTE: One of the terms here should be zero, if we initialized correctly
-    term = (λs_DAE(N*Ts)')*Fdx(x_for[end,1], x_for[end,2])*xθ_for[end,:] - (λs_DAE(0.)')*Fdx(x_for[1,1], x_for[1,2])*xθ_for[1,:]
-    Gp_alt = βs[1] - term
-    # End of DEBUG: Alternative way to compute Gp
+    # term = 0.0
+    # if model_id == PENDULUM
+    #     Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
+    #                             0   1   0          0   0   2x2    0
+    #                             0   0   -x1      0.3   0   0      0
+    #                             0   0   -x2      0   0.3   0      0], zeros(3,7))
+    # elseif model_id == MOH_MDL
+    #     Fdx = (x1, x2) -> [1.0 0.0; 0.0 0.0]
+    # end
+    # # TODO: I should be able to obtain these from the forward problem!
+    # # NOTE: One of the terms here should be zero, if we initialized correctly
+    # term = (λs_DAE(N*Ts)')*Fdx(x_for[end,1], x_for[end,2])*xθ_for[end,:] - (λs_DAE(0.)')*Fdx(x_for[1,1], x_for[1,2])*xθ_for[1,:]
 
     λs_ODE, λsint_ODE = solve_accurate_adjoint(N, Ts, x_func, dx, x_func, y_func, my_ind)
     # Integrating λ*F_θ for different choices of θ
@@ -2622,6 +2619,25 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     # Converts function β(t) to int_0^t λ*F_θ dt, so that it can be compared to λFθ_ints, which is the same function but computed using ODE instead
     λFθ_DAE(t) = β_DAE(t) - β_DAE(0.0)
 
+    # -------------------------------- Testing hopefully stabilized alternative of adjoint system ----------------------------------------
+    mdl_stab, get_Gp_stab = crazystab3_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
+    stab_prob = problem_reverse(mdl_stab, N, Ts)
+    stab_sol = solve(stab_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+        maxiters = maxiters)
+
+    solmat = zeros(length(stab_sol.u),length(stab_sol.u[1]))
+    for i=eachindex(stab_sol.u)
+        for j=eachindex(stab_sol.u[1])
+            solmat[i,j] = stab_sol.u[i][j]
+        end
+    end
+    # Reverses the obtained vector, since adjoint problem was solved in reverse
+    λmat_stab = solmat[end:-1:1,1:7]
+    βvec_stab = solmat[end:-1:1,8]
+    λs_stab  = get_mvar_cubic(0:Tso:N*Ts, λmat_stab)
+    β_stab   = cubic_spline_interpolation(0:Tso:N*Ts, βvec_stab, extrapolation_bc=Line())
+    λFθ_stab(t) = β_stab(t) - β_stab(0.0)
+
     # TODO: TERMS???? WHAT DO WE DO WITH THEM???? MAYBE WE DON'T NEED THEM, NOT IF COMPARING λFθ_ints
     # NOTE: But we might need smarter comparison once we introduce alternative adjoint system. Let's see
 
@@ -2641,7 +2657,7 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
 
     =#
 
-    return Gp, for_dif_est, cost_num_est, λs_ODE, λsint_ODE, λs_DAE, λsint_DAE, λFθ_ints, λFθ_DAE
+    return Gp, for_dif_est, cost_num_est, λs_ODE, λsint_ODE, λs_DAE, λsint_DAE, λFθ_ints, λFθ_DAE, λs_stab, λFθ_stab
 end
 
 # TODO: FINISH!
