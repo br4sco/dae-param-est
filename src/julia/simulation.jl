@@ -5656,7 +5656,7 @@ function solve_adj_in_parallel(solve, is)
   p = Progress(M, 1, "Running $(M) simulations...", 50)
   Gp1 = solve(is[1])
   Gps = zeros(length(Gp1), M)
-  Gps[:, 1] += Gp1
+  Gps[:, 1] .+= Gp1
   next!(p)
   Threads.@threads for m = 2:M
       Gp = solve(is[m])
@@ -5699,7 +5699,29 @@ function solve_in_parallel_sens(solve, is)
         next!(p)
     end
     Y, Ysens
-  end
+end
+
+function solve_in_parallel_debug(solve, is, yind, sensinds, sampling_ratio)
+    M = length(is)
+    p = Progress(M, 1, "Running $(M) simulations...", 50)
+    out = solve(is[1])
+    matout = [Array{Float64,2}(undef, size(out)) for m=1:M]
+    Y = zeros(size(out[1:sampling_ratio:end,:], 1), M)
+    sens = [zeros(size(out[1:sampling_ratio:end,:],1), length(sensinds)) for m=1:M]
+    # sens = zeros(size(out,1), M)
+    matout[1] = out
+    Y[:,1]    = out[1:sampling_ratio:end, yind]
+    sens[1]   = out[1:sampling_ratio:end, sensinds]
+    next!(p)
+    Threads.@threads for m = 2:M
+        out = solve(is[m])
+        matout[m] = out
+        Y[:,m]  = out[1:sampling_ratio:end, yind]
+        sens[m] = out[1:sampling_ratio:end, sensinds]
+        next!(p)
+    end
+    matout, Y, sens
+end
 
 function get_sol_in_parallel(solve, is)
     M = length(is)

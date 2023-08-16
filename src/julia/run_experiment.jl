@@ -2490,22 +2490,7 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     # FORWARD SENSITIVTY ANALYSIS ESTIMATE
     for_dif_est = get_cost_gradient(Y[1:N+1, 1], reshape(Y1[1:sampling_ratio:end], length(Y1[1:sampling_ratio:end]), 1), [sens1[1:sampling_ratio:end,:]], N_trans)[1]
 
-    # -------------------------------DEBUG------------------------------------------
-    # Computing numerical estimate of gradient for debug case, i.e. for paramters pᵢ
-    mdl_deb = pendulum_sensitivity_deb_0p01(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true))
-    prob_deb = problem(mdl_deb, N, Ts)
-    sol_deb  = solve(prob_deb, saveat = 0:Tsλ:N*Ts, abstol = abstol, reltol = reltol,
-        maxiters = maxiters)
-    Yfor = h(sol_for)
-    Ydeb = h(sol_deb)
-    sampling_ratio = Int(Ts/Tsλ)
-    cost_for = get_cost_value(Y[:,1], Yfor[1:sampling_ratio:end,1:1])
-    cost_deb = get_cost_value(Y[:,1], Ydeb[1:sampling_ratio:end,1:1])
-    cost_num_est = (cost_deb - cost_for)/0.01
-
-    # --------------------------------------------------------------------------
-    # ------------- Solution of adjoint system (backwards) ---------------------
-    # --------------------------------------------------------------------------
+    # --------------------- Defining some helper functions -------------------------
     function get_der_est(ts, func::Function)
         dim = length(func(0.0))
         der_est = zeros(length(ts)-1, dim)
@@ -2534,11 +2519,7 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
         # Returns a function mapping time to the vector-value of the function at that time
     end
 
-    y_func  = linear_interpolation(Y[:,1], Ts)
-    dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
-    dy_func = linear_interpolation(dY_est, Ts)
-
-    # --------------------- Computes x_func and dx -----------------------
+    # --------------------- Computes x_func and dx (as well as y) -----------------------
     # NOTE: It is not recommended to access sol.u directly!
     xmat = zeros(length(sol_for.u), length(sol_for.u[1]))
     for i = 1:length(sol_for.u)
@@ -2550,11 +2531,31 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
     dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
 
+    y_func  = linear_interpolation(Y[:,1], Ts)
+    dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
+    dy_func = linear_interpolation(dY_est, Ts)
+
     # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
     mdl_sens = model_sens_to_use(φ0, u, wmm(1), p)
     xp0 = f_sens_deb(mdl_sens.x0)
 
-    # --------------------- Actually solving adjoint problem -----------------------------
+    # -------------------------------DEBUG------------------------------------------
+    # Computing numerical estimate of gradient for debug case, i.e. for paramters pᵢ
+    mdl_deb = pendulum_sensitivity_deb_0p01(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true))
+    prob_deb = problem(mdl_deb, N, Ts)
+    sol_deb  = solve(prob_deb, saveat = 0:Tsλ:N*Ts, abstol = abstol, reltol = reltol,
+        maxiters = maxiters)
+    Yfor = h(sol_for)
+    Ydeb = h(sol_deb)
+    sampling_ratio = Int(Ts/Tsλ)
+    cost_for = get_cost_value(Y[:,1], Yfor[1:sampling_ratio:end,1:1])
+    cost_deb = get_cost_value(Y[:,1], Ydeb[1:sampling_ratio:end,1:1])
+    cost_num_est = (cost_deb - cost_for)/0.01
+
+    # --------------------------------------------------------------------------
+    # ------------- Solution of adjoint system (backwards) ---------------------
+    # --------------------------------------------------------------------------
+    
     mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
     adj_prob = problem_reverse(mdl_adj, N, Ts)
     adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
@@ -2620,7 +2621,7 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     λFθ_DAE(t) = β_DAE(t) - β_DAE(0.0)
 
     # -------------------------------- Testing hopefully stabilized alternative of adjoint system ----------------------------------------
-    mdl_stab, get_Gp_stab = crazystab3_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
+    mdl_stab, get_Gp_stab = crazystab_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
     stab_prob = problem_reverse(mdl_stab, N, Ts)
     stab_sol = solve(stab_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
         maxiters = maxiters)
@@ -2658,6 +2659,287 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     =#
 
     return Gp, for_dif_est, cost_num_est, λs_ODE, λsint_ODE, λs_DAE, λsint_DAE, λFθ_ints, λFθ_DAE, λs_stab, λFθ_stab
+end
+
+# Based on clean_adjoint_debug, but meant to actually verify that we are abje to get unbiased gradient estimate using our adjoint-based approach
+function clean_adjoint_stochastic(expid::String, N_trans::Int=0, my_ind::Int=1)
+    Random.seed!(123)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    u = exp_data.u
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    p = get_all_parameters(free_dyn_pars_true) # All true parameters
+    θ = p[1:dθ]                                # All true dynamical parameters
+    η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
+
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # --------------------------------------------------------------------------
+    # --------------- Forward solution of nominal system -----------------------
+    # --------------------------------------------------------------------------
+    dmdl_true = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+
+    XWm = simulate_noise_process_mangled(dmdl_true, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl_true.Cd, XWm, m, δ)
+
+    ######################
+    ### In a usual scenario, we could just use solve_adj_in_parallel(), but in this case we want to compare forward sensitivity with adjoint, so we need a different way
+    ######################
+
+    sampling_ratio = Int(Ts/Tsλ)
+    solve_func(m) = solve_sens_customstep(u, wmm(m), free_dyn_pars_true, N, Tsλ) |> h_debug
+    ms = 1:M
+    Xcomp_m, Ym, sensm = solve_in_parallel_debug(m -> solve_func(m), ms, 7, 14:14, sampling_ratio)
+    # @info "type: $(typeof(Xcomp_m)), size: $(size(Xcomp_m)), sz2: $(size(Xcomp_m[1]))"
+    # @info "Ym: $(size(Ym)), $(typeof(Ym))"
+    # @info "sensm: $(size(sensm)), $(typeof(sensm)), sz2: $(size(sensm[1]))"
+    for_dif_est = get_cost_gradient(Y[1:N+1, 1], Ym, sensm, N_trans)
+    
+    # # --- OLD: ---
+    # sol_for  = solve_sens_customstep(u, wmm(1), free_dyn_pars_true, N, Tsλ)
+
+    # Y1, sens1 = h_comp(sol_for)
+    # # FORWARD SENSITIVTY ANALYSIS ESTIMATE
+    # for_dif_est = get_cost_gradient(Y[1:N+1, 1], reshape(Y1[1:sampling_ratio:end], length(Y1[1:sampling_ratio:end]), 1), [sens1[1:sampling_ratio:end,:]], N_trans)[1]
+    # --------------------- Defining some helper functions -------------------------
+    function get_der_est(ts, func::Function)
+        dim = length(func(0.0))
+        der_est = zeros(length(ts)-1, dim)
+        for (i,t) = enumerate(ts)
+            if i > 1
+                der_est[i-1,:] = (func(t)-func(ts[i-1]))./(t-ts[i-1])
+            end
+        end
+        return der_est
+    end
+    function get_der_est(vals::Matrix{Float64}, T::Float64, myTs::Float64)
+        # Rows of matrix are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        der_est = (vals[2:end,:]-vals[1:end-1,:])/myTs
+        # Subtracting myTs/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        ts = 0:myTs:T - myTs/2
+        return ts, der_est
+        # Returns range of times, and matrix der_est with same structure as vals, just one row fewer
+    end
+    function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
+    end
+
+    y_func  = linear_interpolation(Y[:,1], Ts)
+    dY_est  = (Y[2:end,1]-Y[1:end-1,1])/Ts
+    dy_func = linear_interpolation(dY_est, Ts)
+
+    function compute_Gp(m)
+        # NOTE: m shouldn't be larger than M÷2
+        # TODO: Need to use sampling_ration for Xcomp_m too???
+        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[m])
+        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[M÷2+m])
+        # der_est  = get_der_est(0.0:Tsλ:(N*Ts-0.00001), x_func)
+        # der_est2 = get_der_est(0.0:Tsλ:(N*Ts-0.00001), x2_func)
+        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
+        der_est2 = get_der_est(0.0:Tsλ:N*Ts, x2_func)
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+        dx2 = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est2)
+
+        # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
+        # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
+        mdl_sens = model_sens_to_use(φ0, u, wmm(m), p)
+        xp0 = f_sens_deb(mdl_sens.x0)
+
+        # ----------------- Actually solving adjoint system ------------------------
+        mdl_adj, get_Gp = model_adj_to_use(u, wmm(m), p, N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
+        adj_prob = problem_reverse(mdl_adj, N, Ts)
+        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+            maxiters = maxiters)
+
+        return first(get_Gp(adj_sol))
+    end
+
+    # NOTE: CAN'T DO IT NOW, HAVE TO DO IT ON A PER-MODEL BASIS! SINCE MULTI-REALIZATION
+    # # --------------------- Computes x_func and dx (as well as y) -----------------------
+    # # NOTE: It is not recommended to access sol.u directly!
+    # xmat = zeros(length(sol_for.u), length(sol_for.u[1]))
+    # for i = 1:length(sol_for.u)
+    #     xmat[i,:] = sol_for.u[i]
+    # end
+    # x_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xmat)
+    # der_est = get_der_est(sol_for.t, x_func)
+    # # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+    # dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+
+    # ------------------- THIS NEW THING HERE, ALL CODE BELOW IS OLD -----------------------
+
+    function compute_Gp_acc(m)
+        # NOTE: m shouldn't be larger than M÷2
+        # TODO: Need to use sampling_ration for Xcomp_m too???
+        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[m])
+        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[M÷2+m])
+        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+
+        λs_ODE, λsint_ODE = solve_accurate_adjoint(N, Ts, x_func, dx, x2_func, y_func, my_ind)
+        # int_m(t) = dx(t)[4]*λs_ODE(t)[1] + dx(t)[5]*λs_ODE(t)[2]
+        # int_L(t) = -2L*λs_ODE(t)[3]
+        # int_g(t) = m*λs_ODE(t)[2]
+        # int_k(t) = x_func(t)[4]*abs(x_func(t)[4])*λs_ODE(t)[1] + x_func(t)[5]*abs(x_func(t)[5])*λs_ODE(t)[2]
+        # TODO: Delete the four lines below here:
+        # prob = ODEProblem(int_k, 0.0, (0.0, N*Ts), [])
+        # sol = DifferentialEquations.solve(prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+        # vec = [sol.u[i][1] for i=eachindex(k_sol)]
+        # λFk_int = cubic_spline_interpolation(0.0:Ts:N*Ts, vec, extrapolation_bc=Line())
+
+        int_func(t) = x_func(t)[4]*abs(x_func(t)[4])*λs_ODE(t)[1] + x_func(t)[5]*abs(x_func(t)[5])*λs_ODE(t)[2]
+        return -quadgk(int_func, 0.0, N*Ts, rtol=1e-10)[1]#/(N*Ts)
+    end
+
+    Gps_acc = solve_adj_in_parallel(compute_Gp_acc, 1:M÷2)
+
+    # NOTE: Obviously this is wrong since we're using biased Gp!!
+    Gps = solve_adj_in_parallel(compute_Gp, 1:M÷2)
+    @info "for_dif_est: $(for_dif_est[1]), Gp estimate: $(mean(Gps)), acc Gp estimate: $(mean(Gps_acc))"
+    return Gps, Gps_acc
+
+    # # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
+    # mdl_sens = model_sens_to_use(φ0, u, wmm(1), p)
+    # xp0 = f_sens_deb(mdl_sens.x0)
+
+    # # -------------------------------DEBUG------------------------------------------
+    # # Computing numerical estimate of gradient for debug case, i.e. for paramters pᵢ
+    # mdl_deb = pendulum_sensitivity_deb_0p01(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true))
+    # prob_deb = problem(mdl_deb, N, Ts)
+    # sol_deb  = solve(prob_deb, saveat = 0:Tsλ:N*Ts, abstol = abstol, reltol = reltol,
+    #     maxiters = maxiters)
+    # Yfor = h(sol_for)
+    # Ydeb = h(sol_deb)
+    # sampling_ratio = Int(Ts/Tsλ)
+    # cost_for = get_cost_value(Y[:,1], Yfor[1:sampling_ratio:end,1:1])
+    # cost_deb = get_cost_value(Y[:,1], Ydeb[1:sampling_ratio:end,1:1])
+    # cost_num_est = (cost_deb - cost_for)/0.01
+
+    # --------------------------------------------------------------------------
+    # ------------- Solution of adjoint system (backwards) ---------------------
+    # --------------------------------------------------------------------------
+    
+    # mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
+    # adj_prob = problem_reverse(mdl_adj, N, Ts)
+    # adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+    #     maxiters = maxiters)
+
+    # Gp = first(get_Gp(adj_sol))
+
+    # solmat = zeros(length(adj_sol.u),8)
+    # for i=eachindex(adj_sol.u)
+    #     for j=eachindex(adj_sol.u[1])
+    #         solmat[i,j] = adj_sol.u[i][j]
+    #     end
+    # end
+    # # Reverses the obtained vector, since adjoint problem was solved in reverse
+    # λs = solmat[end:-1:1,1:num_dyn_vars]
+    # βs = solmat[end:-1:1,num_dyn_vars+1]
+
+    # ts, λ_der = get_der_est(λs, N*Ts, Tso)
+    # λs_DAE  = get_mvar_cubic(0:Tso:N*Ts, λs)
+    # β_DAE   = cubic_spline_interpolation(0:Tso:N*Ts, βs[:,1], extrapolation_bc=Line())
+    # dλs_DAE = get_mvar_cubic(ts, λ_der)
+
+    # λsint_DAE = integrate_lambdas(λs_DAE, N, N*Ts)
+
+    # # term = 0.0
+    # # if model_id == PENDULUM
+    # #     Fdx = (x1, x2) -> vcat([1   0   0          0   0   2x1    0
+    # #                             0   1   0          0   0   2x2    0
+    # #                             0   0   -x1      0.3   0   0      0
+    # #                             0   0   -x2      0   0.3   0      0], zeros(3,7))
+    # # elseif model_id == MOH_MDL
+    # #     Fdx = (x1, x2) -> [1.0 0.0; 0.0 0.0]
+    # # end
+    # # # TODO: I should be able to obtain these from the forward problem!
+    # # # NOTE: One of the terms here should be zero, if we initialized correctly
+    # # term = (λs_DAE(N*Ts)')*Fdx(x_for[end,1], x_for[end,2])*xθ_for[end,:] - (λs_DAE(0.)')*Fdx(x_for[1,1], x_for[1,2])*xθ_for[1,:]
+
+    # λs_ODE, λsint_ODE = solve_accurate_adjoint(N, Ts, x_func, dx, x_func, y_func, my_ind)
+    # # Integrating λ*F_θ for different choices of θ
+    # int_m(z,p,t) = dx(t)[4]*λs_ODE(t)[1] + dx(t)[5]*λs_ODE(t)[2]
+    # int_L(z,p,t) = -2L*λs_ODE(t)[3]
+    # int_g(z,p,t) = m*λs_ODE(t)[2]
+    # int_k(z,p,t) = x_func(t)[4]*abs(x_func(t)[4])*λs_ODE(t)[1] + x_func(t)[5]*abs(x_func(t)[5])*λs_ODE(t)[2]
+    # m_prob = ODEProblem(int_m, 0.0, (0.0, N*Ts), [])
+    # L_prob = ODEProblem(int_L, 0.0, (0.0, N*Ts), [])
+    # g_prob = ODEProblem(int_g, 0.0, (0.0, N*Ts), [])
+    # k_prob = ODEProblem(int_k, 0.0, (0.0, N*Ts), [])
+    # m_sol = DifferentialEquations.solve(m_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    # L_sol = DifferentialEquations.solve(L_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    # g_sol = DifferentialEquations.solve(g_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    # k_sol = DifferentialEquations.solve(k_prob, Tsit5(), reltol=reltol, abstol=abstol, saveat=0.0:Ts:N*Ts)
+    # m_vec = [m_sol.u[i][1] for i=eachindex(m_sol)]
+    # L_vec = [L_sol.u[i][1] for i=eachindex(L_sol)]
+    # g_vec = [g_sol.u[i][1] for i=eachindex(g_sol)]
+    # k_vec = [k_sol.u[i][1] for i=eachindex(k_sol)]
+    # λFm_int = cubic_spline_interpolation(0.0:Ts:N*Ts, m_vec, extrapolation_bc=Line())
+    # λFL_int = cubic_spline_interpolation(0.0:Ts:N*Ts, L_vec, extrapolation_bc=Line())
+    # λFg_int = cubic_spline_interpolation(0.0:Ts:N*Ts, g_vec, extrapolation_bc=Line())
+    # λFk_int = cubic_spline_interpolation(0.0:Ts:N*Ts, k_vec, extrapolation_bc=Line())
+    # λFθ_ints = [λFm_int, λFL_int, λFg_int, λFk_int]
+
+    # # Converts function β(t) to int_0^t λ*F_θ dt, so that it can be compared to λFθ_ints, which is the same function but computed using ODE instead
+    # λFθ_DAE(t) = β_DAE(t) - β_DAE(0.0)
+
+    # # -------------------------------- Testing hopefully stabilized alternative of adjoint system ----------------------------------------
+    # mdl_stab, get_Gp_stab = crazystab_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
+    # stab_prob = problem_reverse(mdl_stab, N, Ts)
+    # stab_sol = solve(stab_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+    #     maxiters = maxiters)
+
+    # solmat = zeros(length(stab_sol.u),length(stab_sol.u[1]))
+    # for i=eachindex(stab_sol.u)
+    #     for j=eachindex(stab_sol.u[1])
+    #         solmat[i,j] = stab_sol.u[i][j]
+    #     end
+    # end
+    # # Reverses the obtained vector, since adjoint problem was solved in reverse
+    # λmat_stab = solmat[end:-1:1,1:7]
+    # βvec_stab = solmat[end:-1:1,8]
+    # λs_stab  = get_mvar_cubic(0:Tso:N*Ts, λmat_stab)
+    # β_stab   = cubic_spline_interpolation(0:Tso:N*Ts, βvec_stab, extrapolation_bc=Line())
+    # λFθ_stab(t) = β_stab(t) - β_stab(0.0)
+
+    # # TODO: TERMS???? WHAT DO WE DO WITH THEM???? MAYBE WE DON'T NEED THEM, NOT IF COMPARING λFθ_ints
+    # # NOTE: But we might need smarter comparison once we introduce alternative adjoint system. Let's see
+
+    # #= -------------------------- INSTRUCTIONS ---------------------------------
+    # 1. First step to checking adjoint method is to see if it matches forward sensitivity analysis for this particular choice.
+    #    Adjoint result is given in Gp, forward sensitivity in for_dif_est, and numerical estimate (debug model with pᵢ only) is given by cost_num_est.
+
+    # 2. If one suspects that something might be wrong, it's worthwile to see if the λs obtained by solving the DAE match the more exact ODE solution.
+    #    Compare λs_ODE to λs_DAE. Both are functions of t returning a 7-element vector.
+
+    # 3. Even if the λs look similar, small differences might accumulate since Gp is computed by integrating the λs. Compare then integrals of all λs.
+    #    Compare λsint_ODE to λsint_DAE. Both are functions of t returning a 7-element vector.
+
+    # 4. To e.g. compare other adjoint systems used to compute the same sensitivity, comparing the λs might not work since the λs might have different meaning.
+    #    We should then compare the obtained parameter sensitivity value. λFθ_ints contains adjoint ODE sensitivities for parameters m, L, g, and k.
+    #    λFθ_DAE contains the DAE sensitivity for whatever parameter have been chosen as free in the problem specification at the top of the page (usually it's k).
+
+    # =#
+
+    # return Gp, for_dif_est, cost_num_est, λs_ODE, λsint_ODE, λs_DAE, λsint_DAE, λFθ_ints, λFθ_DAE, λs_stab, λFθ_stab
 end
 
 # TODO: FINISH!
