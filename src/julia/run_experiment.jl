@@ -67,7 +67,7 @@ const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
 const Q = 1000          # Number of conditional samples stored per interval
 
-M_rate_max = 4#100#8#4#16
+M_rate_max = min(4, M)#100#8#4#16
 # max_allowed_step = 1.0  # Maximum magnitude of step that SGD is allowed to take
 # M_rate(t) specifies over how many realizations the output jacobian estimate
 # should be computed at iteration t. NOTE: A total of 2*M_rate(t) iterations
@@ -154,6 +154,26 @@ function get_cost_value(Y::Array{Float64,1}, Ym::Array{Float64,2}, N_trans::Int=
     (1/(size(Y,1)-N_trans-1))*sum( ( Y[N_trans+1:end] - mean(Ym[N_trans+1:end,:], dims=2) ).^2 )
 end
 
+function get_der_est(ts, func::Function)
+    dim = length(func(0.0))
+    der_est = zeros(length(ts)-1, dim)
+    for (i,t) = enumerate(ts)
+        if i > 1
+            der_est[i-1,:] = (func(t)-func(ts[i-1]))./(t-ts[i-1])
+        end
+    end
+    return der_est
+end
+
+function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
+    # Rows of der_est are assumed to be different values of t, columns of
+    # matrix are assumed to be different elements of the vector-valued process
+    temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+    # temp = [t->t for i=1:size(der_est,2)]
+    return t -> [temp[i](t) for i=eachindex(temp)]
+    # Returns a function mapping time to the vector-value of the function at that time
+end
+
 # We do linear interpolation between exact values because it's fast
 # n is the dimension of one sample of the state
 function interpw(W::Array{Float64, 2}, m::Int, n::Int)
@@ -184,7 +204,6 @@ function mk_noise_interp(C::Array{Float64, 2},
 
         # xl = view(XW, k:(k + nx - 1), m)
         # xu = view(XW, (k + nx):(k + 2nx - 1), m)
-
         xl = XW[k:(k + n_tot - 1), m]
         xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
         return C*(xl + (t-n*δ)*(xu-xl)/δ)
@@ -497,27 +516,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # ------------------------------- For using adjoint sensitivity ---------------------------------
 
-    function get_der_est(ts, func::Function)
-        dim = length(func(0.0))
-        der_est = zeros(length(ts)-1, dim)
-        for (i,t) = enumerate(ts)
-            if i > 1
-                der_est[i-1,:] = (func(t)-func(ts[i-1]))./(t-ts[i-1])
-            end
-        end
-        return der_est
-    end
-
-    function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
-        # Rows of der_est are assumed to be different values of t, columns of
-        # matrix are assumed to be different elements of the vector-valued process
-        temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
-        # temp = [t->t for i=1:size(der_est,2)]
-        return t -> [temp[i](t) for i=eachindex(temp)]
-        # Returns a function mapping time to the vector-value of the function at that time
-    end
-
-    function compute_Gp_acc(y_func, xvec1, xvec2)
+    function compute_Gp_acc(y_func, dy_func, xvec1, xvec2, free_pars, wmm)
         # NOTE: m shouldn't be larger than M÷2
         x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1) # x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[m])
         x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2) # x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[M÷2+m])
@@ -525,49 +524,75 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
         dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
 
+        # m, L, g, k
+        θ = get_all_θs(free_pars)
+        m = θ[1]
+        L = θ[2]
+        g = θ[3]
+        k = θ[4]
+
         λs_ODE, λsint_ODE = solve_accurate_adjoint(N, Ts, x_func, dx, x2_func, y_func, 1)   # 1 because my_ind=1, not that it matters at all here, I just picked any value
         # int_m(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4]
         # int_L(t) = -2L*λs_ODE(t)[5]
         # int_g(t) = m*λs_ODE(t)[4]     # NOTE: g-estimation doesn't seem to work at all, not for default adjoint method either
         # int_k(t) = abs(x_func(t)[4])*x_func(t)[4]*λs_ODE(t)[3] + abs(x_func(t)[5])*x_func(t)[5]*λs_ODE(t)[4]
 
-        int_func(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4]
+        int_func(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4] # TODO: Why do we use true value of g here, and not estimated parameter?
         return -quadgk(int_func, 0.0, N*Ts, rtol=1e-10)[1]#/(N*Ts)
     end
 
+    function compute_Gp_adj(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m)
+        # NOTE: m shouldn't be larger than M÷2
+        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
+        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
+        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
+        der_est2 = get_der_est(0.0:Tsλ:N*Ts, x2_func)
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+        dx2 = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est2)
+
+        # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
+        # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
+        mdl_sens = model_sens_to_use(φ0, u, wmm_m, get_all_θs(free_pars))
+        xp0 = f_sens_deb(mdl_sens.x0)
+
+        # ----------------- Actually solving adjoint system ------------------------
+        mdl_adj, get_Gp = model_adj_to_use(u, wmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
+        adj_prob = problem_reverse(mdl_adj, N, Ts)
+        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+            maxiters = maxiters)
+
+        return first(get_Gp(adj_sol))
+    end
+
     # TODO: Here you have M÷2 hard-coded, while forward sense uses a M_mean variable. Make sure they match right now.
-    function get_gradient_adjoint_acc(y, free_pars, isws, M_mean::Int=1)
+    function get_gradient_adjoint(y, free_pars, compute_Gp, M_mean::Int=1)
         Zm = [randn(Nw, n_tot) for m = 1:M]
         W_meta = exp_data.W_meta
         nx = W_meta.nx
-        # n_in = W_meta.n_in
         n_out = W_meta.n_out
-        # n_tot = nx*n_in
-        # dη = length(W_meta.η)
         N = size(exp_data.Y, 1)-1
-        # dist_par_inds = W_meta.free_par_inds
 
         η = exp_data.get_all_ηs(free_pars)
-        # p = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
-        # θ = p[1:dθ]
-        # η = p[dθ+1: dθ+dη]
-        # # C = reshape(η[nx+1:end], (n_out, n_tot))
 
         dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
         XWm = simulate_noise_process_mangled(dmdl, Zm)
         wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
 
+        # NOTE: No optoin of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
         y_func  = linear_interpolation(y[:,1], Ts)
+        dy_est  = (y[2:end,1]-y[1:end-1,1])/Ts
+        dy_func = linear_interpolation(dy_est, Ts)
         sampling_ratio = Int(Ts/Tsλ)
-        solve_func(m) = solve_sens_customstep(u, wmm(m), free_dyn_pars_true, N, Tsλ) |> h_debug
+        solve_func(m) = solve_sens_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug
         Xcomp_m, _, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, 14:14, sampling_ratio)
-        [mean(solve_adj_in_parallel(m -> compute_Gp_acc(y_func, Xcomp_m[m], Xcomp_m[M_mean+m]), 1:M_mean))]     # NOTE: Does not generalize to multiple parameters
+        [mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean))]     # NOTE: Does not generalize to multiple parameters
     end
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint_acc(Y[:,1], free_pars, isws, M_mean) #get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint(Y[:,1], free_pars, compute_Gp_adj, M_mean) #get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)

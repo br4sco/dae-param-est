@@ -2481,7 +2481,6 @@ function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}
         function get_Gp(adj_sol::DAESolution)
             # NOTE: Changes signs to match what I had in my manual calculations, seems correct now
             # Gp = adj_sol.u[end][end-np+1:end] + (((adj_sol.u[end][1:end-np]')*Fdx(0.0))*xp0)[:]
-            @warn "adj_sols: $(adj_sol.u[end][nx+1:nx+np]), $(adj_sol.u[1][nx+1:nx+np])"
             Gp = adj_sol.u[end-N_trans][nx+1:nx+np] .+ (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)
             # return 0.0
         end
