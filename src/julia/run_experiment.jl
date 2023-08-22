@@ -302,7 +302,7 @@ if model_id == PENDULUM
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [1.0]#, 0.01, 0.1, 0.01]
+    const_learning_rate = [0.1]#, 0.01, 0.1, 0.01]
     model_sens_to_use = pendulum_sensitivity_m#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_monly#my_pendulum_adjoint_deb
@@ -495,8 +495,79 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         return get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
     end
 
-    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
-    get_adjoint_estimate_p(free_pars, M_mean) = get_adjoint_sensitivity(exp_data, free_pars, M_mean, dist_par_inds, isws)
+    # ------------------------------- For using adjoint sensitivity ---------------------------------
+
+    function get_der_est(ts, func::Function)
+        dim = length(func(0.0))
+        der_est = zeros(length(ts)-1, dim)
+        for (i,t) = enumerate(ts)
+            if i > 1
+                der_est[i-1,:] = (func(t)-func(ts[i-1]))./(t-ts[i-1])
+            end
+        end
+        return der_est
+    end
+
+    function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
+        # Rows of der_est are assumed to be different values of t, columns of
+        # matrix are assumed to be different elements of the vector-valued process
+        temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+        # temp = [t->t for i=1:size(der_est,2)]
+        return t -> [temp[i](t) for i=eachindex(temp)]
+        # Returns a function mapping time to the vector-value of the function at that time
+    end
+
+    function compute_Gp_acc(y_func, xvec1, xvec2)
+        # NOTE: m shouldn't be larger than M÷2
+        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1) # x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[m])
+        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2) # x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[M÷2+m])
+        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+
+        λs_ODE, λsint_ODE = solve_accurate_adjoint(N, Ts, x_func, dx, x2_func, y_func, 1)   # 1 because my_ind=1, not that it matters at all here, I just picked any value
+        # int_m(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4]
+        # int_L(t) = -2L*λs_ODE(t)[5]
+        # int_g(t) = m*λs_ODE(t)[4]     # NOTE: g-estimation doesn't seem to work at all, not for default adjoint method either
+        # int_k(t) = abs(x_func(t)[4])*x_func(t)[4]*λs_ODE(t)[3] + abs(x_func(t)[5])*x_func(t)[5]*λs_ODE(t)[4]
+
+        int_func(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4]
+        return -quadgk(int_func, 0.0, N*Ts, rtol=1e-10)[1]#/(N*Ts)
+    end
+
+    # TODO: Here you have M÷2 hard-coded, while forward sense uses a M_mean variable. Make sure they match right now.
+    function get_gradient_adjoint_acc(y, free_pars, isws, M_mean::Int=1)
+        Zm = [randn(Nw, n_tot) for m = 1:M]
+        W_meta = exp_data.W_meta
+        nx = W_meta.nx
+        # n_in = W_meta.n_in
+        n_out = W_meta.n_out
+        # n_tot = nx*n_in
+        # dη = length(W_meta.η)
+        N = size(exp_data.Y, 1)-1
+        # dist_par_inds = W_meta.free_par_inds
+
+        η = exp_data.get_all_ηs(free_pars)
+        # p = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+        # θ = p[1:dθ]
+        # η = p[dθ+1: dθ+dη]
+        # # C = reshape(η[nx+1:end], (n_out, n_tot))
+
+        dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+        # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+        XWm = simulate_noise_process_mangled(dmdl, Zm)
+        wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+
+        y_func  = linear_interpolation(y[:,1], Ts)
+        sampling_ratio = Int(Ts/Tsλ)
+        solve_func(m) = solve_sens_customstep(u, wmm(m), free_dyn_pars_true, N, Tsλ) |> h_debug
+        Xcomp_m, _, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, 14:14, sampling_ratio)
+        [mean(solve_adj_in_parallel(m -> compute_Gp_acc(y_func, Xcomp_m[m], Xcomp_m[M_mean+m]), 1:M_mean))]     # NOTE: Does not generalize to multiple parameters
+    end
+
+    # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
+
+    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint_acc(Y[:,1], free_pars, isws, M_mean) #get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
@@ -1175,7 +1246,7 @@ function contour_2distsens_visualization(trace_address="data/results/from_Alsvin
     scatter!(trace[:,1], trace[:,2])
 end
 
-function contour_2distsens_anim(trace_address="data/results/from_Alsvin/20k_only2distpar/trace_prop_e3.csv", file_name="data/results/contour_gif.gif")
+function contour_2distsens_anim(trace_address="data/results/from_Alsvin/20k_only2distpar/five_times_stepsize/trace_prop_e3.csv", file_name="data/results/contour_gif.gif")
     a1vals = readdlm("data/results/pend_and_dist_identifiability/a1vals.csv", ',')[:]
     a2vals = readdlm("data/results/pend_and_dist_identifiability/a2vals.csv", ',')[:]
     pend_cost = readdlm("data/results/pend_and_dist_identifiability/pend_costs1.csv", ',')
@@ -1183,7 +1254,7 @@ function contour_2distsens_anim(trace_address="data/results/from_Alsvin/20k_only
     contour(a1vals, a2vals, min.(pend_cost', 0.0001))
 
     anim = @animate for i = 1:size(trace,1)
-        contour(a1vals, a2vals, min.(pend_cost', 0.0001), xlimits=(0.0, 3.0), ylimits=(10.0, 20.0), levels=60)
+        contour(a1vals, a2vals, min.(pend_cost', 0.0001), xlimits=(0.0, 3.0), ylimits=(10.0, 20.0), levels=100)
         plot!(trace[1:i-1,1], trace[1:i-1,2])
         scatter!(trace[i:i,1], trace[i:i,2])
     end
