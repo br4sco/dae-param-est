@@ -315,16 +315,16 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, k]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[pars[1], pars[2], g, pars[3]]#[m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1]#, 0.01, 0.1, 0.01]
-    model_sens_to_use = pendulum_sensitivity_m#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [0.1, 1.0, 1.0]
+    model_sens_to_use = pendulum_sensitivity_sans_g#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
-    model_adj_to_use = my_pendulum_adjoint_monly#my_pendulum_adjoint_deb
+    model_adj_to_use = my_pendulum_adjoint_sans_g#my_pendulum_adjoint_deb
     model_stepbystep = pendulum_adj_stepbystep_m#pendulum_adj_stepbystep_deb
 elseif model_id == MOH_MDL
     # For Mohamed's model:
@@ -358,8 +358,8 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 if model_id == PENDULUM
     f(x::Vector{Float64}) = x[7]               # applied on the state at each step
     # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]#, x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
-    f_sens(x::Vector{Float64}) = [x[14]]#, x[21], x[28]]                                                                                           #tuesday debug starting here
-    f_sens_deb(x::Vector{Float64}) = x[8:14]
+    f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]                                                                                           #tuesday debug starting here
+    f_sens_deb(x::Vector{Float64}) = x[8:end]
 elseif model_id == MOH_MDL
     f(x::Vector{Float64}) = x[1]#x[2]
     f_sens(x::Vector{Float64}) = [x[3]]#[x[4]]
@@ -471,7 +471,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 10
+    E = 1
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -531,13 +531,17 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         g = θ[3]
         k = θ[4]
 
+        # NOTE: ODE equation needs to be hard-coded for appropriate choice of parameters here
         λs_ODE, λsint_ODE = solve_accurate_adjoint(N, Ts, x_func, dx, x2_func, y_func, 1)   # 1 because my_ind=1, not that it matters at all here, I just picked any value
         # int_m(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4]
         # int_L(t) = -2L*λs_ODE(t)[5]
         # int_g(t) = m*λs_ODE(t)[4]     # NOTE: g-estimation doesn't seem to work at all, not for default adjoint method either
         # int_k(t) = abs(x_func(t)[4])*x_func(t)[4]*λs_ODE(t)[3] + abs(x_func(t)[5])*x_func(t)[5]*λs_ODE(t)[4]
 
-        int_func(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4] # TODO: Why do we use true value of g here, and not estimated parameter?
+        # int_func(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4] # For only m
+        int_func(t) = [dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4]
+                        -2L*λs_ODE(t)[5]
+                        abs(x_func(t)[4])*x_func(t)[4]*λs_ODE(t)[3] + abs(x_func(t)[5])*x_func(t)[5]*λs_ODE(t)[4]]  # For m, L, k
         return -quadgk(int_func, 0.0, N*Ts, rtol=1e-10)[1]#/(N*Ts)
     end
 
@@ -554,7 +558,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
         # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
         mdl_sens = model_sens_to_use(φ0, u, wmm_m, get_all_θs(free_pars))
-        xp0 = f_sens_deb(mdl_sens.x0)
+        xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars)
 
         # ----------------- Actually solving adjoint system ------------------------
         mdl_adj, get_Gp = model_adj_to_use(u, wmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
@@ -562,7 +566,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
             maxiters = maxiters)
 
-        return first(get_Gp(adj_sol))
+        return get_Gp(adj_sol)
     end
 
     # TODO: Here you have M÷2 hard-coded, while forward sense uses a M_mean variable. Make sure they match right now.
@@ -587,12 +591,14 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         sampling_ratio = Int(Ts/Tsλ)
         solve_func(m) = solve_sens_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug
         Xcomp_m, _, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, 14:14, sampling_ratio)
-        [mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean))]     # NOTE: Does not generalize to multiple parameters
+        # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
+        # mean(temp, dims=2)[:]
+        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean), dims=2)[:]
     end
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint(Y[:,1], free_pars, compute_Gp_adj, M_mean) #get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint(Y[:,1], free_pars, compute_Gp_acc, M_mean) #get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
@@ -602,9 +608,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     trace_lrate     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
     proposed_durations = Array{Millisecond, 1}(undef, E)
     # @warn "Not running proposed identification now"
-    # for e=1:E
-    @warn "Only running proposed identificaiton for e=3"
-    for e=3:10
+    for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"
