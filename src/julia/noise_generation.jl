@@ -166,6 +166,9 @@ function discretize_ct_noise_model_with_sensitivities(
     return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
 end
 
+# Analytically equivalent to non-alt version, but should be numerically more efficient.
+# Instead of computing huge matrices that are then inverted, it inverts several small matrices,
+# which are blocks in the huge matrix.
 function discretize_ct_noise_model_with_sensitivities_alt(
     mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
     # sens_inds: indices of parameter with respect to which we compute the
@@ -202,7 +205,7 @@ function discretize_ct_noise_model_with_sensitivities_alt(
     # Adηa = Mexp[nx+1:(na+1)*nx, 1:nx]
     # temp = Mexp[nx+1:(nθ+1)*nx, (nθ+1)*nx+1:(nθ+2)*nx]*(Ad')
 
-    # # OLD
+    # # OLD, creates huge matrices which it then "inverts" (solves equations rather)
     # Ddηa = Mexp[nx+1:(na+1)*nx, (na+1)*nx+1:(na+2)*nx]*(Ad')
     # for i = 1:na
     #     Ddηa[(i-1)*nx+1:i*nx, :] += (Ddηa[(i-1)*nx+1:i*nx, :])'
@@ -210,7 +213,7 @@ function discretize_ct_noise_model_with_sensitivities_alt(
     # Φ_arg = ((kron(Matrix(I, na, na), Bd)) \ Ddηa ) / (Bd')
     # Bdηa = kron(Matrix(I, na, na), Bd)*Φ( Φ_arg )
 
-    # NEW
+    # NEW, "inverts"/solves equations with many smaller matrices instead of one huge one. Should be more efficient.
     Bdηa = zeros(na*nx, nx)
     for i = 1:na
         # H = Mexp[i*nx+1:(i+1)*nx, nx*(na+1)+1:nx*(2+na)]
@@ -245,6 +248,86 @@ function discretize_ct_noise_model_with_sensitivities_alt(
         end
     end
 
+    return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
+end
+
+function discretize_ct_noise_model_with_sensitivities_for_adj(
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
+    # sens_inds: indices of parameter with respect to which we compute the
+    # sensitivity of disturbance output w
+
+    nx = size(mdl.A,1)
+    n_out = size(mdl.C, 1)
+    n_in  = size(mdl.C, 2)÷nx
+    function get_k_j_i(zeta::Int64)::Tuple{Int64, Int64, Int64}
+        k = rem( (zeta-1), nx ) + 1
+        j = rem( (zeta - k - nx), nx*n_in)÷nx + 1
+        i = (zeta - j*nx - k)÷(nx*n_in) + 1
+        return k, j, i
+    end
+
+    # Indices of free parameters corresponding to "a-vector" in disturbance model
+    sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
+    nη   = length(sens_inds)
+    na = length(sens_inds_a)
+    nx_sens = (1+na)*nx
+
+    Aηa = zeros(na*nx, nx)
+    for i = 1:na
+        Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
+    end
+
+    M = [zeros(nx, (na+1)*nx)      Matrix(I, nx, nx)      zeros(nx, na*nx)                zeros(nx, nx)
+         zeros(na*nx, (na+1)*nx)    zeros(na*nx, nx)   Matrix(I, na*nx, na*nx)            zeros(na*nx, nx)
+         zeros(nx, (na+1)*nx)           mdl.A             zeros(nx, na*nx)                mdl.B*(mdl.B');
+         zeros(na*nx, (na+1)*nx)         Aηa         kron(Matrix(1.0I, na, na), mdl.A)   zeros(nx*na, nx);
+         zeros(nx, (na+1)*nx)          zeros(nx, nx)     zeros(nx, nx*na)                -mdl.A' ]
+
+    Mexp = exp(M*Ts)
+    Ad   = Mexp[(na+1)*nx + 1:(na+2)*nx, (na+1)*nx + 1:(na+2)*nx]
+    Dd   = Hermitian(Mexp[(na+1)*nx + 1:(na+2)*nx, (2na+2)*nx + 1:(2na+3)*nx]*(Ad'))
+    Bd   = cholesky(Dd).L
+    Bdηa = zeros(na*nx, nx)
+    for i = 1:na
+        # H = Mexp[(na+i+1)*nx + 1:(na+i+2)*nx, (2na+2)*nx + 1:(2na+3)*nx]
+        Ddηai = Mexp[(na+i+1)*nx + 1:(na+i+2)*nx, (2na+2)*nx + 1:(2na+3)*nx]*(Ad')
+        Ddηai += Ddηai'
+        Bdηa[(i-1)*nx+1:i*nx,:] = Bd*Phi((Bd\Ddηai)/(Bd'), nx)
+    end
+
+    # Matrices needed for adjoint disturbance estimation
+    P = Mexp[1:nx, (na+1)*nx + 1:(na+2)*nx]
+    R = Mexp[nx+1:(na+1)*nx, (na+1)*nx + 1: (na+2)*nx]
+    Btilde = -((P\R)/P)*Bd + P*Bdηa       # TODO: Uncomment and figure out why dimensions wrong!!!
+
+    # A_mat = [Ad zeros(nx,na*nx); Adηa kron(Matrix(I,na,na), Ad)]
+    A_mat = Mexp[1:nx*(1+na), 1:nx*(1+na)]
+    B_mat = [Bd; Bdηa]
+    C_mat = zeros((nη+1)n_out, nx_sens*n_in)
+    for row_block = 1:nη+1
+        if row_block == 1
+            for col_block = 1:n_in
+                C_mat[(row_block-1)*n_out+1:row_block*n_out,
+                    (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
+                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+                # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
+                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
+            end
+        elseif row_block <= na+1
+            ind = row_block-1
+            for col_block = 1:n_in
+                C_mat[(row_block-1)*n_out+1:row_block*n_out,
+                    ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
+                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+            end
+        else
+            k, j, i = get_k_j_i(sens_inds[row_block-1])
+            C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
+        end
+    end
+
+    # TODO: Figure out exactly what you'll need returned from this function
+    # return Ad, Bd, Bdηa
     return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
 end
 
