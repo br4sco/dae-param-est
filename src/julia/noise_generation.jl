@@ -252,9 +252,11 @@ function discretize_ct_noise_model_with_sensitivities_alt(
 end
 
 function discretize_ct_noise_model_with_sensitivities_for_adj(
-    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
+
+    @assert (length(sens_inds) > 0) "Make sure at least one disturbance parameter is marked for identification. Can't create model for sensitivity with respect to no parameters."
 
     nx = size(mdl.A,1)
     n_out = size(mdl.C, 1)
@@ -268,9 +270,9 @@ function discretize_ct_noise_model_with_sensitivities_for_adj(
 
     # Indices of free parameters corresponding to "a-vector" in disturbance model
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
-    nη   = length(sens_inds)
+    # nη   = length(sens_inds)
     na = length(sens_inds_a)
-    nx_sens = (1+na)*nx
+    # nx_sens = (1+na)*nx
 
     Aηa = zeros(na*nx, nx)
     for i = 1:na
@@ -298,37 +300,39 @@ function discretize_ct_noise_model_with_sensitivities_for_adj(
     # Matrices needed for adjoint disturbance estimation
     P = Mexp[1:nx, (na+1)*nx + 1:(na+2)*nx]
     R = Mexp[nx+1:(na+1)*nx, (na+1)*nx + 1: (na+2)*nx]
-    Btilde = -((P\R)/P)*Bd + P*Bdηa       # TODO: Uncomment and figure out why dimensions wrong!!!
+    B̃ηa = kron(Matrix(I,na,na), P) \ (Bdηa - (R/P)*Bd)
+    B̃  = P\Bd
 
-    # A_mat = [Ad zeros(nx,na*nx); Adηa kron(Matrix(I,na,na), Ad)]
-    A_mat = Mexp[1:nx*(1+na), 1:nx*(1+na)]
-    B_mat = [Bd; Bdηa]
-    C_mat = zeros((nη+1)n_out, nx_sens*n_in)
-    for row_block = 1:nη+1
-        if row_block == 1
-            for col_block = 1:n_in
-                C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
-                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-                # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
-                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
-            end
-        elseif row_block <= na+1
-            ind = row_block-1
-            for col_block = 1:n_in
-                C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
-                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-            end
-        else
-            k, j, i = get_k_j_i(sens_inds[row_block-1])
-            C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
-        end
-    end
+    # Returns non-sensitivity disturbance model and other matrices needed for adjoint disturbance sensitivity
+    return DT_SS_Model(Ad, Bd, mdl.C, zeros(nx*n_in), Ts), B̃, B̃ηa
 
-    # TODO: Figure out exactly what you'll need returned from this function
-    # return Ad, Bd, Bdηa
-    return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
+    # A_mat = Mexp[(na+1)*nx+1:(2+2na)*nx, (na+1)*nx+1:(2+2na)*nx]
+    # B_mat = [Bd; Bdηa]
+    # C_mat = zeros((nη+1)n_out, nx_sens*n_in)
+    # for row_block = 1:nη+1
+    #     if row_block == 1
+    #         for col_block = 1:n_in
+    #             C_mat[(row_block-1)*n_out+1:row_block*n_out,
+    #                 (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
+    #                 mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+    #             # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
+    #             # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
+    #         end
+    #     elseif row_block <= na+1
+    #         ind = row_block-1
+    #         for col_block = 1:n_in
+    #             C_mat[(row_block-1)*n_out+1:row_block*n_out,
+    #                 ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
+    #                 mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+    #         end
+    #     else
+    #         k, j, i = get_k_j_i(sens_inds[row_block-1])
+    #         C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
+    #     end
+    # end
+
+    # # The whole point is that we don't need to simulate disturbance sensitivity forward in time. Why would we then return that model from this function? Just return non-sensitivity model!!
+    # return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts), B̃, B̃ηa
 end
 
 # Parameter values for C-matrix as entered are converted into a single vector
@@ -357,6 +361,12 @@ function get_ct_disturbance_model(η::Array{Float64,1}, nx::Int, n_out::Int)
     C = reshape(η[nx+1:end], n_out, :)
     x0 = zeros(nx)
     return CT_SS_Model(A, B, C, x0)
+    #= With the dimensions we most commonly use, the model becomes
+    A = [-a1 -a2
+          1   0 ]
+    B = [1; 0]
+    C = [c1 c2]
+    =#
 end
 
 # ================= Functions simulating disturbance =======================
