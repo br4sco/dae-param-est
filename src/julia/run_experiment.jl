@@ -238,7 +238,7 @@ function mk_v_ZOH(Zmm::Matrix{Float64}, δ::Float64)
         function z(t::Float64)
             # n*δ <= t <= (n+1)*δ
             n = Int(t÷δ)
-            return Zmm[n, :]
+            return Zmm[n+1, :]  # +1 because t = 0 (and thus n=0) corresponds to index 1
         end
     end
 end

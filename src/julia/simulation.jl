@@ -3071,7 +3071,9 @@ function my_pendulum_adjoint_konly_with_distsensa(u::Function, w::Function, xw::
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
+        nη = 2
         nx = size(xp0,1)
+        nw = length(xw(0.0))
         @assert (np == 3) "my_pendulum_adjoint_konly_with_distsensa is hard-coded to only handle parameters k, a1, and a2. Make sure to pass correct xp0"
         ndist = 3   # length of x_w plus length of w (2+1)
         # x  = t -> sol(t)
@@ -3104,7 +3106,7 @@ function my_pendulum_adjoint_konly_with_distsensa(u::Function, w::Function, xw::
         A = [-η[1]  -η[2]; 1.0   0.0]
         C = [η[3]   η[4]]
         Aθ = [-1.0  0.0; 0.0    0.0; 0.0    -1.0; 0.0   0.0]
-        Cθ = zeros(1,2) # 
+        Cθ = zeros(2,nw) # Only depends on C-parameters, and we only compute sensitivities wrt to a-parameters. We have 2 disturbance parameters
 
         ###################### INITIALIZING ADJOINT SYSTEM ####################
         # Indices 1-4 are differential (d), while 5-7 are algebraic (a)
@@ -3143,29 +3145,38 @@ function my_pendulum_adjoint_konly_with_distsensa(u::Function, w::Function, xw::
             # NOTE: η here then has to contain free_parameters and true values for the non-free ones
             res[8]  = dz[8] + z[9] - η[1]*z[8] + η[3]*z[10]
             res[9]  = dz[9] - η[2]*z[8] + η[4]*z[10]
-            res[10] = 2w(t)*z[3] - z[10]
-            #          | ------------ from original adjoint system --------------- || ----------------------- new terms ---------------------| 
-            res[11]  = dz[8] - z[3]*abs(x(t)[4])*x(t)[4] - z[4]*abs(x(t)[5])*x(t)[5]  + (z[8:9]')*(Aθ*xw(t) - B̃θ*v(t)) + z[10]*(Cθ*xw(t))
+            res[10] = 2w(t)[1]*z[3] - z[10]
+            # #          | ------------ from original adjoint system --------------- || ----------------------- new terms ---------------------| 
+            # res[11]  = dz[8] - z[3]*abs(x(t)[4])*x(t)[4] - z[4]*abs(x(t)[5])*x(t)[5]  + (z[8:9]')*(Aθ*xw(t) - B̃θ*v(t)) + z[10]*(Cθ*xw(t))
+            res[11]  = dz[11] - z[3]*abs(x(t)[4])*x(t)[4] - z[4]*abs(x(t)[5])*x(t)[5]
+            res[12]  = dz[12] + (z[8:9]')*(Aθ[1:nw,:]*xw(t) - B̃θ[1:nw,:]*v(t)) # + z[10]*(Cθ*xw(t)) # This last part is equal to zero since we don't have disturbance parameters
+            res[13]  = dz[13] + (z[8:9]')*(Aθ[nw+1:2nw,:]*xw(t) - B̃θ[nw+1:2nw,:]*v(t))
 
             # # Super-readable but less efficient version
             # res[1:7] = (dz[1:7]')*Fdx(t) + (z[1:7]')*(Fddx(t) - Fx(t)) + gₓ(t)
             # res[8]   = dz[8] - (z[1:7]')*Fp(t)
             nothing
         end
-
+        
         z0  = vcat(λT[:], zeros(np))
-        @info "First: $((λT[xwinds]')), second: $((Aθ*xw(T) - B̃θ*v(T)))"
-        temp1 = (λT[λinds]')*Fp(T)
-        temp2 = (λT[xwinds]')*(Aθ*xw(T) - B̃θ*v(T))
-        temp3 = λT[winds]*Cθ*xw(T)
-        dz0 = vcat(dλT[:], (λT[λinds]')*Fp(T) - (λT[xwinds]')*(Aθ*xw(T) - B̃θ*v(T)) - λT[winds]*Cθ*xw(T))   # For some reason (λT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
+        second_temp = Matrix{Float64}(undef, nw, nη)
+        third_temp  = Matrix{Float64}(undef, 1, nη)
+        for ind = 1:nη   # 2 disturbance parameters
+            second_temp[:, ind] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+            third_temp[:, ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
+            # second_temp[:, (ind-1)nw + 1: ind*nw] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+            # third_temp[:, (ind-1)nw + 1: ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
+        end
+        my_temp = hcat([(λT[λinds]')*Fp(T)], - (λT[xwinds]')*second_temp - (λT[winds]')*third_temp)
+        dz0 = vcat(dλT[:], my_temp[:])
+        # dz0 = vcat(dλT[:], (λT[λinds]')*Fp(T) - (λT[xwinds]')*second_temp - (λT[winds]')*third_temp)   # For some reason (λT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
 
         if N_trans > 0
             @warn "The returned function get_Gp() doesn't fully support N_trans > 0, as sensitivity of internal variables not known at any other time than t=0. A non-rigorous approximation is used instead."
         end
         # Function returning Gp given adjoint solution
         function get_Gp(adj_sol::DAESolution)
-            Gp = adj_sol.u[end-N_trans][nx+ndist+1:nx+ndist+np] .+ (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)     # This is the same as in original adjoint system just because disturbance model has zero initial conditions, independent of parameters
+            Gp = adj_sol.u[end-N_trans][nx+ndist+1:nx+ndist+np] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[:]     # This is the same as in original adjoint system just because disturbance model has zero initial conditions, independent of parameters
         end
 
         dvars = vcat(fill(true, 4), fill(false, 3), fill(true, 2), [false], fill(true, np))
