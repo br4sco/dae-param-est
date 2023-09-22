@@ -298,6 +298,8 @@ function get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
 end
 
 # === MODEL (AND DATA) PARAMETERS ===
+# @warn "Using σ = 0 instead of default, i.e. no measurement noise"
+# const σ = 0.0
 const σ = 0.002                 # measurement noise variance
 
 const m = 0.3                   # [kg]
@@ -648,8 +650,8 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     trace_step     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
     trace_lrate     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
     proposed_durations = Array{Millisecond, 1}(undef, E)
-    # @warn "Not running proposed identification now"
-    for e=1:E
+    @warn "Not running proposed identification now"
+    for e=[]#1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=200 right now"
@@ -5020,6 +5022,34 @@ function debug_minimization_full_along_curve(expid::String, N_trans::Int = 0; pa
     end
 
     return base_pars, base_costs, prop_pars, prop_costs
+end
+
+function gridsearch_m_baseline(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    # Nw = exp_data.Nw
+    # nx = W_meta.nx
+    # n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    # n_tot = nx*n_in
+    # dη = length(W_meta.η)
+    u = exp_data.u
+    # par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_par_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    mrange = 0.1:0.05:2.5
+    cost_vals = zeros(length(mrange))
+
+    for (ind, mval) in enumerate(mrange)
+        Y_base = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), [mval], N ) |> h
+        cost_vals[ind] = mean((Y[N_trans+1:end, 1].-Y_base[N_trans+1:end]).^2)
+    end
+
+    return mrange, cost_vals
 end
 
 function gridsearch_sans_g(expid::String, N_trans::Int = 0)
