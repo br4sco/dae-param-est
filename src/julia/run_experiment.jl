@@ -349,18 +349,18 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = [L]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], L, g, k]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Array{Float64,1}) = [m, pars[1], g, k]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.01 1e4]#; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
-    model_sens_to_use = pendulum_sensitivity_m#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    model_sens_to_use = pendulum_sensitivity_L#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
-    model_adj_to_use = my_pendulum_adjoint_monly#my_pendulum_adjoint_deb
+    model_adj_to_use = my_pendulum_adjoint_Lonly#my_pendulum_adjoint_deb
     model_adj_to_use_dist_sens = my_pendulum_adjoint_konly_with_distsensa
-    model_stepbystep = pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
+    model_stepbystep = pendulum_adj_stepbystep_L#pendulum_adj_stepbystep_deb
 elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
@@ -1313,12 +1313,12 @@ end
 
 function get_estimates_wrapper()
     # opt_pars_baseline1, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, durations
-    opt_pars_baseline100, _, _, _, _, _, _, _ = get_estimates("100_u2w6_from_Alsvin_k0", [0.1], 0)
-    opt_pars_baseline500, _, _, _, _, _, _, _ = get_estimates("500_u2w6_from_Alsvin_k0", [0.1], 0)
-    opt_pars_baseline5k,  _, _, _, _, _, _, _ = get_estimates("5k_adam_u2w6_k0", [0.1], 0)
-    writedlm("data/results/actual_k0_experiments/m/opt_pars_baseline100.csv", opt_pars_baseline100, ',')
-    writedlm("data/results/actual_k0_experiments/m/opt_pars_baseline500.csv", opt_pars_baseline500, ',')
-    writedlm("data/results/actual_k0_experiments/m/opt_pars_baseline5k.csv", opt_pars_baseline5k, ',')
+    opt_pars_baseline100, _, _, _, _, _, _, _ = get_estimates("100_u2w6_from_Alsvin_k0", [4.25], 0)
+    opt_pars_baseline500, _, _, _, _, _, _, _ = get_estimates("500_u2w6_from_Alsvin_k0", [4.25], 0)
+    opt_pars_baseline5k,  _, _, _, _, _, _, _ = get_estimates("5k_adam_u2w6_k0", [4.25], 0)
+    writedlm("data/results/actual_k0_experiments/L/opt_pars_baseline100.csv", opt_pars_baseline100, ',')
+    writedlm("data/results/actual_k0_experiments/L/opt_pars_baseline500.csv", opt_pars_baseline500, ',')
+    writedlm("data/results/actual_k0_experiments/L/opt_pars_baseline5k.csv", opt_pars_baseline5k, ',')
 end
 
 function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
@@ -5068,6 +5068,40 @@ function gridsearch_m_baseline(expid::String, N_trans::Int = 0)
     end
 
     return mrange, cost_vals, Y_base_log, Y
+end
+
+function gridsearch_L_baseline(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    # Nw = exp_data.Nw
+    # nx = W_meta.nx
+    # n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    # n_tot = nx*n_in
+    # dη = length(W_meta.η)
+    u = exp_data.u
+    # par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_par_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    Lrange = 4.25:0.1:10.25
+    # mrange = 0.1:0.05:2.5
+    # mrange = 0.1:0.1:10
+    cost_vals = zeros(length(Lrange))
+
+    Y_base_log = zeros(N+1, length(Lrange))
+
+    for (ind, Lval) in enumerate(Lrange)
+        @info "Finished for L = $Lval"
+        Y_base = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), [Lval], N ) |> h
+        Y_base_log[:,ind] = Y_base
+        cost_vals[ind] = mean((Y[N_trans+1:end, 1].-Y_base[N_trans+1:end]).^2)
+    end
+
+    return Lrange, cost_vals, Y_base_log, Y
 end
 
 function gridsearch_sans_g(expid::String, N_trans::Int = 0)
