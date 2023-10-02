@@ -516,6 +516,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     # DEBUG
     E = 100
     @warn "Using E = $E instead of default"
+    @assert (size(Y,2) >= E) "The data does not contain enough realizations, needs at least $E realizations"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
@@ -824,7 +825,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
         es = collect(1:E)
         we = mk_we(XW, isws)
         # solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
-        Y = solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
+        @warn "GENERATING Y WITHOUT PROCESS DISTURBANCE!!!"
+        Y = solve_in_parallel(e -> solvew(u, t->0.0, free_dyn_pars_true, N) |> h_data, es)
         return Y
     end
 
@@ -1308,6 +1310,16 @@ function sample_cost_func_grad(expid::String, par_vec::Array{Array{Float64,1},1}
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
+
+function get_estimates_wrapper()
+    # opt_pars_baseline1, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, durations
+    opt_pars_baseline100, _, _, _, _, _, _, _ = get_estimates("100_u2w6_from_Alsvin_k0", [0.1], 0)
+    opt_pars_baseline500, _, _, _, _, _, _, _ = get_estimates("500_u2w6_from_Alsvin_k0", [0.1], 0)
+    opt_pars_baseline5k,  _, _, _, _, _, _, _ = get_estimates("5k_adam_u2w6_k0", [0.1], 0)
+    writedlm("data/results/actual_k0_experiments/m/opt_pars_baseline100.csv", opt_pars_baseline100, ',')
+    writedlm("data/results/actual_k0_experiments/m/opt_pars_baseline500.csv", opt_pars_baseline500, ',')
+    writedlm("data/results/actual_k0_experiments/m/opt_pars_baseline5k.csv", opt_pars_baseline5k, ',')
+end
 
 function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     start_datetime = now()
@@ -5041,15 +5053,21 @@ function gridsearch_m_baseline(expid::String, N_trans::Int = 0)
 
     get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
-    mrange = 0.1:0.05:2.5
+    mrange = 0.1:0.01:0.6
+    # mrange = 0.1:0.05:2.5
+    # mrange = 0.1:0.1:10
     cost_vals = zeros(length(mrange))
 
+    Y_base_log = zeros(N+1, length(mrange))
+
     for (ind, mval) in enumerate(mrange)
+        @info "Finished for m = $mval"
         Y_base = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), [mval], N ) |> h
+        Y_base_log[:,ind] = Y_base
         cost_vals[ind] = mean((Y[N_trans+1:end, 1].-Y_base[N_trans+1:end]).^2)
     end
 
-    return mrange, cost_vals
+    return mrange, cost_vals, Y_base_log, Y
 end
 
 function gridsearch_sans_g(expid::String, N_trans::Int = 0)
