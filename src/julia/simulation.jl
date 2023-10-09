@@ -3197,10 +3197,10 @@ function my_pendulum_adjoint_konly_with_distsensa1(u::Function, w::Function, xw:
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
-        nη = 2
+        nη = 1
         nx = size(xp0,1)
         nw = length(xw(0.0))
-        @assert (np == 3) "my_pendulum_adjoint_konly_with_distsensa is hard-coded to only handle parameters k, a1, and a2. Make sure to pass correct xp0"
+        @assert (np == 2) "my_pendulum_adjoint_konly_with_distsensa is hard-coded to only handle parameters k, and a1. Make sure to pass correct xp0"
         ndist = 3   # length of x_w plus length of w (2+1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)

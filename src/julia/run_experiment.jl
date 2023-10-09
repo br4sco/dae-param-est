@@ -351,8 +351,8 @@ if model_id == PENDULUM
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.01 1e4]#; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [1.0]#, 0.1]#, 1.0]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
-    model_sens_to_use = pendulum_sensitivity_k#_with_dist_sens_1#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [1.0, 0.1]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
+    model_sens_to_use = pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly#my_pendulum_adjoint_deb
     model_adj_to_use_dist_sens = my_pendulum_adjoint_konly_with_distsensa1
@@ -608,6 +608,33 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         return get_Gp(adj_sol)
     end
 
+    function compute_Gp_adj_dist_sens(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m, xwmm_m, vmm_m, B̃, B̃θ, η)
+        # NOTE: m shouldn't be larger than M÷2
+        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
+        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
+        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
+        der_est2 = get_der_est(0.0:Tsλ:N*Ts, x2_func)
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+        dx2 = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est2)
+
+        # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
+        # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
+        mdl_sens = model_sens_to_use(φ0, u, t->[wmm_m(t);0.0;0.0], get_all_θs(free_pars))   # The model expects w plus its sensitivities, which we haven't computed since we don't need them for xp0. So we just pad the wmm_m function
+        xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars)
+
+        # u, w, xw, v, θ, T, x, x2, y, dy, xp0, dx, dx2, B̃, B̃θ, η, N_trans
+        # TODO: Define vmm somewhere and apss it here!
+
+        # ----------------- Actually solving adjoint system ------------------------
+        mdl_adj, get_Gp = model_adj_to_use_dist_sens(u, wmm_m, xwmm_m, vmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, B̃, B̃θ, η)
+        adj_prob = problem_reverse(mdl_adj, N, Ts)
+        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+            maxiters = maxiters)
+
+        return get_Gp(adj_sol)
+    end
+
     # TODO: Here you have M÷2 hard-coded, while forward sense uses a M_mean variable. Make sure they match right now.
     function get_gradient_adjoint(y, free_pars, compute_Gp, M_mean::Int=1)
         Zm = [randn(Nw, n_tot) for m = 1:M]
@@ -635,9 +662,40 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean), dims=2)[:]
     end
 
+    function get_gradient_adjoint_distsens(y, free_pars, compute_Gp, M_mean::Int=1)
+        Zm = [randn(Nw, n_tot) for _ = 1:M]
+        W_meta = exp_data.W_meta
+        nx = W_meta.nx
+        n_out = W_meta.n_out
+        N = size(exp_data.Y, 1)-1
+
+        η = exp_data.get_all_ηs(free_pars)
+
+        vmm(m::Int) = mk_v_ZOH(Zm[m], δ)
+
+        dmdl, B̃, B̃ηa = discretize_ct_noise_model_with_sensitivities_for_adj(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+        # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+        XWm = simulate_noise_process_mangled(dmdl, Zm)
+        wmm(m::Int)  = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+        xwmm(m::Int) = mk_xw_interp(dmdl.Cd, XWm, m, δ)
+
+        # NOTE: No optoin of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
+        y_func  = linear_interpolation(y[:,1], Ts)
+        dy_est  = (y[2:end,1]-y[1:end-1,1])/Ts
+        dy_func = linear_interpolation(dy_est, Ts)
+        sampling_ratio = Int(Ts/Tsλ)
+        # solve_func(m) = solve_sens_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug  # TODO: DON'T SOLVE SENS HERE!!!!
+        solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug
+        Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)    # NOTE: Have to make sure not to solve problem with forward sensitivities, that might not work and also just defeats purpose of adjoint method
+        # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
+        # mean(temp, dims=2)[:]
+        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η), 1:M_mean), dims=2)[:]
+    end
+
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint(Y[:,1], free_pars, compute_Gp_adj, M_mean) #get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
+    # get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint(Y[:,1], free_pars, compute_Gp_adj, M_mean)#get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint_distsens(Y[:,1], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
@@ -769,13 +827,13 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
-    # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
+    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
