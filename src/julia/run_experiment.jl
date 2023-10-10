@@ -694,8 +694,8 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    # get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint(Y[:,1], free_pars, compute_Gp_adj, M_mean)#get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
-    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint_distsens(Y[:,1], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
+    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)#get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,1], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
@@ -710,10 +710,10 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
+            perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
         # # DEBUG
         # opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e], trace_step[e], trace_lrate[e] =
-        #     perform_SGD_adam_debug(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)#0)
+        #     perform_SGD_adam_debug((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)#0)
 
         # avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
 
