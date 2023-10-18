@@ -3229,11 +3229,11 @@ function my_pendulum_adjoint_konly_with_distsensa1(u::Function, w::Function, xw:
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
 
-        # Creating some of the needed disturbance from η. ASSUMING ONLY DISTURBANCE PARAMETERS ARE a1 AND a2!!!!!!
+        # Creating some of the needed disturbance from η.
         A = [-η[1]  -η[2]; 1.0   0.0]
         C = [η[3]   η[4]]
         Aθ = [-1.0  0.0; 0.0    0.0; 0.0    -1.0; 0.0   0.0]
-        Cθ = zeros(2,nw) # Only depends on C-parameters, and we only compute sensitivities wrt to a-parameters. We have 2 disturbance parameters, thus 2 rows (I think, added this later)
+        Cθ = zeros(1,nw) # Only depends on C-parameters, and we only compute sensitivities wrt to a-parameters. We have 1 disturbance parameter, thus 1 row (I think, added this later)
 
         ###################### INITIALIZING ADJOINT SYSTEM ####################
         # Indices 1-4 are differential (d), while 5-7 are algebraic (a)
@@ -3670,13 +3670,23 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
         end
         
         z0  = vcat(λT[:], zeros(np))
-        second_temp = Matrix{Float64}(undef, nw, nη)
-        third_temp  = Matrix{Float64}(undef, 1, nη)
-        for ind = 1:nη   # 1 disturbance parameter
+        # # Old attempt, hard to generalize
+        # second_temp = Matrix{Float64}(undef, nw, nη)
+        # third_temp  = Matrix{Float64}(undef, 1, nη)
+        # for ind = 1:nη   # 1 disturbance parameter
+        #     second_temp[:, ind] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+        #     third_temp[:, ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
+        #     # second_temp[:, (ind-1)nw + 1: ind*nw] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+        #     # third_temp[:, (ind-1)nw + 1: ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
+        # end
+        # New attempt, hopefully more generalizable
+        second_temp = zeros(nw, nη)
+        third_temp  = zeros(1, nη)
+        for ind = 1:na
             second_temp[:, ind] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+        end
+        for ind = na+1:nη
             third_temp[:, ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
-            # second_temp[:, (ind-1)nw + 1: ind*nw] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
-            # third_temp[:, (ind-1)nw + 1: ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
         end
         # my_temp = hcat([(λT[λinds]')*Fp(T)], - (λT[xwinds]')*second_temp - (λT[winds]')*third_temp)
         my_temp = - (λT[xwinds]')*second_temp - (λT[winds]')*third_temp
@@ -3793,13 +3803,156 @@ function my_pendulum_adjoint_distsensa2(u::Function, w::Function, xw::Function, 
         end
         
         z0  = vcat(λT[:], zeros(np))
-        second_temp = Matrix{Float64}(undef, nw, nη)
-        third_temp  = Matrix{Float64}(undef, 1, nη)
-        for ind = 1:nη   # 1 disturbance parameter
+        # # Old attempt, hard to generalize
+        # second_temp = Matrix{Float64}(undef, nw, nη)
+        # third_temp  = Matrix{Float64}(undef, 1, nη)
+        # for ind = 1:nη   # 1 disturbance parameter
+        #     second_temp[:, ind] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+        #     third_temp[:, ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
+        #     # second_temp[:, (ind-1)nw + 1: ind*nw] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+        #     # third_temp[:, (ind-1)nw + 1: ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
+        # end
+        # New attempt, hopefully more generalizable
+        second_temp = zeros(nw, nη)
+        third_temp  = zeros(1, nη)
+        for ind = 1:na
             second_temp[:, ind] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+        end
+        for ind = na+1:nη
             third_temp[:, ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
-            # second_temp[:, (ind-1)nw + 1: ind*nw] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
-            # third_temp[:, (ind-1)nw + 1: ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
+        end
+        # my_temp = hcat([(λT[λinds]')*Fp(T)], - (λT[xwinds]')*second_temp - (λT[winds]')*third_temp)
+        my_temp = - (λT[xwinds]')*second_temp - (λT[winds]')*third_temp
+        dz0 = vcat(dλT[:], my_temp[:])
+        # dz0 = vcat(dλT[:], (λT[λinds]')*Fp(T) - (λT[xwinds]')*second_temp - (λT[winds]')*third_temp)   # For some reason (λT')*Fp(T) returns a scalar instead of a 1-element matrix, unexpected but desired
+
+        if N_trans > 0
+            @warn "The returned function get_Gp() doesn't fully support N_trans > 0, as sensitivity of internal variables not known at any other time than t=0. A non-rigorous approximation is used instead."
+        end
+        # Function returning Gp given adjoint solution
+        function get_Gp(adj_sol::DAESolution)
+            Gp = adj_sol.u[end-N_trans][nx+ndist+1:nx+ndist+np] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[:]     # This is the same as in original adjoint system just because disturbance model has zero initial conditions, independent of parameters
+        end
+
+        dvars = vcat(fill(true, 4), fill(false, 3), fill(true, 2), [false], fill(true, np))
+        # dvars = vcat(fill(true, 4), fill(false, 3))
+
+        r0 = zeros(length(z0))
+        f!(r0, dz0, z0, [], 0.0)
+        # @info "r0 is: $r0 here, λ0: $λ0, dλ0: $dλ0"
+
+        # t -> 0.0 is just a dummy function, not to be used
+        return Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
+    end
+end
+
+function my_pendulum_adjoint_distsensc(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
+    # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function. 
+    # But good enough for now, just should be different in final version perhaps
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        np = size(xp0,2)
+        nη = 1
+        nx = size(xp0,1)
+        nw = length(xw(0.0))
+        @assert (np == 1) "my_pendulum_adjoint_konly_with_distsensa is hard-coded to only handle parameter c1. Make sure to pass correct xp0"
+        ndist = 3   # length of x_w plus length of w (2+1)
+        # x  = t -> sol(t)
+        # x2 = t -> sol2(t)
+
+        Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
+                    0           2*dx(t)[6]          0   0                   -1          0   0
+                    -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
+                    0            -dx(t)[3]          0   0               2k*abs(x(t)[5]) 0   0
+                    2x(t)[1]      2x(t)[2]          0   0                   0           0   0
+                    x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
+                    x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
+        # (namely the derivative of F with respect to the variable x_p)
+        Fdx = t -> vcat([1   0   0          0   0   2x(t)[1]    0
+                         0   1   0          0   0   2x(t)[2]    0
+                         0   0   -x(t)[1]   m   0   0           0
+                         0   0   -x(t)[2]   0   m   0           0], zeros(3,7))
+        Fddx = t -> vcat([  0   0  0            0   0   2dx(t)[1]    0
+                            0   0  0            0   0   2dx(t)[2]    0
+                            0   0  -dx(t)[1]    0   0   0            0
+                            0   0  -dx(t)[2]    0   0   0            0], zeros(3,7))
+        # Fp = t -> [.0; .0; abs(x(t)[4])*x(t)[4]; abs(x(t)[5])*x(t)[5]; .0; .0; .0]
+        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-y(t))/T]
+        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-dy(t))/T]
+
+        # NOTE: Convention is used that derivatives wrt to θ stack along cols
+        # while derivatives wrt to x stack along rows
+
+        # Creating some of the needed disturbance from η. ASSUMING ONLY DISTURBANCE PARAMETERS ARE a1 AND a2!!!!!!
+        A = [-η[1]  -η[2]; 1.0   0.0]
+        C = [η[3]   η[4]]
+        Aθ = zeros(2, 2)
+        Cθ = [0.0 1.0] # Only depends on C-parameters, and we only compute sensitivities wrt to a-parameters. We have 1 disturbance parameter, thus 1 row
+
+        ###################### INITIALIZING ADJOINT SYSTEM ####################
+        # Indices 1-4 are differential (d), while 5-7 are algebraic (a)
+        dinds  = 1:4
+        ainds  = 5:7
+        λinds  = 1:7
+        xwinds = 8:9
+        winds  = 10
+        λT  = zeros(10)
+        dλT = zeros(10)
+        temp = (-gₓ(T))/vcat(Fdx(T)[dinds,:], -Fx(T)[ainds,:])
+        λT[dinds] = zeros(length(dinds))
+        λT[ainds] = temp[ainds]
+        dλT[dinds] = temp[dinds]
+        temp = (-gdₓ(T) + (dλT[dinds]')*(Fx(T)[dinds,:] - Fddx(T)[dinds,:] - Fdx(T)[dinds,:]) + (λT[ainds]')*Fx(T)[ainds,:])/vcat(Fdx(T)[dinds,:], -Fx(T)[ainds,:])
+        dλT[ainds] = temp[ainds]
+        # Terminal conditions due to disturbance id
+        λT[xwinds]  = zeros(length(xwinds))
+        λT[winds]   = 2w(T)[1]*λT[3]
+        dλT[xwinds] = (λT[xwinds]')*A + λT[winds]*C
+        dλT[winds]  = 2w(T)[1]*dλT[3] + 2(C*(A*xw(T)+B̃*v(T)))[1]*λT[3]
+
+        # the residual function
+        # NOTE: Could time-varying coefficients be the problem?? Sure would require more allocations?
+        # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
+        function f!(res, dz, z, θ, t)
+            # Completely unreadabe but most efficient version (still not a huge improvement)
+            res[1]  = dz[1] - 2*dx(t)[6]*z[1] + dx(t)[3]*z[3] - 2*x(t)[1]*z[5] - x(t)[4]*z[6] - (x(t)[2]*z[7])/(L^2)
+            res[2]  = dz[2] - 2*dx(t)[6]*z[2] + dx(t)[3]*z[4] - 2*x(t)[2]*z[5] - x(t)[5]*z[6] + (x(t)[1]*z[7])/(L^2)
+            res[3]  = -x(t)[1]*dz[3] - x(t)[2]*dz[4] - dx(t)[1]*z[3] - dx(t)[2]*z[4]
+            res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t)[4])*z[3] - x(t)[1]*z[6]
+            res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t)[5])*z[4] - x(t)[2]*z[6]
+            res[6]  = 2*x(t)[1]*dz[1] + 2*x(t)[2]*dz[2] + 2*dx(t)[1]*z[1] + 2*dx(t)[2]*z[2]
+            res[7]  = (2*(x2(t)[7] - y(t)))/T - z[7]
+
+            # NOTE: η here then has to contain free_parameters and true values for the non-free ones
+            res[8]  = dz[8] + z[9] - η[1]*z[8] + η[3]*z[10]
+            res[9]  = dz[9] - η[2]*z[8] + η[4]*z[10]
+            res[10] = 2w(t)[1]*z[3] - z[10]
+            # β-equations
+            res[11]  = dz[11] + z[10]*(Cθ⋅xw(t)) # + (z[8:9]')*(Aθ[1:nw,:]*xw(t) - B̃θ[1:nw,:]*v(t))  # This last part is equal to zero since we don't have A-parameters
+
+            # # Super-readable but less efficient version
+            # res[1:7] = (dz[1:7]')*Fdx(t) + (z[1:7]')*(Fddx(t) - Fx(t)) + gₓ(t)
+            # res[8]   = dz[8] - (z[1:7]')*Fp(t)
+            nothing
+        end
+        
+        z0  = vcat(λT[:], zeros(np))
+        # # Old attempt, hard to generalize
+        # second_temp = Matrix{Float64}(undef, nw, nη)
+        # third_temp  = Matrix{Float64}(undef, 1, nη)
+        # for ind = 1:nη   # 1 disturbance parameter
+        #     second_temp[:, ind] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+        #     third_temp[:, ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
+        #     # second_temp[:, (ind-1)nw + 1: ind*nw] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+        #     # third_temp[:, (ind-1)nw + 1: ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
+        # end
+        # New attempt, hopefully more generalizable
+        second_temp = zeros(nw, nη)
+        third_temp  = zeros(1, nη)
+        for ind = 1:na
+            second_temp[:, ind] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
+        end
+        for ind = na+1:nη
+            third_temp[:, ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
         end
         # my_temp = hcat([(λT[λinds]')*Fp(T)], - (λT[xwinds]')*second_temp - (λT[winds]')*third_temp)
         my_temp = - (λT[xwinds]')*second_temp - (λT[winds]')*third_temp

@@ -351,11 +351,11 @@ if model_id == PENDULUM
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [1.0]#, 1.0, 1.0, 0.1, 1.0, 1.0]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
+    const_learning_rate = [0.1]#, 1.0, 1.0, 0.1, 1.0, 1.0]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
     model_sens_to_use = pendulum_dist_sens_1#_sans_g_with_dist_sens_3#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly#my_pendulum_adjoint_deb
-    model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa1#sans_g_with_dist_sens_3
+    model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensc#sans_g_with_dist_sens_3
     model_stepbystep = pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
 elseif model_id == MOH_MDL
     # For Mohamed's model:
@@ -835,9 +835,10 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
-    # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
+    # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown (which is zero, I never ID it)
+    free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # Second element of c-vector unknown (all exccept first element of c-vector actually)
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
-    free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
+    # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
@@ -1393,19 +1394,25 @@ function debug_cost_and_min(expid::String, N_trans::Int=0)
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
     # ------- Setting range of parameters to plot cost function over ------------
-    # a1
+    # # a1
     # val_ref = 0.8
     # δval = 0.01
     # nsteps = 20
     # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
     # val0 = 0.6 # Initial guess for optimizer
-    # a2
-    val_ref = 16
-    δval = 0.2
+    # # a2
+    # val_ref = 16
+    # δval = 0.2
+    # nsteps = 20
+    # # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # vals = val_ref:δval/10:val_ref+nsteps*δval
+    # val0 = 18.0 # Initial guess for optimizer
+    # c (c1, c2, whatever I call it, first non-zero element)
+    val_ref = 0.6
+    δval = 0.01
     nsteps = 20
-    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
-    vals = val_ref:δval/10:val_ref+nsteps*δval
-    val0 = 18.0 # Initial guess for optimizer
+    vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    val0 = 0.4 # Initial guess for optimizer
 
     cost_vals = zeros(length(vals))
     min_ind = -1
@@ -1428,7 +1435,7 @@ function debug_cost_and_min(expid::String, N_trans::Int=0)
 
     opt_pars_proposed, trace_proposed, trace_gradient = minimizer_helper(expid, [val0], N_trans)
 
-    return vals, cost_vals, min_ind, opt_pars_proposed, collect(Iterators.flatten(trace_proposed[1])), trace_gradient
+    return vals, cost_vals, min_ind, opt_pars_proposed, trace_proposed, trace_gradient
 end
 
 # To be used with debug_cost_and_min()-above
@@ -1617,8 +1624,8 @@ function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean) #get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
-    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
+    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean) #get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     trace_proposed = [ [Float64[]] for e=1:E]
@@ -1629,12 +1636,13 @@ function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0
         @warn "Only using maxiters=500 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
             perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=500)
+        # NOTE: TODO: Every iteration of SGD, the model from simulation.jl is called three times. That really shouldn't be necessary, one should be enough?
 
         println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
     end
 
     # @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
-    return opt_pars_proposed, trace_proposed, trace_gradient
+    return opt_pars_proposed, collect(Iterators.flatten(trace_proposed[1])), trace_gradient
 end
 
 function animator_1d_helper(vals::AbstractVector{Float64}, cost_vals::AbstractVector{Float64}, trace_proposed::AbstractVector{Float64}, file_name::String)
