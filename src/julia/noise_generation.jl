@@ -270,6 +270,7 @@ function discretize_ct_noise_model_with_sensitivities_for_adj(
 
     # Indices of free parameters corresponding to "a-vector" in disturbance model
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
+    # sens_inds_c = sens_inds[findall(sens_inds .> nx)]
     # nη   = length(sens_inds)
     na = length(sens_inds_a)
     # nx_sens = (1+na)*nx

@@ -61,7 +61,7 @@ const Tsλ = 0.01
 const Tso = 0.01
 # const δ = 0.001                  # noise sampling time
 # const Ts = 0.001                  # step-size
-const M = 100       # Number of monte-carlo simulations used for estimating mean
+const M = 1000       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
@@ -345,17 +345,17 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m, L, k]#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = Array{Float64}(undef, 0)#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Array{Float64,1}) = [m, L, g, k]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0, 1.0]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
-    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [1.0]#, 1.0, 1.0, 0.1, 1.0, 1.0]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
+    model_sens_to_use = pendulum_dist_sens_1#_sans_g_with_dist_sens_3#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly#my_pendulum_adjoint_deb
-    model_adj_to_use_dist_sens = my_pendulum_adjoint_sans_g_with_dist_sens_3
+    model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa1#sans_g_with_dist_sens_3
     model_stepbystep = pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
 elseif model_id == MOH_MDL
     # For Mohamed's model:
@@ -388,7 +388,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Vector{Float64}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Array{Float64,1}) = [x[14]]#, x[21], x[28], x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
     # f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]                                                                                           #tuesday debug starting here
     f_sens_deb(x::Vector{Float64}) = x[8:end]
 elseif model_id == MOH_MDL
@@ -608,7 +608,9 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         return get_Gp(adj_sol)
     end
 
-    function compute_Gp_adj_dist_sens(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m, xwmm_m, vmm_m, B̃, B̃θ, η)
+    function compute_Gp_adj_dist_sens(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m, xwmm_m, vmm_m, B̃, B̃ηa, η, ndist, na)
+        # ndist should be the number of free disturbance parameters
+        # na should be the number of the free disturbance parameters that correspond to the A-matrix
         # NOTE: m shouldn't be larger than M÷2
         x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
         x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
@@ -620,14 +622,14 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
         # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
         # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
-        mdl_sens = model_sens_to_use(φ0, u, t->[wmm_m(t);0.0;0.0], get_all_θs(free_pars))   # The model expects w plus its sensitivities, which we haven't computed since we don't need them for xp0. So we just pad the wmm_m function
+        mdl_sens = model_sens_to_use(φ0, u, t->vcat(wmm_m(t), zeros(ndist,1)), get_all_θs(free_pars))   # The model expects w plus its sensitivities, which we haven't computed since we don't need them for xp0. So we just pad the wmm_m function
         xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars)
 
         # u, w, xw, v, θ, T, x, x2, y, dy, xp0, dx, dx2, B̃, B̃θ, η, N_trans
         # TODO: Define vmm somewhere and apss it here!
 
         # ----------------- Actually solving adjoint system ------------------------
-        mdl_adj, get_Gp = model_adj_to_use_dist_sens(u, wmm_m, xwmm_m, vmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, B̃, B̃θ, η)
+        mdl_adj, get_Gp = model_adj_to_use_dist_sens(u, wmm_m, xwmm_m, vmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, B̃, B̃ηa, η, na)
         adj_prob = problem_reverse(mdl_adj, N, Ts)
         adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
             maxiters = maxiters)
@@ -689,13 +691,14 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)    # NOTE: Have to make sure not to solve problem with forward sensitivities, that might not work and also just defeats purpose of adjoint method
         # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
         # mean(temp, dims=2)[:]
-        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η), 1:M_mean), dims=2)[:]
+        na = length(findall(W_meta.free_par_inds .<= nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
+        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:M_mean), dims=2)[:]
     end
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean) #get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
-    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
+    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean) #get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
@@ -828,12 +831,13 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
     # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
-    free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
+    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
+    free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
@@ -961,7 +965,8 @@ function perform_SGD_adam_new(
     maxiters=200,
     verbose=false,
     betas::Array{Float64,1} = [0.9, 0.999],
-    λ = 0.5)   # betas are the decay parameters of moment estimates
+    # λ = 0.5)   # betas are the decay parameters of moment estimates   # NOTE: I used to use this, then I started deubbing adjoint on 17/10/2023
+    λ = 1-1e-4)   # betas are the decay parameters of moment estimates
     # betas::Array{Float64,1} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
 
     eps = 0.#1e-8
@@ -1363,7 +1368,72 @@ end
 
 # ======================= DEBUGGING FUNCTIONS ========================
 
-function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
+# Only handles optimization over a single paramter right now
+function debug_cost_and_min(expid::String, N_trans::Int=0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    # @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # ------- Setting range of parameters to plot cost function over ------------
+    # a1
+    # val_ref = 0.8
+    # δval = 0.01
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # val0 = 0.6 # Initial guess for optimizer
+    # a2
+    val_ref = 16
+    δval = 0.2
+    nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    vals = val_ref:δval/10:val_ref+nsteps*δval
+    val0 = 18.0 # Initial guess for optimizer
+
+    cost_vals = zeros(length(vals))
+    min_ind = -1
+    min_cost = Inf
+
+    e = 1
+    for (ind, par) in enumerate(vals)
+        pars = [par]
+        Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+        cost_vals[ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+        if cost_vals[ind] < min_cost
+            min_ind = ind
+            min_cost = cost_vals[ind]
+        end
+        @info "Completed computing cost for ind=$ind out of $(length(vals))"
+    end
+
+    writedlm("data/experiments/tmp/costandmin_cost_vals.csv", cost_vals, ',')
+    writedlm("data/experiments/tmp/costandmin_par_vals.csv", vals, ',')
+
+    opt_pars_proposed, trace_proposed, trace_gradient = minimizer_helper(expid, [val0], N_trans)
+
+    return vals, cost_vals, min_ind, opt_pars_proposed, collect(Iterators.flatten(trace_proposed[1])), trace_gradient
+end
+
+# To be used with debug_cost_and_min()-above
+function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0)
+    # TODO: We don't really need to get experiment data here, we should already have it in wrapper function!!!!!!! Or is it easiest to fetch? Perhaps not Y?
     start_datetime = now()
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
@@ -1389,58 +1459,8 @@ function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::In
     get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
 
-    # === We then optimize parameters for the baseline model ===
-    function baseline_model_parametrized(dummy_input, pars)
-        # NOTE: The true input is encoded in the solvew_sens()-function, but this function
-        # still needs to to take two input arguments, so dummy_input could just be
-        # anything, it's not used anyway
-        Y_base = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N ) |> h
-
-        # NOTE: SCALAR_OUTPUT is assumed
-        return reshape(Y_base[N_trans+1:end,:], :)   # Returns 1D-array
-    end
-
-    function jacobian_model_b(dummy_input, free_pars)
-        jac = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> h_sens
-        return jac[N_trans+1:end, :]
-    end
-
-    # jacobian_model_b(dummy_input, pars) =
-    #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
-
-    # E = size(Y, 2)
-    # DEBUG
-    E = 5#100
-    @warn "Using E = $E instead of default"
-    opt_pars_baseline = zeros(length(pars0), E)
-    # trace_base[e][t][j] contains the value of parameter j before iteration t
-    # corresponding to dataset e
-    trace_base = [[pars0] for e=1:E]
-    setup_duration = now() - start_datetime
-    baseline_durations = Array{Millisecond, 1}(undef, E)
-    @warn "Not running baseline identification now"
-    for e=[]#1:E
-        time_start = now()
-        # HACK: Uses trace returned due to hacked LsqFit package
-        baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
-            baseline_model_parametrized, jacobian_model_b,
-            par_bounds[:,1], par_bounds[:,2])
-        opt_pars_baseline[:, e] = coef(baseline_result)
-
-        println("Completed for dataset $e for parameters $(opt_pars_baseline[:,e])")
-        writedlm(joinpath(data_dir, "tmp/backup_baseline_e$e.csv"), opt_pars_baseline[:,e], ',')
-
-        # Sometimes (the first returned value I think) the baseline_trace
-        # has no elements, and therefore doesn't contain the metadata x
-        if length(baseline_trace) > 1
-            for j=2:length(baseline_trace)
-                push!(trace_base[e], baseline_trace[j].metadata["x"])
-            end
-        end
-        baseline_durations[e] = now()-time_start
-    end
-
-    @info "The mean optimal parameters for baseline are given by: $(mean(opt_pars_baseline, dims=2))"
+    E = 1
+    @warn "Using E=$E instead of default"
 
     # === Finally we optimize parameters for the proposed model ==
 
@@ -1477,8 +1497,6 @@ function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::In
         # int_g(t) = m*λs_ODE(t)[4]     # NOTE: g-estimation doesn't seem to work at all, not for default adjoint method either
         # int_k(t) = abs(x_func(t)[4])*x_func(t)[4]*λs_ODE(t)[3] + abs(x_func(t)[5])*x_func(t)[5]*λs_ODE(t)[4]
 
-        @warn "I think compute_Gp_acc forgets about term? Or is term always zero here?"
-
         # int_func(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4] # For only m
         int_func(t) = [dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4]
                         -2L*λs_ODE(t)[5]
@@ -1510,7 +1528,9 @@ function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::In
         return get_Gp(adj_sol)
     end
 
-    function compute_Gp_adj_dist_sens(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m, xwmm_m, vmm_m, B̃, B̃θ, η)
+    function compute_Gp_adj_dist_sens(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m, xwmm_m, vmm_m, B̃, B̃ηa, η, ndist, na)
+        # ndist should be the number of free disturbance parameters
+        # na should be the number of the free disturbance parameters that correspond to the A-matrix
         # NOTE: m shouldn't be larger than M÷2
         x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
         x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
@@ -1522,14 +1542,14 @@ function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::In
 
         # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
         # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
-        mdl_sens = model_sens_to_use(φ0, u, t->[wmm_m(t);0.0;0.0], get_all_θs(free_pars))   # The model expects w plus its sensitivities, which we haven't computed since we don't need them for xp0. So we just pad the wmm_m function
+        mdl_sens = model_sens_to_use(φ0, u, t->vcat(wmm_m(t), zeros(ndist,1)), get_all_θs(free_pars))   # The model expects w plus its sensitivities, which we haven't computed since we don't need them for xp0. So we just pad the wmm_m function
         xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars)
 
         # u, w, xw, v, θ, T, x, x2, y, dy, xp0, dx, dx2, B̃, B̃θ, η, N_trans
         # TODO: Define vmm somewhere and apss it here!
 
         # ----------------- Actually solving adjoint system ------------------------
-        mdl_adj, get_Gp = model_adj_to_use_dist_sens(u, wmm_m, xwmm_m, vmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, B̃, B̃θ, η)
+        mdl_adj, get_Gp = model_adj_to_use_dist_sens(u, wmm_m, xwmm_m, vmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, B̃, B̃ηa, η, na)
         adj_prob = problem_reverse(mdl_adj, N, Ts)
         adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
             maxiters = maxiters)
@@ -1591,53 +1611,54 @@ function get_estimates_debug(expid::String, pars0::Array{Float64,1}, N_trans::In
         Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)    # NOTE: Have to make sure not to solve problem with forward sensitivities, that might not work and also just defeats purpose of adjoint method
         # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
         # mean(temp, dims=2)[:]
-        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η), 1:M_mean), dims=2)[:]
+        na = length(findall(W_meta.free_par_inds .<= nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
+        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:M_mean), dims=2)[:]
     end
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    # get_gradient_estimate_p(free_pars, M_mean) = get_gradient_estimate(Y[:,1], free_pars, isws, M_mean) #get_gradient_adjoint(Y[:,1], free_pars, compute_Gp_adj, M_mean)
-    get_gradient_estimate_p(free_pars, M_mean) = get_gradient_adjoint_distsens(Y[:,1], free_pars, compute_Gp_adj_dist_sens, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean) #get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
+    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
-    avg_pars_proposed = zeros(length(pars0), E)
-    trace_proposed = [ [Float64[]] for _=1:E]
-    trace_gradient = [ [Float64[]] for _=1:E]
-    trace_step     = [ [Float64[]] for _=1:E]        ## DEBUG!!!!!
-    trace_lrate     = [ [Float64[]] for _=1:E]        ## DEBUG!!!!!
-    proposed_durations = Array{Millisecond, 1}(undef, E)
+    trace_proposed = [ [Float64[]] for e=1:E]
+    trace_gradient = [ [Float64[]] for e=1:E]
     # @warn "Not running proposed identification now"
     for e=1:E
-        time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
-        # @warn "Only using maxiters=3 right now"
+        @warn "Only using maxiters=500 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam_new(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-9, maxiters=300)
-        # # DEBUG
-        # opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e], trace_step[e], trace_lrate[e] =
-        #     perform_SGD_adam_debug(get_gradient_estimate_p, pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)#0)
+            perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=500)
 
-        # avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
-
-        writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
-        writedlm(joinpath(data_dir, "tmp/backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
-
-        # proposed_result, proposed_trace = get_fit(Y[:,e], pars0,
-        #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws),
-        #     par_bounds[:,1], par_bounds[:,2])
-        # proposed_result, proposed_trace = get_fit_sens(Y[:,e], pars0,
-        #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws), jacobian_model)
-        # opt_pars_proposed[:, e] = coef(proposed_result)
         println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
-        proposed_durations[e] = now()-time_start
     end
 
-    @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
+    # @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
+    return opt_pars_proposed, trace_proposed, trace_gradient
+end
 
-    # Call Dates.value[setup_duration] or e.g. Dates.value.(baseline_durations) to convert Millisecond to Int
-    durations = (setup_duration, baseline_durations, proposed_durations)
-    # return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, trace_lrate, durations
-    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, durations
+function animator_1d_helper(vals::AbstractVector{Float64}, cost_vals::AbstractVector{Float64}, trace_proposed::AbstractVector{Float64}, file_name::String)
+    plot(vals, cost_vals)
+
+    anim = @animate for i = eachindex(trace_proposed)
+        plot(vals, cost_vals)
+        vline!([trace_proposed[i]])
+        if i > 100
+            vline!([mean(trace_proposed[i-100:i])])
+        elseif i > 10
+            vline!([mean(trace_proposed[i-10:i])])
+        end
+    end
+    gif(anim, file_name, fps = 15)
+end
+
+function save_to_file_helper(vals, cost_vals, min_ind, opt_pars_proposed, trace_proposed, trace_gradient, file_path)
+    writedlm(file_path*"vals.csv", vals, ',')
+    writedlm(file_path*"cost_vals.csv", cost_vals, ',')
+    writedlm(file_path*"min_ind.csv", min_ind, ',')
+    writedlm(file_path*"opt_pars_proposed.csv", opt_pars_proposed, ',')
+    writedlm(file_path*"trace_proposed.csv", trace_proposed, ',')
+    writedlm(file_path*"trace_gradient.csv", trace_gradient, ',')
 end
 
 function contour_2distsens_visualization(trace_address="data/results/from_Alsvin/20k_only2distpar/trace_prop_e3.csv")
