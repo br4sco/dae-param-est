@@ -351,11 +351,11 @@ if model_id == PENDULUM
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1]#, 1.0, 1.0, 0.1, 1.0, 1.0]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
+    const_learning_rate = [1.0]#, 1.0, 1.0, 0.1, 1.0, 1.0]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
     model_sens_to_use = pendulum_dist_sens_1#_sans_g_with_dist_sens_3#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly#my_pendulum_adjoint_deb
-    model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensc#sans_g_with_dist_sens_3
+    model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa2#sans_g_with_dist_sens_3
     model_stepbystep = pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
 elseif model_id == MOH_MDL
     # For Mohamed's model:
@@ -836,9 +836,9 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown (which is zero, I never ID it)
-    free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # Second element of c-vector unknown (all exccept first element of c-vector actually)
+    # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # Second element of c-vector unknown (all exccept first element of c-vector actually)
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
-    # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
+    free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
@@ -1633,9 +1633,9 @@ function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0
     # @warn "Not running proposed identification now"
     for e=1:E
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
-        @warn "Only using maxiters=500 right now"
+        @warn "Only using maxiters=1000 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=500)
+            perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=1000)
         # NOTE: TODO: Every iteration of SGD, the model from simulation.jl is called three times. That really shouldn't be necessary, one should be enough?
 
         println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
@@ -1668,6 +1668,283 @@ function save_to_file_helper(vals, cost_vals, min_ind, opt_pars_proposed, trace_
     writedlm(file_path*"trace_proposed.csv", trace_proposed, ',')
     writedlm(file_path*"trace_gradient.csv", trace_gradient, ',')
 end
+
+# Only handles optimization over a single paramter right now
+function det_debug_cost_and_min(expid::String, N_trans::Int=0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    # @warn "Using E = 1 right now, instead of something larger"
+    Z = [randn(Nw, n_tot)]
+
+    # ------- Setting range of parameters to plot cost function over ------------
+    # # a1
+    # val_ref = 0.8
+    # δval = 0.01
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # val0 = 0.6 # Initial guess for optimizer
+    # a2
+    val_ref = 16
+    δval = 0.2
+    nsteps = 20
+    vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # vals = val_ref:δval/10:val_ref+nsteps*δval
+    val0 = 18.0 # Initial guess for optimizer
+    # # c (c1, c2, whatever I call it, first non-zero element)
+    # val_ref = 0.6
+    # δval = 0.01
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # val0 = 0.4 # Initial guess for optimizer
+
+    cost_vals = zeros(length(vals))
+    min_ind = -1
+    min_cost = Inf
+
+    e = 1
+    for (ind, par) in enumerate(vals)
+        pars = [par]
+        # Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+        Ym = simulate_system(exp_data, pars, 1, dist_sens_inds, isws, Z)
+        cost_vals[ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+        if cost_vals[ind] < min_cost
+            min_ind = ind
+            min_cost = cost_vals[ind]
+        end
+        @info "Completed computing cost for ind=$ind out of $(length(vals))"
+    end
+
+    writedlm("data/experiments/tmp/costandmin_cost_vals.csv", cost_vals, ',')
+    writedlm("data/experiments/tmp/costandmin_par_vals.csv", vals, ',')
+
+    opt_pars_proposed, trace_proposed, trace_gradient = det_minimizer_helper(expid, [val0], Z, N_trans)
+
+    return vals, cost_vals, min_ind, opt_pars_proposed, trace_proposed, trace_gradient
+end
+
+# To be used with debug_cost_and_min()-above
+function det_minimizer_helper(expid::String, pars0::Array{Float64,1}, Z::Vector{Matrix{Float64}}, N_trans::Int=0)
+    # TODO: We don't really need to get experiment data here, we should already have it in wrapper function!!!!!!! Or is it easiest to fetch? Perhaps not Y?
+    start_datetime = now()
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    u = exp_data.u
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    dist_par_inds = W_meta.free_par_inds
+
+    @assert (length(pars0) == num_dyn_pars+length(dist_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
+    @assert (size(dyn_par_bounds, 1) == num_dyn_pars) "Please provide bounds for exactly all free dynamic parameters"
+    @assert (length(const_learning_rate) == length(pars0)) "The learning rate must have the same number of components as the number of parameters to be identified"
+
+    if !isdir(joinpath(data_dir, "tmp/"))
+        mkdir(joinpath(data_dir, "tmp/"))
+    end
+
+    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+
+    E = 1
+    @warn "Using E=$E instead of default"
+
+    # === Finally we optimize parameters for the proposed model ==
+
+    # Returns estimate of gradient of cost function
+    # M_mean specifies over how many realizations the gradient estimate is computed
+    function get_gradient_estimate(y, free_pars, isws)
+        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 1, dist_par_inds, isws, Z)
+
+        return get_cost_gradient(y, Ym, jacsYm, N_trans)
+    end
+
+    # ------------------------------- For using adjoint sensitivity ---------------------------------
+
+    function compute_Gp_acc(y_func, dy_func, xvec1, xvec2, free_pars, wmm)
+        # NOTE: m shouldn't be larger than M÷2
+        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1) # x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[m])
+        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2) # x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[M÷2+m])
+        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+
+        # m, L, g, k
+        θ = get_all_θs(free_pars)
+        m = θ[1]
+        L = θ[2]
+        g = θ[3]
+        k = θ[4]
+
+        # NOTE: ODE equation needs to be hard-coded for appropriate choice of parameters here
+        λs_ODE, λsint_ODE = solve_accurate_adjoint(N, Ts, x_func, dx, x2_func, y_func, 1)   # 1 because my_ind=1, not that it matters at all here, I just picked any value
+        # int_m(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4]
+        # int_L(t) = -2L*λs_ODE(t)[5]
+        # int_g(t) = m*λs_ODE(t)[4]     # NOTE: g-estimation doesn't seem to work at all, not for default adjoint method either
+        # int_k(t) = abs(x_func(t)[4])*x_func(t)[4]*λs_ODE(t)[3] + abs(x_func(t)[5])*x_func(t)[5]*λs_ODE(t)[4]
+
+        # int_func(t) = dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4] # For only m
+        int_func(t) = [dx(t)[4]*λs_ODE(t)[3] + (dx(t)[5]+g)*λs_ODE(t)[4]
+                        -2L*λs_ODE(t)[5]
+                        abs(x_func(t)[4])*x_func(t)[4]*λs_ODE(t)[3] + abs(x_func(t)[5])*x_func(t)[5]*λs_ODE(t)[4]]  # For m, L, k
+        return -quadgk(int_func, 0.0, N*Ts, rtol=1e-10)[1]#/(N*Ts)
+    end
+
+    function compute_Gp_adj(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m)
+        # NOTE: m shouldn't be larger than M÷2
+        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
+        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
+        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
+        der_est2 = get_der_est(0.0:Tsλ:N*Ts, x2_func)
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+        dx2 = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est2)
+
+        # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
+        # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
+        mdl_sens = model_sens_to_use(φ0, u, wmm_m, get_all_θs(free_pars))
+        xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars)
+
+        # ----------------- Actually solving adjoint system ------------------------
+        mdl_adj, get_Gp = model_adj_to_use(u, wmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
+        adj_prob = problem_reverse(mdl_adj, N, Ts)
+        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+            maxiters = maxiters)
+
+        return get_Gp(adj_sol)
+    end
+
+    function compute_Gp_adj_dist_sens(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m, xwmm_m, vmm_m, B̃, B̃ηa, η, ndist, na)
+        # ndist should be the number of free disturbance parameters
+        # na should be the number of the free disturbance parameters that correspond to the A-matrix
+        # NOTE: m shouldn't be larger than M÷2
+        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
+        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
+        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
+        der_est2 = get_der_est(0.0:Tsλ:N*Ts, x2_func)
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+        dx2 = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est2)
+
+        # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
+        # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
+        mdl_sens = model_sens_to_use(φ0, u, t->vcat(wmm_m(t), zeros(ndist,1)), get_all_θs(free_pars))   # The model expects w plus its sensitivities, which we haven't computed since we don't need them for xp0. So we just pad the wmm_m function
+        xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars)
+
+        # u, w, xw, v, θ, T, x, x2, y, dy, xp0, dx, dx2, B̃, B̃θ, η, N_trans
+        # TODO: Define vmm somewhere and apss it here!
+
+        # ----------------- Actually solving adjoint system ------------------------
+        mdl_adj, get_Gp = model_adj_to_use_dist_sens(u, wmm_m, xwmm_m, vmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, B̃, B̃ηa, η, na)
+        adj_prob = problem_reverse(mdl_adj, N, Ts)
+        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+            maxiters = maxiters)
+
+        return get_Gp(adj_sol)
+    end
+
+    function get_gradient_adjoint(y, free_pars, compute_Gp)
+        # Zm = [randn(Nw, n_tot) for m = 1:M]
+        W_meta = exp_data.W_meta
+        nx = W_meta.nx
+        n_out = W_meta.n_out
+        N = size(exp_data.Y, 1)-1
+
+        η = exp_data.get_all_ηs(free_pars)
+
+        dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+        # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+        XWm = simulate_noise_process_mangled(dmdl, Z)
+        wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+
+        # NOTE: No optoin of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
+        y_func  = linear_interpolation(y[:,1], Ts)
+        dy_est  = (y[2:end,1]-y[1:end-1,1])/Ts
+        dy_func = linear_interpolation(dy_est, Ts)
+        sampling_ratio = Int(Ts/Tsλ)
+        solve_func(m) = solve_sens_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug
+        Xcomp_m, _, _ = solve_in_parallel_sens_debug(m -> solve_func(m), 1:1, 7, 14:14, sampling_ratio)
+        # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
+        # mean(temp, dims=2)[:]
+        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[m], free_pars, wmm(m)), 1:1), dims=2)[:]
+    end
+
+    function get_gradient_adjoint_distsens(y, free_pars, compute_Gp)
+        # Zm = [randn(Nw, n_tot) for _ = 1:M]
+        W_meta = exp_data.W_meta
+        nx = W_meta.nx
+        n_out = W_meta.n_out
+        N = size(exp_data.Y, 1)-1
+
+        η = exp_data.get_all_ηs(free_pars)
+
+        vmm(m::Int) = mk_v_ZOH(Z[m], δ)
+
+        dmdl, B̃, B̃ηa = discretize_ct_noise_model_with_sensitivities_for_adj(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+        # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+        XWm = simulate_noise_process_mangled(dmdl, Z)
+        wmm(m::Int)  = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+        xwmm(m::Int) = mk_xw_interp(dmdl.Cd, XWm, m, δ)
+
+        # NOTE: No optoin of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
+        y_func  = linear_interpolation(y[:,1], Ts)
+        dy_est  = (y[2:end,1]-y[1:end-1,1])/Ts
+        dy_func = linear_interpolation(dy_est, Ts)
+        sampling_ratio = Int(Ts/Tsλ)
+        # solve_func(m) = solve_sens_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug  # TODO: DON'T SOLVE SENS HERE!!!!
+        solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug
+        Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:1, 7, sampling_ratio)    # NOTE: Have to make sure not to solve problem with forward sensitivities, that might not work and also just defeats purpose of adjoint method
+        # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
+        # mean(temp, dims=2)[:]
+        na = length(findall(W_meta.free_par_inds .<= nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
+        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:1), dims=2)[:]
+    end
+
+    # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
+
+    # get_gradient_estimate_p(free_pars, e) = get_gradient_estimate(Y[:,e], free_pars, isws) #get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj)
+    get_gradient_estimate_p(free_pars, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens)#get_gradient_estimate(Y[:,e], free_pars, isws)
+
+    opt_pars_proposed = zeros(length(pars0), E)
+    trace_proposed = [ [Float64[]] for e=1:E]
+    trace_gradient = [ [Float64[]] for e=1:E]
+    # @warn "Not running proposed identification now"
+    for e=1:E
+        # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
+        @warn "Only using maxiters=500 right now"
+        opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
+            perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=500)
+        # NOTE: TODO: Every iteration of SGD, the model from simulation.jl is called three times. That really shouldn't be necessary, one should be enough?
+
+        println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
+    end
+
+    # @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
+    return opt_pars_proposed, collect(Iterators.flatten(trace_proposed[1])), trace_gradient
+end
+
+# ----------------------------------------------------------------------
 
 function contour_2distsens_visualization(trace_address="data/results/from_Alsvin/20k_only2distpar/trace_prop_e3.csv")
     a1vals = readdlm("data/results/pend_and_dist_identifiability/a1vals.csv", ',')[:]
