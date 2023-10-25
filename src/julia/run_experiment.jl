@@ -61,7 +61,7 @@ const Tsλ = 0.01
 const Tso = 0.01
 # const δ = 0.001                  # noise sampling time
 # const Ts = 0.001                  # step-size
-const M = 1000       # Number of monte-carlo simulations used for estimating mean
+const M = 100       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
@@ -345,17 +345,17 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = Array{Float64}(undef, 0)#[m, L, g, k] # True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = Array{Float64}(undef, 0)#[m, L, k]# True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
     get_all_θs(pars::Array{Float64,1}) = [m, L, g, k]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = Array{Float64}(undef, 0, 2)#; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [1.0]#, 1.0, 1.0, 0.1, 1.0, 1.0]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
-    model_sens_to_use = pendulum_dist_sens_1#_sans_g_with_dist_sens_3#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [0.1, 1.0]#, 1.0, 0.1, 1.0, 0.1]#, 1.0, 1.0, 0.1, 1.0, 1.0]#[0.1, 1.0, 1.0, 0.1, 1.0, 1.0]
+    model_sens_to_use = pendulum_dist_sens_2#pendulum_sensitivity_deb#_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
-    model_adj_to_use = my_pendulum_adjoint_konly#my_pendulum_adjoint_deb
-    model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa2#sans_g_with_dist_sens_3
+    model_adj_to_use = my_pendulum_adjoint_dist_sens_3#my_pendulum_adjoint_deb
+    model_adj_to_use_dist_sens = my_pendulum_adjoint_sans_g_with_dist_sens_3
     model_stepbystep = pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
 elseif model_id == MOH_MDL
     # For Mohamed's model:
@@ -374,6 +374,7 @@ end
 
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
 learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
+# @warn "AAAAAAAAAAAAAAAAAAAAAAAAAH USING 1/T ON LEARNING RATE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 
 # === OUTPUT FUNCTIONS ===
 # The state vector x from the solver is organized as follows:
@@ -388,7 +389,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Vector{Float64}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14]]#, x[21], x[28], x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Array{Float64,1}) = [x[14], x[21]]#, x[28]]#, x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
     # f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]                                                                                           #tuesday debug starting here
     f_sens_deb(x::Vector{Float64}) = x[8:end]
 elseif model_id == MOH_MDL
@@ -510,7 +511,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 10
+    E = 3
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -697,8 +698,8 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean) #get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
-    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)#get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
+    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
@@ -834,11 +835,11 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
-    # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
+    free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown (which is zero, I never ID it)
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # Second element of c-vector unknown (all exccept first element of c-vector actually)
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
-    free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
+    # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
@@ -1407,12 +1408,24 @@ function debug_cost_and_min(expid::String, N_trans::Int=0)
     # # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
     # vals = val_ref:δval/10:val_ref+nsteps*δval
     # val0 = 18.0 # Initial guess for optimizer
-    # c (c1, c2, whatever I call it, first non-zero element)
-    val_ref = 0.6
+    # # c (c1, c2, whatever I call it, first non-zero element)
+    # val_ref = 0.6
+    # δval = 0.01
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # val0 = 0.4 # Initial guess for optimizer
+    # # k or L
+    # val_ref = 6.25
+    # δval = 0.1
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # val0 = 4.25 # Initial guess for optimize
+    # m
+    val_ref = 0.3
     δval = 0.01
     nsteps = 20
     vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
-    val0 = 0.4 # Initial guess for optimizer
+    val0 = 0.1
 
     cost_vals = zeros(length(vals))
     min_ind = -1
@@ -1429,13 +1442,314 @@ function debug_cost_and_min(expid::String, N_trans::Int=0)
         end
         @info "Completed computing cost for ind=$ind out of $(length(vals))"
     end
-
+    
     writedlm("data/experiments/tmp/costandmin_cost_vals.csv", cost_vals, ',')
     writedlm("data/experiments/tmp/costandmin_par_vals.csv", vals, ',')
 
     opt_pars_proposed, trace_proposed, trace_gradient = minimizer_helper(expid, [val0], N_trans)
 
+    collect(Iterators.flatten(trace_proposed[1]))
+
+    return vals, cost_vals, min_ind, opt_pars_proposed, collect(Iterators.flatten(trace_proposed)), trace_gradient
+end
+
+function debug_cost_and_min_2par(expid::String, N_trans::Int=0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    # @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # ------- Setting range of parameters to plot cost function over ------------
+    # # a1
+    # val_ref = 0.8
+    # δval = 0.01
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # val0 = 0.6 # Initial guess for optimizer
+    # # a2
+    # val_ref = 16
+    # δval = 0.2
+    # nsteps = 20
+    # # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # vals = val_ref:δval/10:val_ref+nsteps*δval
+    # val0 = 18.0 # Initial guess for optimizer
+    # # c (c1, c2, whatever I call it, first non-zero element)
+    # val_ref = 0.6
+    # δval = 0.01
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # val0 = 0.4 # Initial guess for optimizer
+    # L
+    val_ref1 = 6.25
+    δval1 = 0.5
+    nsteps1 = 10#20
+    vals1 = val_ref1-nsteps1*δval1:δval1:val_ref1+nsteps1*δval1
+    val1_0 = 4.25 # Initial guess for optimizer
+    # k
+    val_ref2 = 6.25
+    δval2 = 0.5
+    nsteps2 = 10#20
+    vals2 = val_ref2-nsteps2*δval2:δval2:val_ref2+nsteps2*δval2
+    val2_0 = 4.25 # Initial guess for optimizer
+
+
+    cost_vals = zeros(length(vals2), length(vals1))
+    min_inds = [-1, -1]
+    min_cost = Inf
+
+    e = 1
+    for (ind1, par1) in enumerate(vals1)
+        for (ind2, par2) in enumerate(vals2)
+            pars = [par1, par2]
+            Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+            cost_vals[ind2, ind1] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+            if cost_vals[ind2, ind1] < min_cost
+                min_inds = [ind1, ind2]
+                min_cost = cost_vals[ind2, ind1]
+            end
+            @info "Completed computing cost for inds=$((ind1, ind2)) out of $((length(vals1), length(vals2)))"
+        end
+    end
+
+    writedlm("data/experiments/tmp/costandmin_cost_vals.csv", cost_vals, ',')
+    writedlm("data/experiments/tmp/costandmin_par_vals1.csv", vals1, ',')
+    writedlm("data/experiments/tmp/costandmin_par_vals2.csv", vals2, ',')
+
+    opt_pars_proposed, trace_proposed, trace_gradient = minimizer_helper(expid, [val1_0, val2_0], N_trans)
+
+    # # My extra stuff
+    # save_to_file_helper_2d(vals1, vals2, cost_vals, min_inds, opt_pars_proposed, trace_proposed, trace_gradient, "data/results/singlepar_adj_debug/Lk_overnight/")
+    # animator_2d_helper(vals1, vals2, cost_vals, trace_proposed, "data/results/overnight_Lk.gif")
+
+    return vals1, vals2, cost_vals, min_inds, opt_pars_proposed, trace_proposed, trace_gradient
+end
+
+# Only handles optimization over a single paramter right now
+function det_debug_cost_and_min(expid::String, N_trans::Int=0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    # @warn "Using E = 1 right now, instead of something larger"
+    Z = [randn(Nw, n_tot)]
+
+    # ------- Setting range of parameters to plot cost function over ------------
+    # # a1
+    # val_ref = 0.8
+    # δval = 0.01
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # val0 = 0.6 # Initial guess for optimizer
+    # # a2
+    # val_ref = 16
+    # δval = 0.2
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # # vals = val_ref:δval/10:val_ref+nsteps*δval
+    # val0 = 18.0 # Initial guess for optimizer
+    # # c (c1, c2, whatever I call it, first non-zero element)
+    # val_ref = 0.6
+    # δval = 0.01
+    # nsteps = 20
+    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    # val0 = 0.4 # Initial guess for optimizer
+    # m
+    val_ref = 0.3
+    δval = 0.01
+    nsteps = 20
+    vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
+    val0 = 0.1
+
+    cost_vals = zeros(length(vals))
+    min_ind = -1
+    min_cost = Inf
+
+    e = 1
+    for (ind, par) in enumerate(vals)
+        pars = [par]
+        # Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+        Ym = simulate_system(exp_data, pars, 1, dist_sens_inds, isws, Z)
+        cost_vals[ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+        if cost_vals[ind] < min_cost
+            min_ind = ind
+            min_cost = cost_vals[ind]
+        end
+        @info "Completed computing cost for ind=$ind out of $(length(vals))"
+    end
+
+    writedlm("data/experiments/tmp/costandmin_cost_vals.csv", cost_vals, ',')
+    writedlm("data/experiments/tmp/costandmin_par_vals.csv", vals, ',')
+
+    opt_pars_proposed, trace_proposed, trace_gradient = det_minimizer_helper(expid, [val0], Z, N_trans)
+
     return vals, cost_vals, min_ind, opt_pars_proposed, trace_proposed, trace_gradient
+end
+
+# Specialized to analyze identifiability of disturbance parameters a1 and a2
+function debug_cost_and_min_2dist(expid::String, N_trans::Int=0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    # @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    # ----------------------- Numerical optimization ----------------------------
+    ηinit = [0.6, 18.0]
+    opt_pars_proposed, trace_proposed, trace_gradient = minimizer_helper(expid, ηinit, N_trans)
+    ηtrue = [0.8, 16]
+    ηopt  = opt_pars_proposed[:]
+    a1min = min(ηinit[1], ηtrue[1], ηopt[1])
+    a2min = min(ηinit[2], ηtrue[2], ηopt[2])
+    a1max = max(ηinit[1], ηtrue[1], ηopt[1])
+    a2max = max(ηinit[2], ηtrue[2], ηopt[2])
+    Δ1 = 0.05
+    Δ2 = 1.0
+    δ1 = 0.025
+    δ2 = 0.5
+    vals1 = a1min-Δ1:δ1:a1max+10*Δ1 #DEBUG
+    vals2 = a2min-Δ2:δ2:a2max+10*Δ2
+
+    @info "Optimization returned: $ηopt"
+    writedlm("data/experiments/tmp/distmin_opt_pars.csv", opt_pars_proposed, ',')
+
+    # ----------- Actually plotting cost function --------------
+
+    cost_vals = zeros(length(vals2), length(vals1))
+    min_inds = [-1, -1]
+    min_cost = Inf
+
+    e = 1
+    for (ind1, par1) in enumerate(vals1)
+        for (ind2, par2) in enumerate(vals2)
+            pars = [par1, par2]
+            Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+            cost_vals[ind2, ind1] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+            if cost_vals[ind2, ind1] < min_cost
+                min_inds = [ind1, ind2]
+                min_cost = cost_vals[ind2, ind1]
+            end
+            @info "Completed computing cost for inds=$((ind1, ind2)) out of $((length(vals1), length(vals2)))"
+        end
+    end
+
+    writedlm("data/experiments/tmp/distmin_cost_vals.csv", cost_vals, ',')
+    writedlm("data/experiments/tmp/distmin_par_vals1.csv", vals1, ',')
+    writedlm("data/experiments/tmp/distmin_par_vals2.csv", vals2, ',')
+
+    # -------------- Plotting cost along single curve ----------------
+    myδ = 0.2
+    vec = (ηopt-ηtrue)*myδ
+    range = -myδ:myδ:(1/myδ)+10*myδ     # DEBUG
+    cost_curve = zeros(length(range))
+    curve_vals = zeros(2, length(range))
+    for (ind, val) = enumerate(range)
+        myη = ηtrue+val*vec
+        curve_vals[:,ind] = myη
+        Ym = mean(simulate_system(exp_data, myη, M, dist_sens_inds, isws, Zm), dims=2)
+        cost_curve[ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+        @info "Completed computing cost along curve for ind=$ind out of $(length(range))"
+    end
+
+
+    # # My extra stuff
+    # save_to_file_helper_2d(vals1, vals2, cost_vals, min_inds, opt_pars_proposed, trace_proposed, trace_gradient, "data/results/singlepar_adj_debug/Lk_overnight/")
+    # animator_2d_helper(vals1, vals2, cost_vals, trace_proposed, "data/results/overnight_Lk.gif")
+
+    return vals1, vals2, cost_vals, min_inds, range, curve_vals, cost_curve, opt_pars_proposed, trace_proposed, trace_gradient
+end
+
+# This function is really good for visualizing identifiability issues for disturbance identification! It
+# Plots 3d cost function
+# Vertical green line for true parameter value
+# Vertical red line for initial parameter value passed to optimizer
+# Vertical blue line for optimal parameter value obtained from optimizer
+# Vertical yellow lines getting lower and lower, each for each step of the optimizer trace
+# Blue markers showing the cost function on line between true parameter value and obtained optimum
+#       Green marker corresponds to true value, and red to obtained optimum
+#       2d plot of cost on this line can be shown by also calling the commented-out plot-command just before the return statement
+function crazy_debug_plotter()
+    vals1 = readdlm("data/results/October_dist2_debug/5k/vals1.csv", ',')[:]
+    vals2 = readdlm("data/results/October_dist2_debug/5k/vals2.csv", ',')[:]
+    cost_vals = readdlm("data/results/October_dist2_debug/5k/cost_vals.csv", ',')
+    mymin = minimum(cost_vals)
+    mymax = maximum(cost_vals)
+    # max2  = mymax-(mymax-mymin)/10
+
+    opp = readdlm("data/results/October_dist2_debug/5k/opt_pars_proposed.csv", ',')
+    trace = readdlm("data/results/October_dist2_debug/5k/trace_proposed.csv", ',')
+    mylen = size(trace, 1)
+
+    # range = readdlm("data/results/October_dist2_debug/5k/range.csv", ',')[:]
+    cost_curve = readdlm("data/results/October_dist2_debug/5k/cost_curve.csv", ',')[:]
+    curve_vals = readdlm("data/results/October_dist2_debug/5k/curve_vals.csv", ',')
+    curve_vals1 = curve_vals[1,:]
+    curve_vals2 = curve_vals[2,:]
+
+    p = surface(vals1, vals2, cost_vals)
+    plot!([0.6, 0.6], [18.0, 18.0], [mymin, mymax], linecolor=:red) # Plots starting point
+    plot!([opp[1],opp[1]], [opp[2], opp[2]], [mymin, mymax], linecolor=:blue)
+    trace1 = trace[:,1]
+    trace2 = trace[:,2]
+    for ind = eachindex(trace1)
+        max2 = mymax - ind*(mymax-mymin)/mylen
+        plot!([trace1[ind], trace1[ind]], [trace2[ind], trace2[ind]], [mymin, max2], linecolor=:yellow)
+    end
+    plot!([0.8, 0.8], [16.0, 16.0], [mymin, mymax], linecolor=:green)
+    scatter!(curve_vals1[2:end-1], curve_vals2[2:end-1], cost_curve[2:end-1], markercolor=:blue)
+    scatter!(curve_vals1[1:1], curve_vals2[1:1], cost_curve[1:1], markercolor=:green)   # Green is true parameter value
+    scatter!(curve_vals1[end:end], curve_vals2[end:end], cost_curve[end:end], markercolor=:red) # Red is parameter value obtained from optimization
+
+    # plot(range, cost_curve); scatter!(range[1:1], cost_curve[1:1], markercolor=:green); scatter!(range[end:end], cost_curve[end:end], markercolor=:red) 
+
+    return p
 end
 
 # To be used with debug_cost_and_min()-above
@@ -1624,8 +1938,8 @@ function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean) #get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
-    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)# get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
+    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
 
     opt_pars_proposed = zeros(length(pars0), E)
     trace_proposed = [ [Float64[]] for e=1:E]
@@ -1633,110 +1947,16 @@ function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0
     # @warn "Not running proposed identification now"
     for e=1:E
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
-        @warn "Only using maxiters=1000 right now"
+        @warn "Only using maxiters=100 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=1000)
+            perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
         # NOTE: TODO: Every iteration of SGD, the model from simulation.jl is called three times. That really shouldn't be necessary, one should be enough?
 
         println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
     end
 
     # @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
-    return opt_pars_proposed, collect(Iterators.flatten(trace_proposed[1])), trace_gradient
-end
-
-function animator_1d_helper(vals::AbstractVector{Float64}, cost_vals::AbstractVector{Float64}, trace_proposed::AbstractVector{Float64}, file_name::String)
-    plot(vals, cost_vals)
-
-    anim = @animate for i = eachindex(trace_proposed)
-        plot(vals, cost_vals)
-        vline!([trace_proposed[i]])
-        if i > 100
-            vline!([mean(trace_proposed[i-100:i])])
-        elseif i > 10
-            vline!([mean(trace_proposed[i-10:i])])
-        end
-    end
-    gif(anim, file_name, fps = 15)
-end
-
-function save_to_file_helper(vals, cost_vals, min_ind, opt_pars_proposed, trace_proposed, trace_gradient, file_path)
-    writedlm(file_path*"vals.csv", vals, ',')
-    writedlm(file_path*"cost_vals.csv", cost_vals, ',')
-    writedlm(file_path*"min_ind.csv", min_ind, ',')
-    writedlm(file_path*"opt_pars_proposed.csv", opt_pars_proposed, ',')
-    writedlm(file_path*"trace_proposed.csv", trace_proposed, ',')
-    writedlm(file_path*"trace_gradient.csv", trace_gradient, ',')
-end
-
-# Only handles optimization over a single paramter right now
-function det_debug_cost_and_min(expid::String, N_trans::Int=0)
-    exp_data, isws = get_experiment_data(expid)
-    W_meta = exp_data.W_meta
-    Y = exp_data.Y
-    N = size(Y,1)-1
-    Nw = exp_data.Nw
-    nx = W_meta.nx
-    n_in = W_meta.n_in
-    n_out = W_meta.n_out
-    n_tot = nx*n_in
-    dη = length(W_meta.η)
-    u = exp_data.u
-    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
-    dist_sens_inds = W_meta.free_par_inds
-
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
-
-    # E = size(Y, 2)
-    # DEBUG
-    E = 1
-    # @warn "Using E = 1 right now, instead of something larger"
-    Z = [randn(Nw, n_tot)]
-
-    # ------- Setting range of parameters to plot cost function over ------------
-    # # a1
-    # val_ref = 0.8
-    # δval = 0.01
-    # nsteps = 20
-    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
-    # val0 = 0.6 # Initial guess for optimizer
-    # a2
-    val_ref = 16
-    δval = 0.2
-    nsteps = 20
-    vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
-    # vals = val_ref:δval/10:val_ref+nsteps*δval
-    val0 = 18.0 # Initial guess for optimizer
-    # # c (c1, c2, whatever I call it, first non-zero element)
-    # val_ref = 0.6
-    # δval = 0.01
-    # nsteps = 20
-    # vals = val_ref-nsteps*δval:δval:val_ref+nsteps*δval
-    # val0 = 0.4 # Initial guess for optimizer
-
-    cost_vals = zeros(length(vals))
-    min_ind = -1
-    min_cost = Inf
-
-    e = 1
-    for (ind, par) in enumerate(vals)
-        pars = [par]
-        # Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
-        Ym = simulate_system(exp_data, pars, 1, dist_sens_inds, isws, Z)
-        cost_vals[ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-        if cost_vals[ind] < min_cost
-            min_ind = ind
-            min_cost = cost_vals[ind]
-        end
-        @info "Completed computing cost for ind=$ind out of $(length(vals))"
-    end
-
-    writedlm("data/experiments/tmp/costandmin_cost_vals.csv", cost_vals, ',')
-    writedlm("data/experiments/tmp/costandmin_par_vals.csv", vals, ',')
-
-    opt_pars_proposed, trace_proposed, trace_gradient = det_minimizer_helper(expid, [val0], Z, N_trans)
-
-    return vals, cost_vals, min_ind, opt_pars_proposed, trace_proposed, trace_gradient
+    return opt_pars_proposed, trace_proposed[1], trace_gradient
 end
 
 # To be used with debug_cost_and_min()-above
@@ -1923,8 +2143,8 @@ function det_minimizer_helper(expid::String, pars0::Array{Float64,1}, Z::Vector{
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
-    # get_gradient_estimate_p(free_pars, e) = get_gradient_estimate(Y[:,e], free_pars, isws) #get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj)
-    get_gradient_estimate_p(free_pars, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens)#get_gradient_estimate(Y[:,e], free_pars, isws)
+    get_gradient_estimate_p(free_pars, e) = get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj) #get_gradient_estimate(Y[:,e], free_pars, isws)
+    # get_gradient_estimate_p(free_pars, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens)#get_gradient_estimate(Y[:,e], free_pars, isws)
 
     opt_pars_proposed = zeros(length(pars0), E)
     trace_proposed = [ [Float64[]] for e=1:E]
@@ -1942,6 +2162,71 @@ function det_minimizer_helper(expid::String, pars0::Array{Float64,1}, Z::Vector{
 
     # @info "The mean optimal parameters for proposed method are given by: $(mean(opt_pars_proposed, dims=2))"
     return opt_pars_proposed, collect(Iterators.flatten(trace_proposed[1])), trace_gradient
+end
+
+function animator_1d_helper(vals::AbstractVector{Float64}, cost_vals::AbstractVector{Float64}, trace_proposed::AbstractVector{Float64}, file_name::String)
+    plot(vals, cost_vals)
+
+    anim = @animate for i = eachindex(trace_proposed)
+        plot(vals, cost_vals)
+        vline!([trace_proposed[i]])
+        if i > 100
+            vline!([mean(trace_proposed[i-100:i])])
+        elseif i > 10
+            vline!([mean(trace_proposed[i-10:i])])
+        end
+    end
+    gif(anim, file_name, fps = 15)
+end
+
+function animator_2d_helper(vals1::AbstractVector{Float64}, vals2::AbstractVector{Float64}, cost_vals::AbstractMatrix{Float64}, trace_proposed::Vector{Vector{Float64}}, file_name::String)
+    plotlyjs()
+    surface(vals1, vals2, min.(cost_vals, 0.00003))
+
+    mymin = minimum(cost_vals)
+    mymax = min(maximum(cost_vals), 0.00003)
+    myδ = (mymax-mymin)
+
+    anim = @animate for i = eachindex(trace_proposed)
+        surface(vals1, vals2, min.(cost_vals, 0.00003))
+        cost_range = mymin:myδ:mymax
+        range1 = fill(trace_proposed[i][1], length(cost_range))
+        range2 = fill(trace_proposed[i][2], length(cost_range))
+        plot!(range1, range2, cost_range)
+    end
+    gif(anim, file_name, fps = 15)
+end
+
+function save_to_file_helper(vals, cost_vals, min_ind, opt_pars_proposed, trace_proposed, trace_gradient, file_path)
+    writedlm(file_path*"vals.csv", vals, ',')
+    writedlm(file_path*"cost_vals.csv", cost_vals, ',')
+    writedlm(file_path*"min_ind.csv", min_ind, ',')
+    writedlm(file_path*"opt_pars_proposed.csv", opt_pars_proposed, ',')
+    writedlm(file_path*"trace_proposed.csv", trace_proposed, ',')
+    writedlm(file_path*"trace_gradient.csv", trace_gradient, ',')
+end
+
+function save_to_file_helper_2d(vals1, vals2, cost_vals, min_inds, opt_pars_proposed, trace_proposed, trace_gradient, file_path)
+    writedlm(file_path*"vals1.csv", vals1, ',')
+    writedlm(file_path*"vals2.csv", vals2, ',')
+    writedlm(file_path*"cost_vals.csv", cost_vals, ',')
+    writedlm(file_path*"min_inds.csv", min_inds, ',')
+    writedlm(file_path*"opt_pars_proposed.csv", opt_pars_proposed, ',')
+    writedlm(file_path*"trace_proposed.csv", trace_proposed, ',')
+    writedlm(file_path*"trace_gradient.csv", trace_gradient, ',')
+end
+
+function save_to_file_helper_2dist(vals1, vals2, cost_vals, min_inds, range, curve_vals, cost_curve, opt_pars_proposed, trace_proposed, trace_gradient, file_path)
+    writedlm(file_path*"vals1.csv", vals1, ',')
+    writedlm(file_path*"vals2.csv", vals2, ',')
+    writedlm(file_path*"cost_vals.csv", cost_vals, ',')
+    writedlm(file_path*"min_inds.csv", min_inds, ',')
+    writedlm(file_path*"range.csv", range, ',')
+    writedlm(file_path*"curve_vals.csv", curve_vals, ',')
+    writedlm(file_path*"cost_curve.csv", cost_curve, ',')
+    writedlm(file_path*"opt_pars_proposed.csv", opt_pars_proposed, ',')
+    writedlm(file_path*"trace_proposed.csv", trace_proposed, ',')
+    writedlm(file_path*"trace_gradient.csv", trace_gradient, ',')
 end
 
 # ----------------------------------------------------------------------
@@ -6950,5 +7235,5 @@ function plot_boxplots(θs, θ0, labels)
     )
 
     hline!(p, [θ0], label = L"\theta_0", linestyle = :dot, linecolor = :gray)
-    savefig("C:\\Programming\\dae-param-est\\src\\julia\\data\\results\\50k_hugest\\boxplot.png")
+    savefig("C:\\Programming\\dae-param-est\\src\\julia\\data\\results\\from_Alsvin\\October_mLk_summary\\boxplot.png")
 end
