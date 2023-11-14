@@ -30,6 +30,29 @@ function interpolation(T::Float64, xs::Array{Float64, 1})
   end
 end
 
+function delta_robot(Φs::Vector{Float64}, u::Function, w::Function, θ::Vector{Float64})::Model
+    let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = θ[12]
+
+        include("delta_robot_helper.jl")
+        f!(res, dz, z, θ, t) = delta_robot_f!(res, dz, z, θ, t)
+    end
+
+    ϕ1 = π/6
+    ϕ2 = acos(-0.5*L1/L2)
+    ϕ3 = 0.0
+    q0 = repeat([ϕ1, ϕ2, ϕ3], 3)
+    v0 = zeros(9)
+    κ0 = zeros(6)
+    z0  = vcat(q0, v0, κ0)
+    dz0 = zeros(24)
+
+    dvars = vcat(fill(true, 18), fill(false, 6))
+
+    r0 = zeros(length(z0))
+    f!(r0, dz0, z0, [], 0.0)
+    @warn "okay, r0 is now: $r0"
+end
+
 function pendulum_new(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
