@@ -428,6 +428,65 @@ const abstol = 1e-8#1e-9
 const reltol = 1e-5#1e-6
 const maxiters = Int64(1e8)
 
+function solve_delta(N::Int)
+    θ = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
+    L0 = θ[1]
+    L1 = θ[2]
+    L2 = θ[3]
+    L3 = θ[4]
+    delta_mdl = delta_robot([0.0,0.0], t->0.0, t->0.0, θ)
+    delta_prob = problem(delta_mdl, N, Ts)
+    sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
+    outmat = get_delta_output(sol, θ)
+    # p1 = plot(-outmat[2,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
+    # p2 = plot(outmat[1,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
+    # p3 = plot(outmat[1,:], outmat[2,:], xlims=(-L2,L2), ylims=(-L2,L2), color=:blue, legend=false)
+    # scatter!(p1, -outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
+    # scatter!(p2, outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
+    # scatter!(p3, outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue)
+    # l = @layout [a b c]
+    # plot(p1, p2, p3, layout=l)
+
+    animate_delta_gif(outmat, θ, "data/results/delta_gif.gif")
+end
+
+function get_delta_output(sol, θ)
+    T = length(sol)
+    outmat = zeros(3,T)
+    # TODO: sol.u is not the recommended way to access the solution
+    for (i,x) = enumerate(sol.u)
+        # out = 
+        # [L2*sin(ϕ2)*sin(ϕ3)
+        #  L1*cos(ϕ1) + L2*cos(ϕ2) + L0 - L3
+        #  L1*sin(ϕ1) + L2*sin(ϕ2)*cos(ϕ3)]
+        # where
+        # L0 = θ[1], L1 = θ[2], L2 = θ[3], L4 = θ[4]
+        outmat[:,i] = [θ[3]*sin(x[2])*sin(x[3])
+                       θ[2]*cos(x[1]) + θ[3]*cos(x[2]) + θ[1] - θ[4]
+                       θ[2]*sin(x[1]) + θ[3]*sin(x[2])*cos(x[3])]
+    end
+    return outmat
+end
+
+function animate_delta_gif(outmat::Matrix{Float64}, θ::Vector{Float64}, file_name::String)
+    l = @layout [a b c]
+    p1 = scatter(-outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
+    p2 = scatter(outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
+    p3 = scatter(outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2,L2), legend=false)
+    plot(p1, p2, p3, layout=l)
+
+    anim = @animate for i = eachindex(outmat[1,:])
+        p1 = scatter(-outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
+        p2 = scatter(outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
+        p3 = scatter(outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2,L2), legend=false)
+        plot!(p1, -outmat[2,1:i], -outmat[3,1:i])
+        plot!(p2, outmat[1,1:i], -outmat[3,1:i])
+        plot!(p3, outmat[1,1:i], outmat[2,1:i])
+        plot(p1, p2, p3, layout=l)
+    end
+    gif(anim, file_name, fps = 15)
+end
+
 solvew_sens(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
   realize_model_sens(u, w, free_dyn_pars, N),
   saveat = 0:Ts:(N*Ts),
