@@ -554,11 +554,10 @@ function disturbance_model_3(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)
     nx = 2        # model order
     n_out = 1     # number of outputs
     n_in = 1      # number of inputs
-    w_scale = scale*ones(n_out)             # noise scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [2*ω*ζ, ω^2]
-    c_vec = Diagonal(w_scale)*[0, 1]
+    c_vec = scale*[0, 1]
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
     mdl =
