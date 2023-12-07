@@ -44,9 +44,10 @@ end
 
 const PENDULUM = 1
 const MOH_MDL  = 2
+const DELTA    = 3
 
 # Selects which model to adapt code to
-model_id = PENDULUM
+model_id = DELTA
 
 # ==================
 # === PARAMETERS ===
@@ -61,7 +62,7 @@ const Tsλ = 0.01
 const Tso = 0.01
 # const δ = 0.001                  # noise sampling time
 # const Ts = 0.001                  # step-size
-const M = 100       # Number of monte-carlo simulations used for estimating mean
+const M = 1#00       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
@@ -308,6 +309,20 @@ const k = 6.25                  # [1/s^2]
 
 const φ0 = 0.0                   # Initial angle of pendulum from negative y-axis
 
+# ------------------ For Delta-robot ---------------------
+const L0 = 1.0
+const L1 = 1.5
+const L2 = 2.0
+const L3 = 0.5
+const LC1 = 0.75
+const LC2 = 1.0
+const M1 = 0.1
+const M2 = 0.1
+const M3 = 0.3
+const J1 = 0.4
+const J2 = 0.4
+const γ = 1.0
+
 # === HELPER FUNCTIONS TO READ AND WRITE DATA
 const data_dir = joinpath("data", "experiments")
 
@@ -370,6 +385,17 @@ elseif model_id == MOH_MDL
     model_to_use = model_mohamed
     model_adj_to_use = mohamed_adjoint_new
     model_stepbystep = mohamed_stepbystep
+elseif model_id == DELTA
+    const free_dyn_pars_true = [J1, J2]
+    const num_dyn_vars = 24
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, pars[1], pars[2], g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    dyn_par_bounds = [0.01 1e4]
+    @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
+    const_learning_rate = [0.1]
+    model_sens_to_use = pendulum_sensitivity_sans_g    # TODO: Change to model of delta robot
+    model_to_use = delta_robot_new
+    # model_adj_to_use = mohamed_adjoint_new
+    # model_stepbystep = mohamed_stepbystep
 end
 
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
@@ -396,13 +422,17 @@ elseif model_id == MOH_MDL
     f(x::Vector{Float64}) = x[1]#x[2]
     f_sens(x::Vector{Float64}) = [x[3]]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
+elseif model_id == DELTA
+    f(x::Vector{Float64}) = [x[1],x[4],x[7]]    # All three servo angles
+    # f_sens(x::Vector{Float64}) = [x[3]]#[x[4]]
+    # f_sens_deb(x::Vector{Float64}) = x[3:4]
 end
 f_debug(x::Array{Float64,1}) = x
 # f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
 # f_sens(x::Array{Float64,1}) = [x[14], x[21]]
 # NOTE: Has to be changed when number of free  parameters is changed.
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
-h(sol) = apply_outputfun(f, sol)                            # for our model                                             # USED
+h(sol) = apply_outputfun_mvar(f, sol)                            # for our model                                             # USED
 h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete model with dynamics sensitivity         # USED
 h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity                           # USED
 # h_debug(sol) = apply_outputfun(f_debug, sol)
@@ -428,26 +458,31 @@ const abstol = 1e-8#1e-9
 const reltol = 1e-5#1e-6
 const maxiters = Int64(1e8)
 
+# ---------- Temporary functions for checking out and debugging Delta model --------------
 function solve_delta(N::Int)
     θ = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
     L0 = θ[1]
     L1 = θ[2]
     L2 = θ[3]
     L3 = θ[4]
-    delta_mdl = delta_robot([0.0,0.0], t->0.0, t->0.0, θ)
-    delta_prob = problem(delta_mdl, N, Ts)
-    sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
-    outmat = get_delta_output(sol, θ)
-    # p1 = plot(-outmat[2,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
-    # p2 = plot(outmat[1,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
-    # p3 = plot(outmat[1,:], outmat[2,:], xlims=(-L2,L2), ylims=(-L2,L2), color=:blue, legend=false)
-    # scatter!(p1, -outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
-    # scatter!(p2, outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
-    # scatter!(p3, outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue)
-    # l = @layout [a b c]
-    # plot(p1, p2, p3, layout=l)
+    # delta_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->-0.4*[sin(5*t+2); sin(5*(t+0.2*π/3+2)); sin(5*(t-0.2*π/3+2))], θ)
+    # delta_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), θ)
+    delta_mdl = delta_robot_new(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), θ)
+    my_other_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), θ)
+    # delta_prob = problem(delta_mdl, N, Ts)
+    # sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
+    # outmat = get_delta_output(sol, θ)
 
-    animate_delta_gif(outmat, θ, "data/results/delta_gif.gif")
+    # # p1 = plot(-outmat[2,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
+    # # p2 = plot(outmat[1,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
+    # # p3 = plot(outmat[1,:], outmat[2,:], xlims=(-L2,L2), ylims=(-L2,L2), color=:blue, legend=false)
+    # # scatter!(p1, -outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
+    # # scatter!(p2, outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
+    # # scatter!(p3, outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue)
+    # # l = @layout [a b c]
+    # # plot(p1, p2, p3, layout=l)
+    
+    # animate_delta_gif(outmat, θ, "data/results/delta_gif.gif")
 end
 
 function get_delta_output(sol, θ)
@@ -470,6 +505,10 @@ end
 
 function animate_delta_gif(outmat::Matrix{Float64}, θ::Vector{Float64}, file_name::String)
     l = @layout [a b c]
+    L0 = θ[1]
+    L1 = θ[2]
+    L2 = θ[3]
+    L3 = θ[4]
     p1 = scatter(-outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
     p2 = scatter(outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
     p3 = scatter(outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2,L2), legend=false)
@@ -486,6 +525,8 @@ function animate_delta_gif(outmat::Matrix{Float64}, θ::Vector{Float64}, file_na
     end
     gif(anim, file_name, fps = 15)
 end
+
+# ----------------------------------------------------------------------------------------
 
 solvew_sens(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
   realize_model_sens(u, w, free_dyn_pars, N),
@@ -521,7 +562,7 @@ solve_customstep(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::
   )
 
 # data-set output function
-h_data(sol) = apply_outputfun(x -> f(x) + σ * randn(), sol)
+h_data(sol) = apply_outputfun_mvar(x -> f(x) + σ * randn(size(f(x))), sol)
 
 function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     start_datetime = now()
@@ -891,8 +932,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
-    free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
+    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
@@ -938,13 +979,13 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     function calc_Y(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1})
         # NOTE: This XW should be non-mangled, which is why we don't divide by n_tot
         @assert (Nw <= size(XW, 1)) "Disturbance data size mismatch ($(Nw) > $(size(XW, 1)))"
-        # @warn "Using E=1 instead of size of XW when generating Y!"
-        E = size(XW, 2)
-        # E = 1
+        @warn "Using E=1 instead of size of XW when generating Y!"
+        # E = size(XW, 2)
+        E = 1
         es = collect(1:E)
         we = mk_we(XW, isws)
         # solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
-        Y = solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
+        Y, _ = solve_in_parallel_multivar_flat(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
         return Y
     end
 
