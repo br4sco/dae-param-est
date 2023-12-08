@@ -257,34 +257,6 @@ function delta_robot_f!(res, dz, z, u, w, θ)
      alpha1 = 2*pole
      alpha0 = pole^2
 
-     # @info "Over here, we get (z0, z1, z2)"
-     # println(z0)
-     # println(z1)
-     # println(z2)
-
-     # @warn "EXTRA INSIGHT: mvecs: $(mvec1[1,1]), $(mvec1[1,2]), $(mvec1[1,3]) dvs: $(dv1[1]), $(dv1[2]), $(dv1[3])"
-
-     # OKAY PRINTING CRAZY DEBUGGING:
-     println("IN HELPER FUNCTION, SAME ORDER:")
-     @warn "EXTRA INFO, syssol: $(mysol[1:3]), u: $u"
-     print("mvec1[1,1]: ");println((mvec1*dv1)[1])
-     print("u: ");println((-b*utot[1])[1])
-     print("G-term: ");println(G_1[1])
-     print("dpsi1[3,1] first: ");println((-transpose(dpsi_1)[1,2]*κ[2])[1])
-     print("dpsi1[3,1] second: ");println((-transpose(dpsi_1)[1,3]*κ[3])[1])
-     print("dpsi1[2,1] first: ");println((-transpose(dpsi_1)[1,2]*κ[5])[1])
-     print("dpsi1[2,1] second: ");println((-transpose(dpsi_1)[1,3]*κ[6])[1])
-     print("mvec1[1,2]: ");println((mvec1*dv1)[2])
-     print("c v12^2 term: ");println((c2_1*v1[2]^2)[1])
-     print("c v13^2 term: ");println((c3_1*v1[3]^2)[1])
-     print("mvec1[1,3]: ");println((mvec1*dv1)[3])
-     print("c v12*v13 term: ");println((c5_1*v1[2]*v1[3])[1])
-     print("damping: "); println((γ*v1)[1])
-     @warn "EXTRA INFO utot: $(utot[1])"
-
-
-     # cg1 = c1_1*v1[1]^2+c2_1*v1[2]^2+c3_1*v1[3]^2+c4_1*v1[1]*v1[2]+c5_1*v1[2]*v1[3]+c6_1*v1[1]*v1[3]+G_1+γ*v1
-
      res[1:3] = dq1 - v1
      res[4:6] = dq2 - v2
      res[7:9] = dq3 - v3

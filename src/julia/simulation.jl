@@ -38,34 +38,15 @@ function delta_robot_new(Φ::Float64, u::Function, w::Function, θ::Vector{Float
         α1 = 2*pole
         α0 = pole^2
         function f!(res, dz, z, _, t)
-            # syssol = 
-            # [1.   0.   0.   0.   -L1*sin(z[1])   L1*cos(z[1])   0.   -L1*sin(z[1])   L1*cos(z[1])
-            #  0   0   0   L2*cos(z[2])*sin(z[3])   -L2*sin(z[2])   L2*cos(z[2])*cos(z[3])   L2*cos(z[2])*sin(z[3])   -L2*sin(z[2])   L2*cos(z[2])*cos(z[3])
-            #  0   0   0   L2*cos(z[3])*sin(z[2])   0   -L2*sin(z[2])*sin(z[3])   L2*cos(z[3])*sin(z[2])   0   -L2*sin(z[2])*sin(z[3])
-            #  0   1   0   -(sqrt(3)*L1*sin(z[4]))*0.5   (L1*sin(z[4]))*0.5   -L1*cos(z[4])   0   0   0
-            #  0   0   0   -(L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5   (L2*sin(z[5]))*0.5-(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5   -L2*cos(z[5])*cos(z[6])   0   0   0
-            #  0   0   0   -(L2*cos(z[6])*sin(z[5]))*0.5   -(sqrt(3)*L2*cos(z[6])*sin(z[5]))*0.5   L2*sin(z[5])*sin(z[6])   0   0   0
-            #  0   0   1   0   0   0   (sqrt(3)*L1*sin(z[7]))*0.5   (L1*sin(z[7]))*0.5   -L1*cos(z[7])
-            #  0   0   0   0   0   0   (sqrt(3)*L2*sin(z[8]))*0.5-(L2*cos(z[8])*sin(z[9]))*0.5   (L2*sin(z[8]))*0.5+(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5   -L2*cos(z[8])*cos(z[9])
-            #  0   0   0   0   0   0   -(L2*cos(z[9])*sin(z[8]))*0.5   (sqrt(3)*L2*cos(z[9])*sin(z[8]))*0.5   L2*sin(z[8])*sin(z[9])]\
-            #  [-g*cos(z[1])*(L1*(M2+M3)+LC1*M1)
-            #  -g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)
-            #  g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)
-            #  -g*cos(z[4])*(L1*(M2+M3)+LC1*M1)
-            #  -g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)
-            #  g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)
-            #  -g*cos(z[7])*(L1*(M2+M3)+LC1*M1)
-            #  -g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)
-            #  g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)]
-            syssol = 
-            [1.   0.   0.   0.   -L1*sin(z[1])   L1*cos(z[1])   0.   -L1*sin(z[1])   L1*cos(z[1])
+            syssol =
+            [1   0   0   0   -L1*sin(z[1])   L1*cos(z[1])   0   -L1*sin(z[1])   L1*cos(z[1])
              0   0   0   L2*cos(z[2])*sin(z[3])   -L2*sin(z[2])   L2*cos(z[2])*cos(z[3])   L2*cos(z[2])*sin(z[3])   -L2*sin(z[2])   L2*cos(z[2])*cos(z[3])
              0   0   0   L2*cos(z[3])*sin(z[2])   0   -L2*sin(z[2])*sin(z[3])   L2*cos(z[3])*sin(z[2])   0   -L2*sin(z[2])*sin(z[3])
-             0   1   0   -(sqrt(3)*L1*sin(z[4]))*0.5  -(L1*sin(z[4]))*0.5   -L1*cos(z[4])   0   0   0
-             0   0   0    (L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5  -(L2*sin(z[5]))*0.5-(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5   -L2*cos(z[5])*cos(z[6])   0   0   0
-             0   0   0    (L2*cos(z[6])*sin(z[5]))*0.5   -(sqrt(3)*L2*cos(z[6])*sin(z[5]))*0.5   L2*sin(z[5])*sin(z[6])   0   0   0
+             0   1   0   -(sqrt(3)*L1*sin(z[4]))*0.5   -(L1*sin(z[4]))*0.5   -L1*cos(z[4])   0   0   0
+             0   0   0   (L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5   -(L2*sin(z[5]))*0.5-(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5   -L2*cos(z[5])*cos(z[6])   0   0   0
+             0   0   0   (L2*cos(z[6])*sin(z[5]))*0.5   -(sqrt(3)*L2*cos(z[6])*sin(z[5]))*0.5   L2*sin(z[5])*sin(z[6])   0   0   0
              0   0   1   0   0   0   (sqrt(3)*L1*sin(z[7]))*0.5   -(L1*sin(z[7]))*0.5   -L1*cos(z[7])
-             0   0   0   0   0   0   (sqrt(3)*L2*sin(z[8]))*0.5-(L2*cos(z[8])*sin(z[9]))*0.5   -(L2*sin(z[8]))*0.5+(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5   -L2*cos(z[8])*cos(z[9])
+             0   0   0   0   0   0   (L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5   (sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5-(L2*sin(z[8]))*0.5   -L2*cos(z[8])*cos(z[9])
              0   0   0   0   0   0   (L2*cos(z[9])*sin(z[8]))*0.5   (sqrt(3)*L2*cos(z[9])*sin(z[8]))*0.5   L2*sin(z[8])*sin(z[9])]\
              [-g*cos(z[1])*(L1*(M2+M3)+LC1*M1)
              -g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)
@@ -79,28 +60,7 @@ function delta_robot_new(Φ::Float64, u::Function, w::Function, θ::Vector{Float
             
             # Control signal, adding gravity compensating input to user-specified input
             ut = syssol[1:3]+u(t);
-            @warn "EXTRA INFO syssol: $(syssol[1:3]), u: $(u(t)), t: $t"
 
-            # @warn "EXTRA INSIGHT: mvecs: $((J1+L1^2*(M2+M3)+LC1^2*M1)), $(L1*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))), $(- L1*cos(z[1])*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)), dvs: $(dz[10]), $(dz[11]), $(dz[12])"
-
-            println("SYMBOLIC, PRINTING TERMS OF ROW 10")
-            # println("mvec1[1,1]: $(dz[10]*(J1+L1^2*(M2+M3)+LC1^2*M1))")
-            println("mvec1[1,1]: $(dz[10]*(J1+L1^2*(M2+M3)+LC1^2*M1) + L1*dz[11]*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3])) - L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[12]*(L2*M3+LC2*M2))")
-            println("u: $(-ut[1])")
-            println("G-term: $(-g*cos(z[1])*(L1*(M2+M3)+LC1*M1))")
-            println("dpsi1[3,1] first: $(-L1*cos(z[1])*z[21])")
-            println("dpsi1[3,1] second: $(-L1*cos(z[1])*z[24])")
-            println("dpsi1[2,1] first: $(+L1*sin(z[1])*z[20])")
-            println("dpsi1[2,1] second: $(+L1*sin(z[1])*z[23])")
-            println("mvec1[1,2] $(+L1*dz[11]*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3])))")
-            println("c v12^2 term $(+L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2])))")
-            println("c v13^2 term $(-L1*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2*(L2*M3+LC2*M2))")
-            println("mvec1[1,3] $(-L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[12]*(L2*M3+LC2*M2))")
-            println("c v12*v13 term: $(-2*L1*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]*(L2*M3+LC2*M2))")
-            println("damping: $(γ*z[10])")
-            @warn "EXTRA INFO u: $(ut[1])"
-
-            # For sure the new one!
             res[1] = dz[1]-z[10]
             res[2] = dz[2]-z[11]
             res[3] = dz[3]-z[12]
@@ -136,17 +96,15 @@ function delta_robot_new(Φ::Float64, u::Function, w::Function, θ::Vector{Float
         # v2 = zeros(3)
         # v3 = zeros(3)
 
-        @info "And here u(0.0) is $(u(0.0))"
         z0, dz0 = get_delta_initial_dv(θ, u(0.0), w(0.0))
-        @info "z0 and dz0"
-        println(z0)
-        println(dz0)
 
         dvars = vcat(fill(true, 18), fill(false, 6))
         r0 = zeros(length(z0))
         f!(r0, dz0, z0, [], 0.0)
-        @info "And r0 here is: $r0"
-        println("----------------------------")
+        @info "r0 for new delta robot is: $r0"
+        f!(r0, ones(length(z0)), ones(length(dz0)), [], 0.0)
+        @info "residual for one-states: $r0"
+        println("!-----------------!")
 
         # t -> 0.0 is just a dummy function, not to be used
         Model(f!, t -> 0.0, z0, dz0, dvars, r0)
@@ -158,11 +116,7 @@ function delta_robot(Φ::Float64, u::Function, w::Function, θ::Vector{Float64})
         # NOTE: This is a funky way of doing it, passing θ to delta_robot_f!, but not to f!
         f!(res, dz, z, _, t) = delta_robot_f!(res, dz, z, u(t), w(t), θ)
 
-        @info "Here u(0.0) is $(u(0.0))"
         z0, dz0 = get_delta_initial_dv(θ, u(0.0), w(0.0))
-        @info "z0 and dz0"
-        println(z0)
-        println(dz0)
         # ϕ1 = π/6
         # ϕ2 = acos(-0.5*sqrt(3)*L1/L2 + (L3-L0)/L2)
         # ϕ3 = 0.0
@@ -177,8 +131,10 @@ function delta_robot(Φ::Float64, u::Function, w::Function, θ::Vector{Float64})
 
         r0 = zeros(length(z0))
         f!(r0, dz0, z0, [], 0.0)
-        @info "In this case r0 is $r0"
-        println("============================")
+        @info "r0 for old delta robot is: $r0"
+        f!(r0, ones(length(z0)), ones(length(dz0)), [], 0.0)
+        @info "residual for one-states: $r0"
+        println("-----------------")
 
         # t -> 0.0 is just a dummy function, not to be used
         Model(f!, t -> 0.0, z0, dz0, dvars, r0)
