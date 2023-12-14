@@ -467,10 +467,11 @@ function solve_delta(N::Int)
     L3 = θ[4]
     # delta_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->-0.4*[sin(5*t+2); sin(5*(t+0.2*π/3+2)); sin(5*(t-0.2*π/3+2))], θ)
     # delta_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), θ)
-    delta_mdl = delta_robot_new(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), θ)
+    du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
+    # delta_mdl = delta_robot_new(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
     # my_other_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), θ)
-    # delta_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), θ)
-    delta_prob = problem(delta_mdl, N, Ts)
+    delta_mdl_comp = delta_robot_gravitycomp(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
+    delta_prob = problem(delta_mdl_comp, N, Ts)
     sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
     outmat = get_delta_output(sol, θ)
 
