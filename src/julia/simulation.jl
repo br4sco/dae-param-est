@@ -163,19 +163,179 @@ function delta_robot_new(Φ::Float64, u::Function, w::Function, du0::Vector{Floa
     end
 end
 
-# TODO: Maybe just delete
-# OKAY FIGURE OUT A BETTER WAY OF DOING THIS, MAYBE DON'T OVER-OPTIMIZE YET!!
-# function robert_product(A::AbstractMatrix, B::AbstractMatrix, n::Int)
-#     w,h = size(A)
-#     out = zeros(w, (h÷n)*size(B,2))
-#     wb = w÷n
-#     hb = h÷n
-#     for i=1:wb
-#         for j=1:hb
-#             out[(i-1)*n+1:i*n,(j-1)]
-#         end
-#     end
-# end
+function delta_robot_newest(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
+    let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = θ[12], γ = θ[13]
+        pole = 5
+        α1 = 2*pole
+        α0 = pole^2
+        function f!(res, dz, z, _, t)
+            # ug_lg = BHT\G
+            ug_lg = [
+                1   0   0   0   -L1*sin(z[1])   L1*cos(z[1])   0   -L1*sin(z[1])   L1*cos(z[1])
+                0   0   0   L2*cos(z[2])*sin(z[3])   -L2*sin(z[2])   L2*cos(z[2])*cos(z[3])   L2*cos(z[2])*sin(z[3])   -L2*sin(z[2])   L2*cos(z[2])*cos(z[3])
+                0   0   0   L2*cos(z[3])*sin(z[2])   0   -L2*sin(z[2])*sin(z[3])   L2*cos(z[3])*sin(z[2])   0   -L2*sin(z[2])*sin(z[3])
+                0   1   0   -(sqrt(3)*L1*sin(z[4]))*0.5   -(L1*sin(z[4]))*0.5   -L1*cos(z[4])   0   0   0
+                0   0   0   (L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5   -(L2*sin(z[5]))*0.5-(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5   -L2*cos(z[5])*cos(z[6])   0   0   0
+                0   0   0   (L2*cos(z[6])*sin(z[5]))*0.5   -(sqrt(3)*L2*cos(z[6])*sin(z[5]))*0.5   L2*sin(z[5])*sin(z[6])   0   0   0
+                0   0   1   0   0   0   (sqrt(3)*L1*sin(z[7]))*0.5   -(L1*sin(z[7]))*0.5   -L1*cos(z[7])
+                0   0   0   0   0   0   (L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5   (sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5-(L2*sin(z[8]))*0.5   -L2*cos(z[8])*cos(z[9])
+                0   0   0   0   0   0   (L2*cos(z[9])*sin(z[8]))*0.5   (sqrt(3)*L2*cos(z[9])*sin(z[8]))*0.5   L2*sin(z[8])*sin(z[9])
+            ]\[
+                -g*cos(z[1])*(L1*(M2+M3)+LC1*M1)
+                -g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)
+                g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)
+                -g*cos(z[4])*(L1*(M2+M3)+LC1*M1)
+                -g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)
+                g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)
+                -g*cos(z[7])*(L1*(M2+M3)+LC1*M1)
+                -g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)
+                g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)
+            ]
+            ut = ug_lg[1:3] + u(t)
+
+            # Differential equations
+            res[1] = dz[1]-z[10]
+            res[2] = dz[2]-z[11]
+            res[3] = dz[3]-z[12]
+            res[4] = dz[4]-z[13]
+            res[5] = dz[5]-z[14]
+            res[6] = dz[6]-z[15]
+            res[7] = dz[7]-z[16]
+            res[8] = dz[8]-z[17]
+            res[9] = dz[9]-z[18]
+            res[10] = dz[10]*(J1+L1^2*(M2+M3)+LC1^2*M1)-ut[1]+γ*z[10]-g*cos(z[1])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[1])*z[21]-L1*cos(z[1])*z[24]+L1*sin(z[1])*z[20]+L1*sin(z[1])*z[23]+L1*dz[11]*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))+L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))-L1*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2*(L2*M3+LC2*M2)-L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[12]*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]*(L2*M3+LC2*M2)
+            res[11] = dz[11]*(J2+L2^2*M3+LC2^2*M2)+γ*z[11]+L2*sin(z[2])*z[20]+L2*sin(z[2])*z[23]-L2*cos(z[2])*cos(z[3])*z[21]-L2*cos(z[2])*cos(z[3])*z[24]-L2*cos(z[2])*sin(z[3])*z[19]-L2*cos(z[2])*sin(z[3])*z[22]+L1*dz[10]*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))-cos(z[2])*sin(z[2])*z[12]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)+L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))
+            res[12] = γ*z[12]+sin(z[2])^2*dz[12]*(J2+L2^2*M3+LC2^2*M2)-L2*cos(z[3])*sin(z[2])*z[19]-L2*cos(z[3])*sin(z[2])*z[22]+L2*sin(z[2])*sin(z[3])*z[21]+L2*sin(z[2])*sin(z[3])*z[24]+sin(2*z[2])*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)+L1*sin(z[1])*sin(z[2])*sin(z[3])*z[10]^2*(L2*M3+LC2*M2)-L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[10]*(L2*M3+LC2*M2)
+            res[13] = dz[13]*(J1+L1^2*(M2+M3)+LC1^2*M1)-ut[2]+γ*z[13]-g*cos(z[4])*(L1*(M2+M3)+LC1*M1)+L1*cos(z[4])*z[21]+(L1*sin(z[4])*z[20])*0.5+(sqrt(3)*L1*sin(z[4])*z[19])*0.5+L1*dz[14]*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))+L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))-L1*cos(z[4])*cos(z[6])*sin(z[5])*z[15]^2*(L2*M3+LC2*M2)-L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[15]*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*sin(z[6])*z[14]*z[15]*(L2*M3+LC2*M2)
+            res[14] = z[20]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)-z[19]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)+dz[14]*(J2+L2^2*M3+LC2^2*M2)+γ*z[14]+L2*cos(z[5])*cos(z[6])*z[21]+L1*dz[13]*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))-cos(z[5])*sin(z[5])*z[15]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)+L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))
+            res[15] = γ*z[15]+sin(z[5])^2*dz[15]*(J2+L2^2*M3+LC2^2*M2)-(L2*cos(z[6])*sin(z[5])*z[19])*0.5-L2*sin(z[5])*sin(z[6])*z[21]+sin(2*z[5])*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)+(sqrt(3)*L2*cos(z[6])*sin(z[5])*z[20])*0.5+L1*sin(z[4])*sin(z[5])*sin(z[6])*z[13]^2*(L2*M3+LC2*M2)-L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[13]*(L2*M3+LC2*M2)
+            res[16] = dz[16]*(J1+L1^2*(M2+M3)+LC1^2*M1)-ut[3]+γ*z[16]-g*cos(z[7])*(L1*(M2+M3)+LC1*M1)+L1*cos(z[7])*z[24]+(L1*sin(z[7])*z[23])*0.5-(sqrt(3)*L1*sin(z[7])*z[22])*0.5+L1*dz[17]*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))+L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))-L1*cos(z[7])*cos(z[9])*sin(z[8])*z[18]^2*(L2*M3+LC2*M2)-L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[18]*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*sin(z[9])*z[17]*z[18]*(L2*M3+LC2*M2)
+            res[17] = z[23]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)-z[22]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)+dz[17]*(J2+L2^2*M3+LC2^2*M2)+γ*z[17]+L2*cos(z[8])*cos(z[9])*z[24]+L1*dz[16]*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))-cos(z[8])*sin(z[8])*z[18]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)+L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))
+            res[18] = γ*z[18]+sin(z[8])^2*dz[18]*(J2+L2^2*M3+LC2^2*M2)-(L2*cos(z[9])*sin(z[8])*z[22])*0.5-L2*sin(z[8])*sin(z[9])*z[24]+sin(2*z[8])*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)-(sqrt(3)*L2*cos(z[9])*sin(z[8])*z[23])*0.5+L1*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2*(L2*M3+LC2*M2)-L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[16]*(L2*M3+LC2*M2)
+            
+            # Algebraic equations
+
+            dv = [ # inv(M)*Mv_term
+                [J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))   -L1*cos(z[1])*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)
+                 L1*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))   J2+L2^2*M3+LC2^2*M2   0
+                 -L1*cos(z[1])*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)   0   sin(z[2])^2*(J2+L2^2*M3+LC2^2*M2)]\
+                [ut[1]-γ*z[10]+g*cos(z[1])*(L1*(M2+M3)+LC1*M1)+L1*cos(z[1])*z[21]+L1*cos(z[1])*z[24]-L1*sin(z[1])*z[20]-L1*sin(z[1])*z[23]-L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))+L1*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2*(L2*M3+LC2*M2)+2*L1*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]*(L2*M3+LC2*M2)
+                 L2*cos(z[2])*cos(z[3])*z[21]-L2*sin(z[2])*z[20]-L2*sin(z[2])*z[23]-γ*z[11]+L2*cos(z[2])*cos(z[3])*z[24]+L2*cos(z[2])*sin(z[3])*z[19]+L2*cos(z[2])*sin(z[3])*z[22]+cos(z[2])*sin(z[2])*z[12]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)-L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))
+                 L2*cos(z[3])*sin(z[2])*z[19]-γ*z[12]+L2*cos(z[3])*sin(z[2])*z[22]-L2*sin(z[2])*sin(z[3])*z[21]-L2*sin(z[2])*sin(z[3])*z[24]-sin(2*z[2])*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)-L1*sin(z[1])*sin(z[2])*sin(z[3])*z[10]^2*(L2*M3+LC2*M2)]
+
+                [J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))   -L1*cos(z[4])*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)
+                 L1*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))   J2+L2^2*M3+LC2^2*M2   0
+                 -L1*cos(z[4])*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)   0   sin(z[5])^2*(J2+L2^2*M3+LC2^2*M2)]\
+                [ut[2]-γ*z[13]+g*cos(z[4])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[4])*z[21]-(L1*sin(z[4])*z[20])*0.5-(sqrt(3)*L1*sin(z[4])*z[19])*0.5-L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))+L1*cos(z[4])*cos(z[6])*sin(z[5])*z[15]^2*(L2*M3+LC2*M2)+2*L1*cos(z[4])*cos(z[5])*sin(z[6])*z[14]*z[15]*(L2*M3+LC2*M2)
+                 z[19]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)-z[20]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)-γ*z[14]-L2*cos(z[5])*cos(z[6])*z[21]+cos(z[5])*sin(z[5])*z[15]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)-L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))
+                 (L2*cos(z[6])*sin(z[5])*z[19])*0.5-γ*z[15]+L2*sin(z[5])*sin(z[6])*z[21]-sin(2*z[5])*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)-(sqrt(3)*L2*cos(z[6])*sin(z[5])*z[20])*0.5-L1*sin(z[4])*sin(z[5])*sin(z[6])*z[13]^2*(L2*M3+LC2*M2)]
+                
+                [J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))   -L1*cos(z[7])*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)
+                 L1*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))   J2+L2^2*M3+LC2^2*M2   0
+                 -L1*cos(z[7])*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)   0   sin(z[8])^2*(J2+L2^2*M3+LC2^2*M2)]\
+                [ut[3]-γ*z[16]+g*cos(z[7])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[7])*z[24]-(L1*sin(z[7])*z[23])*0.5+(sqrt(3)*L1*sin(z[7])*z[22])*0.5-L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))+L1*cos(z[7])*cos(z[9])*sin(z[8])*z[18]^2*(L2*M3+LC2*M2)+2*L1*cos(z[7])*cos(z[8])*sin(z[9])*z[17]*z[18]*(L2*M3+LC2*M2)
+                 z[22]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)-z[23]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)-γ*z[17]-L2*cos(z[8])*cos(z[9])*z[24]+cos(z[8])*sin(z[8])*z[18]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)-L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))
+                 (L2*cos(z[9])*sin(z[8])*z[22])*0.5-γ*z[18]+L2*sin(z[8])*sin(z[9])*z[24]-sin(2*z[8])*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)+(sqrt(3)*L2*cos(z[9])*sin(z[8])*z[23])*0.5-L1*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2*(L2*M3+LC2*M2)]
+                ]
+
+            res[19] = α1*(dz[5]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)+L2*cos(z[2])*sin(z[3])*dz[2]+L2*cos(z[3])*sin(z[2])*dz[3]+(L2*cos(z[6])*sin(z[5])*dz[6])*0.5-(sqrt(3)*L1*sin(z[4])*dz[4])*0.5)-z[14]*((sqrt(3)*L2*cos(z[5])*dz[5])*0.5-(L2*cos(z[5])*cos(z[6])*dz[6])*0.5+(L2*sin(z[5])*sin(z[6])*dz[5])*0.5)+dv[5]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)+α0*((sqrt(3)*(L0-L3+L1*cos(z[4])+L2*cos(z[5])))*0.5+L2*sin(z[2])*sin(z[3])+(L2*sin(z[5])*sin(z[6]))*0.5)+z[11]*(L2*cos(z[2])*cos(z[3])*dz[3]-L2*sin(z[2])*sin(z[3])*dz[2])+z[12]*(L2*cos(z[2])*cos(z[3])*dz[2]-L2*sin(z[2])*sin(z[3])*dz[3])+z[15]*((L2*cos(z[5])*cos(z[6])*dz[5])*0.5-(L2*sin(z[5])*sin(z[6])*dz[6])*0.5)+L2*cos(z[2])*sin(z[3])*dv[2]+L2*cos(z[3])*sin(z[2])*dv[3]+(L2*cos(z[6])*sin(z[5])*dv[6])*0.5-(sqrt(3)*L1*sin(z[4])*dv[4])*0.5-(sqrt(3)*L1*cos(z[4])*dz[4]*z[13])*0.5
+            res[20] = α0*((3*L0)*0.5-(3*L3)*0.5+L1*cos(z[1])+L2*cos(z[2])+(L1*cos(z[4]))*0.5+(L2*cos(z[5]))*0.5-(sqrt(3)*L2*sin(z[5])*sin(z[6]))*0.5)-dv[5]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)-z[14]*((L2*cos(z[5])*dz[5])*0.5+(sqrt(3)*L2*cos(z[5])*cos(z[6])*dz[6])*0.5-(sqrt(3)*L2*sin(z[5])*sin(z[6])*dz[5])*0.5)-α1*(dz[5]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)+L1*sin(z[1])*dz[1]+L2*sin(z[2])*dz[2]+(L1*sin(z[4])*dz[4])*0.5+(sqrt(3)*L2*cos(z[6])*sin(z[5])*dz[6])*0.5)-z[15]*((sqrt(3)*L2*cos(z[5])*cos(z[6])*dz[5])*0.5-(sqrt(3)*L2*sin(z[5])*sin(z[6])*dz[6])*0.5)-L1*sin(z[1])*dv[1]-L2*sin(z[2])*dv[2]-(L1*sin(z[4])*dv[4])*0.5-L1*cos(z[1])*dz[1]*z[10]-L2*cos(z[2])*dz[2]*z[11]-(L1*cos(z[4])*dz[4]*z[13])*0.5-(sqrt(3)*L2*cos(z[6])*sin(z[5])*dv[6])*0.5
+            res[21] = α1*(L1*cos(z[1])*dz[1]-L1*cos(z[4])*dz[4]+L2*cos(z[2])*cos(z[3])*dz[2]-L2*cos(z[5])*cos(z[6])*dz[5]-L2*sin(z[2])*sin(z[3])*dz[3]+L2*sin(z[5])*sin(z[6])*dz[6])+α0*(L1*sin(z[1])-L1*sin(z[4])+L2*cos(z[3])*sin(z[2])-L2*cos(z[6])*sin(z[5]))-z[11]*(L2*cos(z[3])*sin(z[2])*dz[2]+L2*cos(z[2])*sin(z[3])*dz[3])-z[12]*(L2*cos(z[2])*sin(z[3])*dz[2]+L2*cos(z[3])*sin(z[2])*dz[3])+z[14]*(L2*cos(z[6])*sin(z[5])*dz[5]+L2*cos(z[5])*sin(z[6])*dz[6])+z[15]*(L2*cos(z[5])*sin(z[6])*dz[5]+L2*cos(z[6])*sin(z[5])*dz[6])+L1*cos(z[1])*dv[1]-L1*cos(z[4])*dv[4]+L2*cos(z[2])*cos(z[3])*dv[2]-L2*cos(z[5])*cos(z[6])*dv[5]-L2*sin(z[2])*sin(z[3])*dv[3]+L2*sin(z[5])*sin(z[6])*dv[6]-L1*sin(z[1])*dz[1]*z[10]+L1*sin(z[4])*dz[4]*z[13]
+            res[22] = α1*(dz[8]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)+L2*cos(z[2])*sin(z[3])*dz[2]+L2*cos(z[3])*sin(z[2])*dz[3]+(L2*cos(z[9])*sin(z[8])*dz[9])*0.5+(sqrt(3)*L1*sin(z[7])*dz[7])*0.5)+z[17]*((L2*cos(z[8])*cos(z[9])*dz[9])*0.5+(sqrt(3)*L2*cos(z[8])*dz[8])*0.5-(L2*sin(z[8])*sin(z[9])*dz[8])*0.5)+dv[8]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)+α0*(L2*sin(z[2])*sin(z[3])-(sqrt(3)*(L0-L3+L1*cos(z[7])+L2*cos(z[8])))*0.5+(L2*sin(z[8])*sin(z[9]))*0.5)+z[11]*(L2*cos(z[2])*cos(z[3])*dz[3]-L2*sin(z[2])*sin(z[3])*dz[2])+z[12]*(L2*cos(z[2])*cos(z[3])*dz[2]-L2*sin(z[2])*sin(z[3])*dz[3])+z[18]*((L2*cos(z[8])*cos(z[9])*dz[8])*0.5-(L2*sin(z[8])*sin(z[9])*dz[9])*0.5)+L2*cos(z[2])*sin(z[3])*dv[2]+L2*cos(z[3])*sin(z[2])*dv[3]+(L2*cos(z[9])*sin(z[8])*dv[9])*0.5+(sqrt(3)*L1*sin(z[7])*dv[7])*0.5+(sqrt(3)*L1*cos(z[7])*dz[7]*z[16])*0.5
+            res[23] = α0*((3*L0)*0.5-(3*L3)*0.5+L1*cos(z[1])+L2*cos(z[2])+(L1*cos(z[7]))*0.5+(L2*cos(z[8]))*0.5+(sqrt(3)*L2*sin(z[8])*sin(z[9]))*0.5)-dv[8]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)-z[17]*((L2*cos(z[8])*dz[8])*0.5-(sqrt(3)*L2*cos(z[8])*cos(z[9])*dz[9])*0.5+(sqrt(3)*L2*sin(z[8])*sin(z[9])*dz[8])*0.5)-α1*(dz[8]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)+L1*sin(z[1])*dz[1]+L2*sin(z[2])*dz[2]+(L1*sin(z[7])*dz[7])*0.5-(sqrt(3)*L2*cos(z[9])*sin(z[8])*dz[9])*0.5)+z[18]*((sqrt(3)*L2*cos(z[8])*cos(z[9])*dz[8])*0.5-(sqrt(3)*L2*sin(z[8])*sin(z[9])*dz[9])*0.5)-L1*sin(z[1])*dv[1]-L2*sin(z[2])*dv[2]-(L1*sin(z[7])*dv[7])*0.5-L1*cos(z[1])*dz[1]*z[10]-L2*cos(z[2])*dz[2]*z[11]-(L1*cos(z[7])*dz[7]*z[16])*0.5+(sqrt(3)*L2*cos(z[9])*sin(z[8])*dv[9])*0.5
+            res[24] = α1*(L1*cos(z[1])*dz[1]-L1*cos(z[7])*dz[7]+L2*cos(z[2])*cos(z[3])*dz[2]-L2*cos(z[8])*cos(z[9])*dz[8]-L2*sin(z[2])*sin(z[3])*dz[3]+L2*sin(z[8])*sin(z[9])*dz[9])+α0*(L1*sin(z[1])-L1*sin(z[7])+L2*cos(z[3])*sin(z[2])-L2*cos(z[9])*sin(z[8]))-z[11]*(L2*cos(z[3])*sin(z[2])*dz[2]+L2*cos(z[2])*sin(z[3])*dz[3])-z[12]*(L2*cos(z[2])*sin(z[3])*dz[2]+L2*cos(z[3])*sin(z[2])*dz[3])+z[17]*(L2*cos(z[9])*sin(z[8])*dz[8]+L2*cos(z[8])*sin(z[9])*dz[9])+z[18]*(L2*cos(z[8])*sin(z[9])*dz[8]+L2*cos(z[9])*sin(z[8])*dz[9])+L1*cos(z[1])*dv[1]-L1*cos(z[7])*dv[7]+L2*cos(z[2])*cos(z[3])*dv[2]-L2*cos(z[8])*cos(z[9])*dv[8]-L2*sin(z[2])*sin(z[3])*dv[3]+L2*sin(z[8])*sin(z[9])*dv[9]-L1*sin(z[1])*dz[1]*z[10]+L1*sin(z[7])*dz[7]*z[16]
+
+            nothing
+        end
+
+        # z0, dz0 = get_delta_initial_dv(θ, u(0.0), w(0.0))
+        z0, dz0 = get_delta_initial_newest(θ, u(0.0), du0, w(0.0))
+
+        dvars = vcat(fill(true, 18), fill(false, 6))
+        r0 = zeros(length(z0))
+        f!(r0, dz0, z0, [], 0.0)
+        @info "r0 for newest delta robot is: $r0"
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, z0, dz0, dvars, r0)
+    end
+end
+
+function delta_robot_gravitycomp_newest(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
+    let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
+        pole = 5
+        α1 = 2*pole
+        α0 = pole^2
+        function f!(res, dz, z, _, t)
+            ut = u(t)
+
+            # Differential equations
+            res[1] = dz[1]-z[10]
+            res[2] = dz[2]-z[11]
+            res[3] = dz[3]-z[12]
+            res[4] = dz[4]-z[13]
+            res[5] = dz[5]-z[14]
+            res[6] = dz[6]-z[15]
+            res[7] = dz[7]-z[16]
+            res[8] = dz[8]-z[17]
+            res[9] = dz[9]-z[18]
+            res[10] = dz[10]*(J1+L1^2*(M2+M3)+LC1^2*M1)-ut[1]+γ*z[10]-g*cos(z[1])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[1])*z[21]-L1*cos(z[1])*z[24]+L1*sin(z[1])*z[20]+L1*sin(z[1])*z[23]+L1*dz[11]*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))+L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))-L1*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2*(L2*M3+LC2*M2)-L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[12]*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]*(L2*M3+LC2*M2)
+            res[11] = dz[11]*(J2+L2^2*M3+LC2^2*M2)+γ*z[11]+L2*sin(z[2])*z[20]+L2*sin(z[2])*z[23]-L2*cos(z[2])*cos(z[3])*z[21]-L2*cos(z[2])*cos(z[3])*z[24]-L2*cos(z[2])*sin(z[3])*z[19]-L2*cos(z[2])*sin(z[3])*z[22]+L1*dz[10]*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))-cos(z[2])*sin(z[2])*z[12]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)+L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))
+            res[12] = γ*z[12]+sin(z[2])^2*dz[12]*(J2+L2^2*M3+LC2^2*M2)-L2*cos(z[3])*sin(z[2])*z[19]-L2*cos(z[3])*sin(z[2])*z[22]+L2*sin(z[2])*sin(z[3])*z[21]+L2*sin(z[2])*sin(z[3])*z[24]+sin(2*z[2])*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)+L1*sin(z[1])*sin(z[2])*sin(z[3])*z[10]^2*(L2*M3+LC2*M2)-L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[10]*(L2*M3+LC2*M2)
+            res[13] = dz[13]*(J1+L1^2*(M2+M3)+LC1^2*M1)-ut[2]+γ*z[13]-g*cos(z[4])*(L1*(M2+M3)+LC1*M1)+L1*cos(z[4])*z[21]+(L1*sin(z[4])*z[20])*0.5+(sqrt(3)*L1*sin(z[4])*z[19])*0.5+L1*dz[14]*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))+L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))-L1*cos(z[4])*cos(z[6])*sin(z[5])*z[15]^2*(L2*M3+LC2*M2)-L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[15]*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*sin(z[6])*z[14]*z[15]*(L2*M3+LC2*M2)
+            res[14] = z[20]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)-z[19]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)+dz[14]*(J2+L2^2*M3+LC2^2*M2)+γ*z[14]+L2*cos(z[5])*cos(z[6])*z[21]+L1*dz[13]*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))-cos(z[5])*sin(z[5])*z[15]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)+L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))
+            res[15] = γ*z[15]+sin(z[5])^2*dz[15]*(J2+L2^2*M3+LC2^2*M2)-(L2*cos(z[6])*sin(z[5])*z[19])*0.5-L2*sin(z[5])*sin(z[6])*z[21]+sin(2*z[5])*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)+(sqrt(3)*L2*cos(z[6])*sin(z[5])*z[20])*0.5+L1*sin(z[4])*sin(z[5])*sin(z[6])*z[13]^2*(L2*M3+LC2*M2)-L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[13]*(L2*M3+LC2*M2)
+            res[16] = dz[16]*(J1+L1^2*(M2+M3)+LC1^2*M1)-ut[3]+γ*z[16]-g*cos(z[7])*(L1*(M2+M3)+LC1*M1)+L1*cos(z[7])*z[24]+(L1*sin(z[7])*z[23])*0.5-(sqrt(3)*L1*sin(z[7])*z[22])*0.5+L1*dz[17]*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))+L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))-L1*cos(z[7])*cos(z[9])*sin(z[8])*z[18]^2*(L2*M3+LC2*M2)-L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[18]*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*sin(z[9])*z[17]*z[18]*(L2*M3+LC2*M2)
+            res[17] = z[23]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)-z[22]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)+dz[17]*(J2+L2^2*M3+LC2^2*M2)+γ*z[17]+L2*cos(z[8])*cos(z[9])*z[24]+L1*dz[16]*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))-cos(z[8])*sin(z[8])*z[18]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)+L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))
+            res[18] = γ*z[18]+sin(z[8])^2*dz[18]*(J2+L2^2*M3+LC2^2*M2)-(L2*cos(z[9])*sin(z[8])*z[22])*0.5-L2*sin(z[8])*sin(z[9])*z[24]+sin(2*z[8])*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)-(sqrt(3)*L2*cos(z[9])*sin(z[8])*z[23])*0.5+L1*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2*(L2*M3+LC2*M2)-L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[16]*(L2*M3+LC2*M2)
+            
+            # Algebraic equations
+
+            dv = [ # inv(M)*Mv_term
+                [J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))   -L1*cos(z[1])*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)
+                 L1*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))   J2+L2^2*M3+LC2^2*M2   0
+                 -L1*cos(z[1])*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)   0   sin(z[2])^2*(J2+L2^2*M3+LC2^2*M2)]\
+                [ut[1]-γ*z[10]+g*cos(z[1])*(L1*(M2+M3)+LC1*M1)+L1*cos(z[1])*z[21]+L1*cos(z[1])*z[24]-L1*sin(z[1])*z[20]-L1*sin(z[1])*z[23]-L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))+L1*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2*(L2*M3+LC2*M2)+2*L1*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]*(L2*M3+LC2*M2)
+                 L2*cos(z[2])*cos(z[3])*z[21]-L2*sin(z[2])*z[20]-L2*sin(z[2])*z[23]-γ*z[11]+L2*cos(z[2])*cos(z[3])*z[24]+L2*cos(z[2])*sin(z[3])*z[19]+L2*cos(z[2])*sin(z[3])*z[22]+cos(z[2])*sin(z[2])*z[12]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)-L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))
+                 L2*cos(z[3])*sin(z[2])*z[19]-γ*z[12]+L2*cos(z[3])*sin(z[2])*z[22]-L2*sin(z[2])*sin(z[3])*z[21]-L2*sin(z[2])*sin(z[3])*z[24]-sin(2*z[2])*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)-L1*sin(z[1])*sin(z[2])*sin(z[3])*z[10]^2*(L2*M3+LC2*M2)]
+
+                [J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))   -L1*cos(z[4])*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)
+                 L1*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))   J2+L2^2*M3+LC2^2*M2   0
+                 -L1*cos(z[4])*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)   0   sin(z[5])^2*(J2+L2^2*M3+LC2^2*M2)]\
+                [ut[2]-γ*z[13]+g*cos(z[4])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[4])*z[21]-(L1*sin(z[4])*z[20])*0.5-(sqrt(3)*L1*sin(z[4])*z[19])*0.5-L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))+L1*cos(z[4])*cos(z[6])*sin(z[5])*z[15]^2*(L2*M3+LC2*M2)+2*L1*cos(z[4])*cos(z[5])*sin(z[6])*z[14]*z[15]*(L2*M3+LC2*M2)
+                 z[19]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)-z[20]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)-γ*z[14]-L2*cos(z[5])*cos(z[6])*z[21]+cos(z[5])*sin(z[5])*z[15]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)-L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))
+                 (L2*cos(z[6])*sin(z[5])*z[19])*0.5-γ*z[15]+L2*sin(z[5])*sin(z[6])*z[21]-sin(2*z[5])*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)-(sqrt(3)*L2*cos(z[6])*sin(z[5])*z[20])*0.5-L1*sin(z[4])*sin(z[5])*sin(z[6])*z[13]^2*(L2*M3+LC2*M2)]
+                
+                [J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))   -L1*cos(z[7])*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)
+                 L1*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))   J2+L2^2*M3+LC2^2*M2   0
+                 -L1*cos(z[7])*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)   0   sin(z[8])^2*(J2+L2^2*M3+LC2^2*M2)]\
+                [ut[3]-γ*z[16]+g*cos(z[7])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[7])*z[24]-(L1*sin(z[7])*z[23])*0.5+(sqrt(3)*L1*sin(z[7])*z[22])*0.5-L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))+L1*cos(z[7])*cos(z[9])*sin(z[8])*z[18]^2*(L2*M3+LC2*M2)+2*L1*cos(z[7])*cos(z[8])*sin(z[9])*z[17]*z[18]*(L2*M3+LC2*M2)
+                 z[22]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)-z[23]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)-γ*z[17]-L2*cos(z[8])*cos(z[9])*z[24]+cos(z[8])*sin(z[8])*z[18]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)-L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))
+                 (L2*cos(z[9])*sin(z[8])*z[22])*0.5-γ*z[18]+L2*sin(z[8])*sin(z[9])*z[24]-sin(2*z[8])*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)+(sqrt(3)*L2*cos(z[9])*sin(z[8])*z[23])*0.5-L1*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2*(L2*M3+LC2*M2)]
+                ]
+
+            res[19] = α1*(dz[5]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)+L2*cos(z[2])*sin(z[3])*dz[2]+L2*cos(z[3])*sin(z[2])*dz[3]+(L2*cos(z[6])*sin(z[5])*dz[6])*0.5-(sqrt(3)*L1*sin(z[4])*dz[4])*0.5)-z[14]*((sqrt(3)*L2*cos(z[5])*dz[5])*0.5-(L2*cos(z[5])*cos(z[6])*dz[6])*0.5+(L2*sin(z[5])*sin(z[6])*dz[5])*0.5)+dv[5]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)+α0*((sqrt(3)*(L0-L3+L1*cos(z[4])+L2*cos(z[5])))*0.5+L2*sin(z[2])*sin(z[3])+(L2*sin(z[5])*sin(z[6]))*0.5)+z[11]*(L2*cos(z[2])*cos(z[3])*dz[3]-L2*sin(z[2])*sin(z[3])*dz[2])+z[12]*(L2*cos(z[2])*cos(z[3])*dz[2]-L2*sin(z[2])*sin(z[3])*dz[3])+z[15]*((L2*cos(z[5])*cos(z[6])*dz[5])*0.5-(L2*sin(z[5])*sin(z[6])*dz[6])*0.5)+L2*cos(z[2])*sin(z[3])*dv[2]+L2*cos(z[3])*sin(z[2])*dv[3]+(L2*cos(z[6])*sin(z[5])*dv[6])*0.5-(sqrt(3)*L1*sin(z[4])*dv[4])*0.5-(sqrt(3)*L1*cos(z[4])*dz[4]*z[13])*0.5
+            res[20] = α0*((3*L0)*0.5-(3*L3)*0.5+L1*cos(z[1])+L2*cos(z[2])+(L1*cos(z[4]))*0.5+(L2*cos(z[5]))*0.5-(sqrt(3)*L2*sin(z[5])*sin(z[6]))*0.5)-dv[5]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)-z[14]*((L2*cos(z[5])*dz[5])*0.5+(sqrt(3)*L2*cos(z[5])*cos(z[6])*dz[6])*0.5-(sqrt(3)*L2*sin(z[5])*sin(z[6])*dz[5])*0.5)-α1*(dz[5]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)+L1*sin(z[1])*dz[1]+L2*sin(z[2])*dz[2]+(L1*sin(z[4])*dz[4])*0.5+(sqrt(3)*L2*cos(z[6])*sin(z[5])*dz[6])*0.5)-z[15]*((sqrt(3)*L2*cos(z[5])*cos(z[6])*dz[5])*0.5-(sqrt(3)*L2*sin(z[5])*sin(z[6])*dz[6])*0.5)-L1*sin(z[1])*dv[1]-L2*sin(z[2])*dv[2]-(L1*sin(z[4])*dv[4])*0.5-L1*cos(z[1])*dz[1]*z[10]-L2*cos(z[2])*dz[2]*z[11]-(L1*cos(z[4])*dz[4]*z[13])*0.5-(sqrt(3)*L2*cos(z[6])*sin(z[5])*dv[6])*0.5
+            res[21] = α1*(L1*cos(z[1])*dz[1]-L1*cos(z[4])*dz[4]+L2*cos(z[2])*cos(z[3])*dz[2]-L2*cos(z[5])*cos(z[6])*dz[5]-L2*sin(z[2])*sin(z[3])*dz[3]+L2*sin(z[5])*sin(z[6])*dz[6])+α0*(L1*sin(z[1])-L1*sin(z[4])+L2*cos(z[3])*sin(z[2])-L2*cos(z[6])*sin(z[5]))-z[11]*(L2*cos(z[3])*sin(z[2])*dz[2]+L2*cos(z[2])*sin(z[3])*dz[3])-z[12]*(L2*cos(z[2])*sin(z[3])*dz[2]+L2*cos(z[3])*sin(z[2])*dz[3])+z[14]*(L2*cos(z[6])*sin(z[5])*dz[5]+L2*cos(z[5])*sin(z[6])*dz[6])+z[15]*(L2*cos(z[5])*sin(z[6])*dz[5]+L2*cos(z[6])*sin(z[5])*dz[6])+L1*cos(z[1])*dv[1]-L1*cos(z[4])*dv[4]+L2*cos(z[2])*cos(z[3])*dv[2]-L2*cos(z[5])*cos(z[6])*dv[5]-L2*sin(z[2])*sin(z[3])*dv[3]+L2*sin(z[5])*sin(z[6])*dv[6]-L1*sin(z[1])*dz[1]*z[10]+L1*sin(z[4])*dz[4]*z[13]
+            res[22] = α1*(dz[8]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)+L2*cos(z[2])*sin(z[3])*dz[2]+L2*cos(z[3])*sin(z[2])*dz[3]+(L2*cos(z[9])*sin(z[8])*dz[9])*0.5+(sqrt(3)*L1*sin(z[7])*dz[7])*0.5)+z[17]*((L2*cos(z[8])*cos(z[9])*dz[9])*0.5+(sqrt(3)*L2*cos(z[8])*dz[8])*0.5-(L2*sin(z[8])*sin(z[9])*dz[8])*0.5)+dv[8]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)+α0*(L2*sin(z[2])*sin(z[3])-(sqrt(3)*(L0-L3+L1*cos(z[7])+L2*cos(z[8])))*0.5+(L2*sin(z[8])*sin(z[9]))*0.5)+z[11]*(L2*cos(z[2])*cos(z[3])*dz[3]-L2*sin(z[2])*sin(z[3])*dz[2])+z[12]*(L2*cos(z[2])*cos(z[3])*dz[2]-L2*sin(z[2])*sin(z[3])*dz[3])+z[18]*((L2*cos(z[8])*cos(z[9])*dz[8])*0.5-(L2*sin(z[8])*sin(z[9])*dz[9])*0.5)+L2*cos(z[2])*sin(z[3])*dv[2]+L2*cos(z[3])*sin(z[2])*dv[3]+(L2*cos(z[9])*sin(z[8])*dv[9])*0.5+(sqrt(3)*L1*sin(z[7])*dv[7])*0.5+(sqrt(3)*L1*cos(z[7])*dz[7]*z[16])*0.5
+            res[23] = α0*((3*L0)*0.5-(3*L3)*0.5+L1*cos(z[1])+L2*cos(z[2])+(L1*cos(z[7]))*0.5+(L2*cos(z[8]))*0.5+(sqrt(3)*L2*sin(z[8])*sin(z[9]))*0.5)-dv[8]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)-z[17]*((L2*cos(z[8])*dz[8])*0.5-(sqrt(3)*L2*cos(z[8])*cos(z[9])*dz[9])*0.5+(sqrt(3)*L2*sin(z[8])*sin(z[9])*dz[8])*0.5)-α1*(dz[8]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)+L1*sin(z[1])*dz[1]+L2*sin(z[2])*dz[2]+(L1*sin(z[7])*dz[7])*0.5-(sqrt(3)*L2*cos(z[9])*sin(z[8])*dz[9])*0.5)+z[18]*((sqrt(3)*L2*cos(z[8])*cos(z[9])*dz[8])*0.5-(sqrt(3)*L2*sin(z[8])*sin(z[9])*dz[9])*0.5)-L1*sin(z[1])*dv[1]-L2*sin(z[2])*dv[2]-(L1*sin(z[7])*dv[7])*0.5-L1*cos(z[1])*dz[1]*z[10]-L2*cos(z[2])*dz[2]*z[11]-(L1*cos(z[7])*dz[7]*z[16])*0.5+(sqrt(3)*L2*cos(z[9])*sin(z[8])*dv[9])*0.5
+            res[24] = α1*(L1*cos(z[1])*dz[1]-L1*cos(z[7])*dz[7]+L2*cos(z[2])*cos(z[3])*dz[2]-L2*cos(z[8])*cos(z[9])*dz[8]-L2*sin(z[2])*sin(z[3])*dz[3]+L2*sin(z[8])*sin(z[9])*dz[9])+α0*(L1*sin(z[1])-L1*sin(z[7])+L2*cos(z[3])*sin(z[2])-L2*cos(z[9])*sin(z[8]))-z[11]*(L2*cos(z[3])*sin(z[2])*dz[2]+L2*cos(z[2])*sin(z[3])*dz[3])-z[12]*(L2*cos(z[2])*sin(z[3])*dz[2]+L2*cos(z[3])*sin(z[2])*dz[3])+z[17]*(L2*cos(z[9])*sin(z[8])*dz[8]+L2*cos(z[8])*sin(z[9])*dz[9])+z[18]*(L2*cos(z[8])*sin(z[9])*dz[8]+L2*cos(z[9])*sin(z[8])*dz[9])+L1*cos(z[1])*dv[1]-L1*cos(z[7])*dv[7]+L2*cos(z[2])*cos(z[3])*dv[2]-L2*cos(z[8])*cos(z[9])*dv[8]-L2*sin(z[2])*sin(z[3])*dv[3]+L2*sin(z[8])*sin(z[9])*dv[9]-L1*sin(z[1])*dz[1]*z[10]+L1*sin(z[7])*dz[7]*z[16]
+
+            nothing
+        end
+
+        # z0, dz0 = get_delta_initial_dv(θ, u(0.0), w(0.0))
+        z0, dz0 = get_delta_initial_comp_newest(θ, u(0.0), du0, w(0.0))
+
+        dvars = vcat(fill(true, 18), fill(false, 6))
+        r0 = zeros(length(z0))
+        f!(r0, dz0, z0, [], 0.0)
+        @info "r0 for newest delta robot is: $r0"
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, z0, dz0, dvars, r0)
+    end
+end
 
 # Robert product, very inefficient implementation (actually is it that inefficient?)
 function rp(A::AbstractMatrix, B::AbstractMatrix)
@@ -465,6 +625,7 @@ function delta_robot_gravitycomp(Φ::Float64, u::Function, w::Function, du0::Vec
             res[17] = z[23]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)-z[22]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)+dz[17]*(J2+L2^2*M3+LC2^2*M2)+γ*z[17]+L2*cos(z[8])*cos(z[9])*z[24]+L1*dz[16]*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))-cos(z[8])*sin(z[8])*z[18]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)+L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))
             res[18] = γ*z[18]+sin(z[8])^2*dz[18]*(J2+L2^2*M3+LC2^2*M2)-(L2*cos(z[9])*sin(z[8])*z[22])*0.5-L2*sin(z[8])*sin(z[9])*z[24]+sin(2*z[8])*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)-(sqrt(3)*L2*cos(z[9])*sin(z[8])*z[23])*0.5+L1*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2*(L2*M3+LC2*M2)-L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[16]*(L2*M3+LC2*M2)
             res[19:24] = z2 + a1z1_a0z0
+
             nothing
         end
 
@@ -473,8 +634,8 @@ function delta_robot_gravitycomp(Φ::Float64, u::Function, w::Function, du0::Vec
 
         dvars = vcat(fill(true, 18), fill(false, 6))
         r0 = zeros(length(z0))
-        # f!(r0, dz0, z0, [], 0.0)
-        # @info "r0 for new delta robot is: $r0"
+        f!(r0, dz0, z0, [], 0.0)
+        @info "r0 for new delta robot is: $r0"
 
         # t -> 0.0 is just a dummy function, not to be used
         Model(f!, t -> 0.0, z0, dz0, dvars, r0)
@@ -894,13 +1055,6 @@ function get_delta_initial_J1sens_comp(θ, ut0, du0, w0)
 
     # TODO: THIS ISN'T QUITE RIGHT SINCE WE HAVEN'T INITIALIZED \dot{\kappa}_p, IT SHOULDN'T BE ZERO!
 
-    ########################################################
-    ###CRAZY DEBUG TIIIIIMEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE###
-    ########################################################
-    mything = Mp*dz[10:18] + M*dz[24+10:24+18]
-    @info "mything should be approximately zero but it is: $(mything)"
-    ########################################################
-
     return z, dz
 end
 
@@ -1071,6 +1225,285 @@ function get_delta_initial(θ, ut0, du0, w0)
         - ((dH/M - (H/M)*(dM/M))*transpose(H) + (H/M)*transpose(dH))*z[19:24])      # - Green term * κ
 
     return z, dz
+end
+
+function get_delta_initial_newest(θ, ut0, dut0, w0)
+    let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = θ[12], γ = θ[13]
+
+        z  = zeros(24)
+        dz = zeros(24)
+        z[1:3] = [π/6; acos(-0.5*sqrt(3)*L1/L2 + (L3-L0)/L2); 0.0]
+        z[4:6] = [π/6; acos(-0.5*sqrt(3)*L1/L2 + (L3-L0)/L2); 0.0]
+        z[7:9] = [π/6; acos(-0.5*sqrt(3)*L1/L2 + (L3-L0)/L2); 0.0]
+
+        # Computing gravity compensating input
+        BHT = [
+            1   0   0   0   -L1*sin(z[1])   L1*cos(z[1])   0   -L1*sin(z[1])   L1*cos(z[1])
+            0   0   0   L2*cos(z[2])*sin(z[3])   -L2*sin(z[2])   L2*cos(z[2])*cos(z[3])   L2*cos(z[2])*sin(z[3])   -L2*sin(z[2])   L2*cos(z[2])*cos(z[3])
+            0   0   0   L2*cos(z[3])*sin(z[2])   0   -L2*sin(z[2])*sin(z[3])   L2*cos(z[3])*sin(z[2])   0   -L2*sin(z[2])*sin(z[3])
+            0   1   0   -(sqrt(3)*L1*sin(z[4]))*0.5   -(L1*sin(z[4]))*0.5   -L1*cos(z[4])   0   0   0
+            0   0   0   (L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5   -(L2*sin(z[5]))*0.5-(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5   -L2*cos(z[5])*cos(z[6])   0   0   0
+            0   0   0   (L2*cos(z[6])*sin(z[5]))*0.5   -(sqrt(3)*L2*cos(z[6])*sin(z[5]))*0.5   L2*sin(z[5])*sin(z[6])   0   0   0
+            0   0   1   0   0   0   (sqrt(3)*L1*sin(z[7]))*0.5   -(L1*sin(z[7]))*0.5   -L1*cos(z[7])
+            0   0   0   0   0   0   (L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5   (sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5-(L2*sin(z[8]))*0.5   -L2*cos(z[8])*cos(z[9])
+            0   0   0   0   0   0   (L2*cos(z[9])*sin(z[8]))*0.5   (sqrt(3)*L2*cos(z[9])*sin(z[8]))*0.5   L2*sin(z[8])*sin(z[9])
+        ]
+        # ug_lg = BHT\G
+        ug_lg = BHT\[
+            -g*cos(z[1])*(L1*(M2+M3)+LC1*M1)
+            -g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)
+            g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)
+            -g*cos(z[4])*(L1*(M2+M3)+LC1*M1)
+            -g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)
+            g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)
+            -g*cos(z[7])*(L1*(M2+M3)+LC1*M1)
+            -g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)
+            g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)
+        ]
+
+        dH = [
+            0   L2*cos(z[2])*cos(z[3])*dz[3]-L2*sin(z[2])*sin(z[3])*dz[2]   L2*cos(z[2])*cos(z[3])*dz[2]-L2*sin(z[2])*sin(z[3])*dz[3]   -(sqrt(3)*L1*cos(z[4])*dz[4])*0.5   (L2*cos(z[5])*cos(z[6])*dz[6])*0.5-(sqrt(3)*L2*cos(z[5])*dz[5])*0.5-(L2*sin(z[5])*sin(z[6])*dz[5])*0.5   (L2*cos(z[5])*cos(z[6])*dz[5])*0.5-(L2*sin(z[5])*sin(z[6])*dz[6])*0.5   0   0   0
+            -L1*cos(z[1])*dz[1]   -L2*cos(z[2])*dz[2]   0   -(L1*cos(z[4])*dz[4])*0.5   (sqrt(3)*L2*sin(z[5])*sin(z[6])*dz[5])*0.5-(sqrt(3)*L2*cos(z[5])*cos(z[6])*dz[6])*0.5-(L2*cos(z[5])*dz[5])*0.5   (sqrt(3)*L2*sin(z[5])*sin(z[6])*dz[6])*0.5-(sqrt(3)*L2*cos(z[5])*cos(z[6])*dz[5])*0.5   0   0   0
+            -L1*sin(z[1])*dz[1]   -L2*cos(z[3])*sin(z[2])*dz[2]-L2*cos(z[2])*sin(z[3])*dz[3]   -L2*cos(z[2])*sin(z[3])*dz[2]-L2*cos(z[3])*sin(z[2])*dz[3]   L1*sin(z[4])*dz[4]   L2*cos(z[6])*sin(z[5])*dz[5]+L2*cos(z[5])*sin(z[6])*dz[6]   L2*cos(z[5])*sin(z[6])*dz[5]+L2*cos(z[6])*sin(z[5])*dz[6]   0   0   0
+            0   L2*cos(z[2])*cos(z[3])*dz[3]-L2*sin(z[2])*sin(z[3])*dz[2]   L2*cos(z[2])*cos(z[3])*dz[2]-L2*sin(z[2])*sin(z[3])*dz[3]   0   0   0   (sqrt(3)*L1*cos(z[7])*dz[7])*0.5   (L2*cos(z[8])*cos(z[9])*dz[9])*0.5+(sqrt(3)*L2*cos(z[8])*dz[8])*0.5-(L2*sin(z[8])*sin(z[9])*dz[8])*0.5   (L2*cos(z[8])*cos(z[9])*dz[8])*0.5-(L2*sin(z[8])*sin(z[9])*dz[9])*0.5
+            -L1*cos(z[1])*dz[1]   -L2*cos(z[2])*dz[2]   0   0   0   0   -(L1*cos(z[7])*dz[7])*0.5   (sqrt(3)*L2*cos(z[8])*cos(z[9])*dz[9])*0.5-(L2*cos(z[8])*dz[8])*0.5-(sqrt(3)*L2*sin(z[8])*sin(z[9])*dz[8])*0.5   (sqrt(3)*L2*cos(z[8])*cos(z[9])*dz[8])*0.5-(sqrt(3)*L2*sin(z[8])*sin(z[9])*dz[9])*0.5
+            -L1*sin(z[1])*dz[1]   -L2*cos(z[3])*sin(z[2])*dz[2]-L2*cos(z[2])*sin(z[3])*dz[3]   -L2*cos(z[2])*sin(z[3])*dz[2]-L2*cos(z[3])*sin(z[2])*dz[3]   0   0   0   L1*sin(z[7])*dz[7]   L2*cos(z[9])*sin(z[8])*dz[8]+L2*cos(z[8])*sin(z[9])*dz[9]   L2*cos(z[8])*sin(z[9])*dz[8]+L2*cos(z[9])*sin(z[8])*dz[9]
+        ]
+
+        dug_dlg = BHT\([    #dug_dlg = inv(BHT)*(dG-transpose(dH)*lg)
+            g*sin(z[1])*dz[1]*(L1*(M2+M3)+LC1*M1)
+            g*cos(z[3])*sin(z[2])*dz[2]*(L2*M3+LC2*M2)+g*cos(z[2])*sin(z[3])*dz[3]*(L2*M3+LC2*M2)
+            g*cos(z[2])*sin(z[3])*dz[2]*(L2*M3+LC2*M2)+g*cos(z[3])*sin(z[2])*dz[3]*(L2*M3+LC2*M2)
+            g*sin(z[4])*dz[4]*(L1*(M2+M3)+LC1*M1)
+            g*cos(z[6])*sin(z[5])*dz[5]*(L2*M3+LC2*M2)+g*cos(z[5])*sin(z[6])*dz[6]*(L2*M3+LC2*M2)
+            g*cos(z[5])*sin(z[6])*dz[5]*(L2*M3+LC2*M2)+g*cos(z[6])*sin(z[5])*dz[6]*(L2*M3+LC2*M2)
+            g*sin(z[7])*dz[7]*(L1*(M2+M3)+LC1*M1)
+            g*cos(z[9])*sin(z[8])*dz[8]*(L2*M3+LC2*M2)+g*cos(z[8])*sin(z[9])*dz[9]*(L2*M3+LC2*M2)
+            g*cos(z[8])*sin(z[9])*dz[8]*(L2*M3+LC2*M2)+g*cos(z[9])*sin(z[8])*dz[9]*(L2*M3+LC2*M2)
+        ]-transpose(dH)*ug_lg[4:9])
+
+        u0 = ug_lg[1:3] + ut0
+        du0 = dug_dlg[1:3] + dut0
+
+        H = [
+            0   L2*cos(z[2])*sin(z[3])   L2*cos(z[3])*sin(z[2])   -(sqrt(3)*L1*sin(z[4]))*0.5   (L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5   (L2*cos(z[6])*sin(z[5]))*0.5   0   0   0
+            -L1*sin(z[1])   -L2*sin(z[2])   0   -(L1*sin(z[4]))*0.5   -(L2*sin(z[5]))*0.5-(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5   -(sqrt(3)*L2*cos(z[6])*sin(z[5]))*0.5   0   0   0
+            L1*cos(z[1])   L2*cos(z[2])*cos(z[3])   -L2*sin(z[2])*sin(z[3])   -L1*cos(z[4])   -L2*cos(z[5])*cos(z[6])   L2*sin(z[5])*sin(z[6])   0   0   0
+            0   L2*cos(z[2])*sin(z[3])   L2*cos(z[3])*sin(z[2])   0   0   0   (sqrt(3)*L1*sin(z[7]))*0.5   (L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5   (L2*cos(z[9])*sin(z[8]))*0.5
+            -L1*sin(z[1])   -L2*sin(z[2])   0   0   0   0   -(L1*sin(z[7]))*0.5   (sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5-(L2*sin(z[8]))*0.5   (sqrt(3)*L2*cos(z[9])*sin(z[8]))*0.5
+            L1*cos(z[1])   L2*cos(z[2])*cos(z[3])   -L2*sin(z[2])*sin(z[3])   0   0   0   -L1*cos(z[7])   -L2*cos(z[8])*cos(z[9])   L2*sin(z[8])*sin(z[9])
+        ]
+
+        m1 = [
+            J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))   -L1*cos(z[1])*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)
+            L1*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))   J2+L2^2*M3+LC2^2*M2   0
+            -L1*cos(z[1])*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)   0   sin(z[2])^2*(J2+L2^2*M3+LC2^2*M2)
+        ]
+        m2 = [
+            J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))   -L1*cos(z[4])*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)
+            L1*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))   J2+L2^2*M3+LC2^2*M2   0
+            -L1*cos(z[4])*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)   0   sin(z[5])^2*(J2+L2^2*M3+LC2^2*M2)
+        ]
+        m3 = [
+            J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))   -L1*cos(z[7])*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)
+            L1*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))   J2+L2^2*M3+LC2^2*M2   0
+            -L1*cos(z[7])*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)   0   sin(z[8])^2*(J2+L2^2*M3+LC2^2*M2)
+        ]
+
+        HinvM = [
+            H[:,1:3]/m1   H[:,4:6]/m2   H[:,7:9]/m3
+        ]
+
+        cgBu = [
+            γ*z[10]-u0[1]-g*cos(z[1])*(L1*(M2+M3)+LC1*M1)+L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))-L1*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]*(L2*M3+LC2*M2)
+            γ*z[11]-cos(z[2])*sin(z[2])*z[12]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)+L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))
+            γ*z[12]+sin(2*z[2])*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)+L1*sin(z[1])*sin(z[2])*sin(z[3])*z[10]^2*(L2*M3+LC2*M2)
+            γ*z[13]-u0[2]-g*cos(z[4])*(L1*(M2+M3)+LC1*M1)+L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))-L1*cos(z[4])*cos(z[6])*sin(z[5])*z[15]^2*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*sin(z[6])*z[14]*z[15]*(L2*M3+LC2*M2)
+            γ*z[14]-cos(z[5])*sin(z[5])*z[15]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)+L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))
+            γ*z[15]+sin(2*z[5])*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)+L1*sin(z[4])*sin(z[5])*sin(z[6])*z[13]^2*(L2*M3+LC2*M2)
+            γ*z[16]-u0[3]-g*cos(z[7])*(L1*(M2+M3)+LC1*M1)+L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))-L1*cos(z[7])*cos(z[9])*sin(z[8])*z[18]^2*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*sin(z[9])*z[17]*z[18]*(L2*M3+LC2*M2)
+            γ*z[17]-cos(z[8])*sin(z[8])*z[18]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)+L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))
+            γ*z[18]+sin(2*z[8])*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)+L1*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2*(L2*M3+LC2*M2)
+        ]
+
+        # κ = (HinvM*transpose(H))\(HinvM*cgBu)
+        z[19:24] = (HinvM*transpose(H))\(HinvM*cgBu)
+
+        # dv = inv(M)*Mvterm
+        dz[10:18] = [
+            m1\[
+                u0[1]-γ*z[10]+g*cos(z[1])*(L1*(M2+M3)+LC1*M1)+L1*cos(z[1])*z[21]+L1*cos(z[1])*z[24]-L1*sin(z[1])*z[20]-L1*sin(z[1])*z[23]-L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))+L1*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2*(L2*M3+LC2*M2)+2*L1*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]*(L2*M3+LC2*M2)
+                L2*cos(z[2])*cos(z[3])*z[21]-L2*sin(z[2])*z[20]-L2*sin(z[2])*z[23]-γ*z[11]+L2*cos(z[2])*cos(z[3])*z[24]+L2*cos(z[2])*sin(z[3])*z[19]+L2*cos(z[2])*sin(z[3])*z[22]+cos(z[2])*sin(z[2])*z[12]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)-L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))
+                L2*cos(z[3])*sin(z[2])*z[19]-γ*z[12]+L2*cos(z[3])*sin(z[2])*z[22]-L2*sin(z[2])*sin(z[3])*z[21]-L2*sin(z[2])*sin(z[3])*z[24]-sin(2*z[2])*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)-L1*sin(z[1])*sin(z[2])*sin(z[3])*z[10]^2*(L2*M3+LC2*M2)
+            ]
+            m2\[
+                u0[2]-γ*z[13]+g*cos(z[4])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[4])*z[21]-(L1*sin(z[4])*z[20])*0.5-(sqrt(3)*L1*sin(z[4])*z[19])*0.5-L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))+L1*cos(z[4])*cos(z[6])*sin(z[5])*z[15]^2*(L2*M3+LC2*M2)+2*L1*cos(z[4])*cos(z[5])*sin(z[6])*z[14]*z[15]*(L2*M3+LC2*M2)
+                z[19]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)-z[20]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)-γ*z[14]-L2*cos(z[5])*cos(z[6])*z[21]+cos(z[5])*sin(z[5])*z[15]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)-L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))
+                (L2*cos(z[6])*sin(z[5])*z[19])*0.5-γ*z[15]+L2*sin(z[5])*sin(z[6])*z[21]-sin(2*z[5])*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)-(sqrt(3)*L2*cos(z[6])*sin(z[5])*z[20])*0.5-L1*sin(z[4])*sin(z[5])*sin(z[6])*z[13]^2*(L2*M3+LC2*M2)
+            ]
+            m3\[
+                u0[3]-γ*z[16]+g*cos(z[7])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[7])*z[24]-(L1*sin(z[7])*z[23])*0.5+(sqrt(3)*L1*sin(z[7])*z[22])*0.5-L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))+L1*cos(z[7])*cos(z[9])*sin(z[8])*z[18]^2*(L2*M3+LC2*M2)+2*L1*cos(z[7])*cos(z[8])*sin(z[9])*z[17]*z[18]*(L2*M3+LC2*M2)
+                z[22]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)-z[23]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)-γ*z[17]-L2*cos(z[8])*cos(z[9])*z[24]+cos(z[8])*sin(z[8])*z[18]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)-L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))
+                (L2*cos(z[9])*sin(z[8])*z[22])*0.5-γ*z[18]+L2*sin(z[8])*sin(z[9])*z[24]-sin(2*z[8])*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)+(sqrt(3)*L2*cos(z[9])*sin(z[8])*z[23])*0.5-L1*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2*(L2*M3+LC2*M2)
+            ]
+        ]
+
+        # ---------------------- Initializing dκ ----------------------
+        dM = [
+            0   -L1*(L2*M3+LC2*M2)*(cos(z[2])*cos(z[3])*sin(z[1])*dz[1]-cos(z[2])*sin(z[1])*dz[2]-cos(z[1])*sin(z[2])*dz[1]+cos(z[1])*cos(z[3])*sin(z[2])*dz[2]+cos(z[1])*cos(z[2])*sin(z[3])*dz[3])   L1*sin(z[1])*sin(z[2])*sin(z[3])*dz[1]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[3])*sin(z[2])*dz[3]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[2])*sin(z[3])*dz[2]*(L2*M3+LC2*M2)   0   0   0   0   0   0
+            -L1*(L2*M3+LC2*M2)*(cos(z[2])*cos(z[3])*sin(z[1])*dz[1]-cos(z[2])*sin(z[1])*dz[2]-cos(z[1])*sin(z[2])*dz[1]+cos(z[1])*cos(z[3])*sin(z[2])*dz[2]+cos(z[1])*cos(z[2])*sin(z[3])*dz[3])   0   0   0   0   0   0   0   0
+            L1*sin(z[1])*sin(z[2])*sin(z[3])*dz[1]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[3])*sin(z[2])*dz[3]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[2])*sin(z[3])*dz[2]*(L2*M3+LC2*M2)   0   2*cos(z[2])*sin(z[2])*dz[2]*(J2+L2^2*M3+LC2^2*M2)   0   0   0   0   0   0
+            0   0   0   0   -L1*(L2*M3+LC2*M2)*(cos(z[5])*cos(z[6])*sin(z[4])*dz[4]-cos(z[5])*sin(z[4])*dz[5]-cos(z[4])*sin(z[5])*dz[4]+cos(z[4])*cos(z[6])*sin(z[5])*dz[5]+cos(z[4])*cos(z[5])*sin(z[6])*dz[6])   L1*sin(z[4])*sin(z[5])*sin(z[6])*dz[4]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[6])*sin(z[5])*dz[6]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[5])*sin(z[6])*dz[5]*(L2*M3+LC2*M2)   0   0   0
+            0   0   0   -L1*(L2*M3+LC2*M2)*(cos(z[5])*cos(z[6])*sin(z[4])*dz[4]-cos(z[5])*sin(z[4])*dz[5]-cos(z[4])*sin(z[5])*dz[4]+cos(z[4])*cos(z[6])*sin(z[5])*dz[5]+cos(z[4])*cos(z[5])*sin(z[6])*dz[6])   0   0   0   0   0
+            0   0   0   L1*sin(z[4])*sin(z[5])*sin(z[6])*dz[4]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[6])*sin(z[5])*dz[6]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[5])*sin(z[6])*dz[5]*(L2*M3+LC2*M2)   0   2*cos(z[5])*sin(z[5])*dz[5]*(J2+L2^2*M3+LC2^2*M2)   0   0   0
+            0   0   0   0   0   0   0   -L1*(L2*M3+LC2*M2)*(cos(z[8])*cos(z[9])*sin(z[7])*dz[7]-cos(z[8])*sin(z[7])*dz[8]-cos(z[7])*sin(z[8])*dz[7]+cos(z[7])*cos(z[9])*sin(z[8])*dz[8]+cos(z[7])*cos(z[8])*sin(z[9])*dz[9])   L1*sin(z[7])*sin(z[8])*sin(z[9])*dz[7]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[9])*sin(z[8])*dz[9]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[8])*sin(z[9])*dz[8]*(L2*M3+LC2*M2)
+            0   0   0   0   0   0   -L1*(L2*M3+LC2*M2)*(cos(z[8])*cos(z[9])*sin(z[7])*dz[7]-cos(z[8])*sin(z[7])*dz[8]-cos(z[7])*sin(z[8])*dz[7]+cos(z[7])*cos(z[9])*sin(z[8])*dz[8]+cos(z[7])*cos(z[8])*sin(z[9])*dz[9])   0   0
+            0   0   0   0   0   0   L1*sin(z[7])*sin(z[8])*sin(z[9])*dz[7]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[9])*sin(z[8])*dz[9]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[8])*sin(z[9])*dz[8]*(L2*M3+LC2*M2)   0   2*cos(z[8])*sin(z[8])*dz[8]*(J2+L2^2*M3+LC2^2*M2)
+        ]
+        dH_invM = [
+            dH[:,1:3]/m1   dH[:,4:6]/m2   dH[:,7:9]/m3
+        ] 
+        HinvM_dM =  HinvM*dM
+        temp = dH_invM - [
+            HinvM_dM[:,1:3]/m1   HinvM_dM[:,4:6]/m2   HinvM_dM[:,7:9]/m3
+        ]
+        green_term = temp*transpose(H) + HinvM*transpose(dH) # {dH*inv(M) - H*inv(M)*dM*inv(M)}*transpose(H) + H*inv(M)*transpose(dH)
+        blue_term = temp*cgBu + HinvM*[ # {dH*inv(M) - H*inv(M)*dM*inv(M)}*cgBu + HinvM*dcgBu
+            γ*dz[10]-du0[1]+L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[1])*cos(z[2])*dz[1]-sin(z[1])*sin(z[2])*dz[2]-cos(z[1])*cos(z[2])*cos(z[3])*dz[2]+cos(z[3])*sin(z[1])*sin(z[2])*dz[1]+cos(z[1])*sin(z[2])*sin(z[3])*dz[3])+g*sin(z[1])*dz[1]*(L1*(M2+M3)+LC1*M1)+2*L1*dz[11]*z[11]*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))+L1*cos(z[3])*sin(z[1])*sin(z[2])*dz[1]*z[12]^2*(L2*M3+LC2*M2)+L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[3]*z[12]^2*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*sin(z[3])*dz[11]*z[12]*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*sin(z[3])*dz[12]*z[11]*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[3])*sin(z[2])*dz[12]*z[12]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[2])*cos(z[3])*dz[2]*z[12]^2*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*cos(z[3])*dz[3]*z[11]*z[12]*(L2*M3+LC2*M2)+2*L1*cos(z[2])*sin(z[1])*sin(z[3])*dz[1]*z[11]*z[12]*(L2*M3+LC2*M2)+2*L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[2]*z[11]*z[12]*(L2*M3+LC2*M2)
+            γ*dz[11]-cos(z[2])^2*dz[2]*z[12]^2*(J2+L2^2*M3+LC2^2*M2)+sin(z[2])^2*dz[2]*z[12]^2*(J2+L2^2*M3+LC2^2*M2)+L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*cos(z[2])*dz[2]-sin(z[1])*sin(z[2])*dz[1]-cos(z[1])*cos(z[2])*cos(z[3])*dz[1]+cos(z[3])*sin(z[1])*sin(z[2])*dz[2]+cos(z[2])*sin(z[1])*sin(z[3])*dz[3])-2*cos(z[2])*sin(z[2])*dz[12]*z[12]*(J2+L2^2*M3+LC2^2*M2)+2*L1*dz[10]*z[10]*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))+g*cos(z[3])*sin(z[2])*dz[2]*(L2*M3+LC2*M2)+g*cos(z[2])*sin(z[3])*dz[3]*(L2*M3+LC2*M2)
+            γ*dz[12]+sin(2*z[2])*dz[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)+sin(2*z[2])*dz[12]*z[11]*(J2+L2^2*M3+LC2^2*M2)+2*cos(2*z[2])*dz[2]*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[2])*sin(z[3])*dz[2]*(L2*M3+LC2*M2)+g*cos(z[3])*sin(z[2])*dz[3]*(L2*M3+LC2*M2)+L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[1]*z[10]^2*(L2*M3+LC2*M2)+L1*cos(z[2])*sin(z[1])*sin(z[3])*dz[2]*z[10]^2*(L2*M3+LC2*M2)+L1*cos(z[3])*sin(z[1])*sin(z[2])*dz[3]*z[10]^2*(L2*M3+LC2*M2)+2*L1*sin(z[1])*sin(z[2])*sin(z[3])*dz[10]*z[10]*(L2*M3+LC2*M2)
+            γ*dz[13]-du0[2]+L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[4])*cos(z[5])*dz[4]-sin(z[4])*sin(z[5])*dz[5]-cos(z[4])*cos(z[5])*cos(z[6])*dz[5]+cos(z[6])*sin(z[4])*sin(z[5])*dz[4]+cos(z[4])*sin(z[5])*sin(z[6])*dz[6])+g*sin(z[4])*dz[4]*(L1*(M2+M3)+LC1*M1)+2*L1*dz[14]*z[14]*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))+L1*cos(z[6])*sin(z[4])*sin(z[5])*dz[4]*z[15]^2*(L2*M3+LC2*M2)+L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[6]*z[15]^2*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*sin(z[6])*dz[14]*z[15]*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*sin(z[6])*dz[15]*z[14]*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[6])*sin(z[5])*dz[15]*z[15]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[5])*cos(z[6])*dz[5]*z[15]^2*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*cos(z[6])*dz[6]*z[14]*z[15]*(L2*M3+LC2*M2)+2*L1*cos(z[5])*sin(z[4])*sin(z[6])*dz[4]*z[14]*z[15]*(L2*M3+LC2*M2)+2*L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[5]*z[14]*z[15]*(L2*M3+LC2*M2)
+            γ*dz[14]-cos(z[5])^2*dz[5]*z[15]^2*(J2+L2^2*M3+LC2^2*M2)+sin(z[5])^2*dz[5]*z[15]^2*(J2+L2^2*M3+LC2^2*M2)+L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*cos(z[5])*dz[5]-sin(z[4])*sin(z[5])*dz[4]-cos(z[4])*cos(z[5])*cos(z[6])*dz[4]+cos(z[6])*sin(z[4])*sin(z[5])*dz[5]+cos(z[5])*sin(z[4])*sin(z[6])*dz[6])-2*cos(z[5])*sin(z[5])*dz[15]*z[15]*(J2+L2^2*M3+LC2^2*M2)+2*L1*dz[13]*z[13]*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))+g*cos(z[6])*sin(z[5])*dz[5]*(L2*M3+LC2*M2)+g*cos(z[5])*sin(z[6])*dz[6]*(L2*M3+LC2*M2)
+            γ*dz[15]+sin(2*z[5])*dz[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)+sin(2*z[5])*dz[15]*z[14]*(J2+L2^2*M3+LC2^2*M2)+2*cos(2*z[5])*dz[5]*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[5])*sin(z[6])*dz[5]*(L2*M3+LC2*M2)+g*cos(z[6])*sin(z[5])*dz[6]*(L2*M3+LC2*M2)+L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[4]*z[13]^2*(L2*M3+LC2*M2)+L1*cos(z[5])*sin(z[4])*sin(z[6])*dz[5]*z[13]^2*(L2*M3+LC2*M2)+L1*cos(z[6])*sin(z[4])*sin(z[5])*dz[6]*z[13]^2*(L2*M3+LC2*M2)+2*L1*sin(z[4])*sin(z[5])*sin(z[6])*dz[13]*z[13]*(L2*M3+LC2*M2)
+            γ*dz[16]-du0[3]+L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[7])*cos(z[8])*dz[7]-sin(z[7])*sin(z[8])*dz[8]-cos(z[7])*cos(z[8])*cos(z[9])*dz[8]+cos(z[9])*sin(z[7])*sin(z[8])*dz[7]+cos(z[7])*sin(z[8])*sin(z[9])*dz[9])+g*sin(z[7])*dz[7]*(L1*(M2+M3)+LC1*M1)+2*L1*dz[17]*z[17]*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))+L1*cos(z[9])*sin(z[7])*sin(z[8])*dz[7]*z[18]^2*(L2*M3+LC2*M2)+L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[9]*z[18]^2*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*sin(z[9])*dz[17]*z[18]*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*sin(z[9])*dz[18]*z[17]*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[9])*sin(z[8])*dz[18]*z[18]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[8])*cos(z[9])*dz[8]*z[18]^2*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*cos(z[9])*dz[9]*z[17]*z[18]*(L2*M3+LC2*M2)+2*L1*cos(z[8])*sin(z[7])*sin(z[9])*dz[7]*z[17]*z[18]*(L2*M3+LC2*M2)+2*L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[8]*z[17]*z[18]*(L2*M3+LC2*M2)
+            γ*dz[17]-cos(z[8])^2*dz[8]*z[18]^2*(J2+L2^2*M3+LC2^2*M2)+sin(z[8])^2*dz[8]*z[18]^2*(J2+L2^2*M3+LC2^2*M2)+L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*cos(z[8])*dz[8]-sin(z[7])*sin(z[8])*dz[7]-cos(z[7])*cos(z[8])*cos(z[9])*dz[7]+cos(z[9])*sin(z[7])*sin(z[8])*dz[8]+cos(z[8])*sin(z[7])*sin(z[9])*dz[9])-2*cos(z[8])*sin(z[8])*dz[18]*z[18]*(J2+L2^2*M3+LC2^2*M2)+2*L1*dz[16]*z[16]*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))+g*cos(z[9])*sin(z[8])*dz[8]*(L2*M3+LC2*M2)+g*cos(z[8])*sin(z[9])*dz[9]*(L2*M3+LC2*M2)
+            γ*dz[18]+sin(2*z[8])*dz[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)+sin(2*z[8])*dz[18]*z[17]*(J2+L2^2*M3+LC2^2*M2)+2*cos(2*z[8])*dz[8]*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[8])*sin(z[9])*dz[8]*(L2*M3+LC2*M2)+g*cos(z[9])*sin(z[8])*dz[9]*(L2*M3+LC2*M2)+L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[7]*z[16]^2*(L2*M3+LC2*M2)+L1*cos(z[8])*sin(z[7])*sin(z[9])*dz[8]*z[16]^2*(L2*M3+LC2*M2)+L1*cos(z[9])*sin(z[7])*sin(z[8])*dz[9]*z[16]^2*(L2*M3+LC2*M2)+2*L1*sin(z[7])*sin(z[8])*sin(z[9])*dz[16]*z[16]*(L2*M3+LC2*M2)        
+        ]
+
+        dz[19:24] = (HinvM*transpose(H))\(blue_term - green_term*z[19:24])
+
+        return z, dz
+    end
+end
+
+function get_delta_initial_comp_newest(θ, ut0, du0, w0)
+    let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
+
+        z  = zeros(24)
+        dz = zeros(24)
+        z[1:3] = [π/6; acos(-0.5*sqrt(3)*L1/L2 + (L3-L0)/L2); 0.0]
+        z[4:6] = [π/6; acos(-0.5*sqrt(3)*L1/L2 + (L3-L0)/L2); 0.0]
+        z[7:9] = [π/6; acos(-0.5*sqrt(3)*L1/L2 + (L3-L0)/L2); 0.0]
+
+        u0 = ut0
+
+        H = [
+            0   L2*cos(z[2])*sin(z[3])   L2*cos(z[3])*sin(z[2])   -(sqrt(3)*L1*sin(z[4]))*0.5   (L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5   (L2*cos(z[6])*sin(z[5]))*0.5   0   0   0
+            -L1*sin(z[1])   -L2*sin(z[2])   0   -(L1*sin(z[4]))*0.5   -(L2*sin(z[5]))*0.5-(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5   -(sqrt(3)*L2*cos(z[6])*sin(z[5]))*0.5   0   0   0
+            L1*cos(z[1])   L2*cos(z[2])*cos(z[3])   -L2*sin(z[2])*sin(z[3])   -L1*cos(z[4])   -L2*cos(z[5])*cos(z[6])   L2*sin(z[5])*sin(z[6])   0   0   0
+            0   L2*cos(z[2])*sin(z[3])   L2*cos(z[3])*sin(z[2])   0   0   0   (sqrt(3)*L1*sin(z[7]))*0.5   (L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5   (L2*cos(z[9])*sin(z[8]))*0.5
+            -L1*sin(z[1])   -L2*sin(z[2])   0   0   0   0   -(L1*sin(z[7]))*0.5   (sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5-(L2*sin(z[8]))*0.5   (sqrt(3)*L2*cos(z[9])*sin(z[8]))*0.5
+            L1*cos(z[1])   L2*cos(z[2])*cos(z[3])   -L2*sin(z[2])*sin(z[3])   0   0   0   -L1*cos(z[7])   -L2*cos(z[8])*cos(z[9])   L2*sin(z[8])*sin(z[9])
+        ]
+
+        m1 = [
+            J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))   -L1*cos(z[1])*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)
+            L1*(L2*M3+LC2*M2)*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))   J2+L2^2*M3+LC2^2*M2   0
+            -L1*cos(z[1])*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)   0   sin(z[2])^2*(J2+L2^2*M3+LC2^2*M2)
+        ]
+        m2 = [
+            J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))   -L1*cos(z[4])*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)
+            L1*(L2*M3+LC2*M2)*(sin(z[4])*sin(z[5])+cos(z[4])*cos(z[5])*cos(z[6]))   J2+L2^2*M3+LC2^2*M2   0
+            -L1*cos(z[4])*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)   0   sin(z[5])^2*(J2+L2^2*M3+LC2^2*M2)
+        ]
+        m3 = [
+            J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))   -L1*cos(z[7])*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)
+            L1*(L2*M3+LC2*M2)*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))   J2+L2^2*M3+LC2^2*M2   0
+            -L1*cos(z[7])*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)   0   sin(z[8])^2*(J2+L2^2*M3+LC2^2*M2)
+        ]
+
+        HinvM = [
+            H[:,1:3]/m1   H[:,4:6]/m2   H[:,7:9]/m3
+        ]
+
+        cgBu = [
+            γ*z[10]-u0[1]-g*cos(z[1])*(L1*(M2+M3)+LC1*M1)+L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))-L1*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]*(L2*M3+LC2*M2)
+            γ*z[11]-cos(z[2])*sin(z[2])*z[12]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)+L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))
+            γ*z[12]+sin(2*z[2])*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)+L1*sin(z[1])*sin(z[2])*sin(z[3])*z[10]^2*(L2*M3+LC2*M2)
+            γ*z[13]-u0[2]-g*cos(z[4])*(L1*(M2+M3)+LC1*M1)+L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))-L1*cos(z[4])*cos(z[6])*sin(z[5])*z[15]^2*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*sin(z[6])*z[14]*z[15]*(L2*M3+LC2*M2)
+            γ*z[14]-cos(z[5])*sin(z[5])*z[15]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)+L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))
+            γ*z[15]+sin(2*z[5])*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)+L1*sin(z[4])*sin(z[5])*sin(z[6])*z[13]^2*(L2*M3+LC2*M2)
+            γ*z[16]-u0[3]-g*cos(z[7])*(L1*(M2+M3)+LC1*M1)+L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))-L1*cos(z[7])*cos(z[9])*sin(z[8])*z[18]^2*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*sin(z[9])*z[17]*z[18]*(L2*M3+LC2*M2)
+            γ*z[17]-cos(z[8])*sin(z[8])*z[18]^2*(J2+L2^2*M3+LC2^2*M2)-g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)+L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))
+            γ*z[18]+sin(2*z[8])*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)+g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)+L1*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2*(L2*M3+LC2*M2)
+        ]
+
+        # κ = (HinvM*transpose(H))\(HinvM*cgBu)
+        z[19:24] = (HinvM*transpose(H))\(HinvM*cgBu)
+
+        # dv = inv(M)*Mvterm
+        dz[10:18] = [
+            m1\[
+                u0[1]-γ*z[10]+g*cos(z[1])*(L1*(M2+M3)+LC1*M1)+L1*cos(z[1])*z[21]+L1*cos(z[1])*z[24]-L1*sin(z[1])*z[20]-L1*sin(z[1])*z[23]-L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))+L1*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2*(L2*M3+LC2*M2)+2*L1*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]*(L2*M3+LC2*M2)
+                L2*cos(z[2])*cos(z[3])*z[21]-L2*sin(z[2])*z[20]-L2*sin(z[2])*z[23]-γ*z[11]+L2*cos(z[2])*cos(z[3])*z[24]+L2*cos(z[2])*sin(z[3])*z[19]+L2*cos(z[2])*sin(z[3])*z[22]+cos(z[2])*sin(z[2])*z[12]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[2])*cos(z[3])*(L2*M3+LC2*M2)-L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))
+                L2*cos(z[3])*sin(z[2])*z[19]-γ*z[12]+L2*cos(z[3])*sin(z[2])*z[22]-L2*sin(z[2])*sin(z[3])*z[21]-L2*sin(z[2])*sin(z[3])*z[24]-sin(2*z[2])*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[2])*sin(z[3])*(L2*M3+LC2*M2)-L1*sin(z[1])*sin(z[2])*sin(z[3])*z[10]^2*(L2*M3+LC2*M2)
+            ]
+            m2\[
+                u0[2]-γ*z[13]+g*cos(z[4])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[4])*z[21]-(L1*sin(z[4])*z[20])*0.5-(sqrt(3)*L1*sin(z[4])*z[19])*0.5-L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))+L1*cos(z[4])*cos(z[6])*sin(z[5])*z[15]^2*(L2*M3+LC2*M2)+2*L1*cos(z[4])*cos(z[5])*sin(z[6])*z[14]*z[15]*(L2*M3+LC2*M2)
+                z[19]*((L2*cos(z[5])*sin(z[6]))*0.5-(sqrt(3)*L2*sin(z[5]))*0.5)-z[20]*((L2*sin(z[5]))*0.5+(sqrt(3)*L2*cos(z[5])*sin(z[6]))*0.5)-γ*z[14]-L2*cos(z[5])*cos(z[6])*z[21]+cos(z[5])*sin(z[5])*z[15]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[5])*cos(z[6])*(L2*M3+LC2*M2)-L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))
+                (L2*cos(z[6])*sin(z[5])*z[19])*0.5-γ*z[15]+L2*sin(z[5])*sin(z[6])*z[21]-sin(2*z[5])*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[5])*sin(z[6])*(L2*M3+LC2*M2)-(sqrt(3)*L2*cos(z[6])*sin(z[5])*z[20])*0.5-L1*sin(z[4])*sin(z[5])*sin(z[6])*z[13]^2*(L2*M3+LC2*M2)
+            ]
+            m3\[
+                u0[3]-γ*z[16]+g*cos(z[7])*(L1*(M2+M3)+LC1*M1)-L1*cos(z[7])*z[24]-(L1*sin(z[7])*z[23])*0.5+(sqrt(3)*L1*sin(z[7])*z[22])*0.5-L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))+L1*cos(z[7])*cos(z[9])*sin(z[8])*z[18]^2*(L2*M3+LC2*M2)+2*L1*cos(z[7])*cos(z[8])*sin(z[9])*z[17]*z[18]*(L2*M3+LC2*M2)
+                z[22]*((L2*cos(z[8])*sin(z[9]))*0.5+(sqrt(3)*L2*sin(z[8]))*0.5)-z[23]*((L2*sin(z[8]))*0.5-(sqrt(3)*L2*cos(z[8])*sin(z[9]))*0.5)-γ*z[17]-L2*cos(z[8])*cos(z[9])*z[24]+cos(z[8])*sin(z[8])*z[18]^2*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[8])*cos(z[9])*(L2*M3+LC2*M2)-L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))
+                (L2*cos(z[9])*sin(z[8])*z[22])*0.5-γ*z[18]+L2*sin(z[8])*sin(z[9])*z[24]-sin(2*z[8])*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)-g*sin(z[8])*sin(z[9])*(L2*M3+LC2*M2)+(sqrt(3)*L2*cos(z[9])*sin(z[8])*z[23])*0.5-L1*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2*(L2*M3+LC2*M2)
+            ]
+        ]
+
+        # ---------------------- Initializing dκ ----------------------
+        dH = [
+            0   L2*cos(z[2])*cos(z[3])*dz[3]-L2*sin(z[2])*sin(z[3])*dz[2]   L2*cos(z[2])*cos(z[3])*dz[2]-L2*sin(z[2])*sin(z[3])*dz[3]   -(sqrt(3)*L1*cos(z[4])*dz[4])*0.5   (L2*cos(z[5])*cos(z[6])*dz[6])*0.5-(sqrt(3)*L2*cos(z[5])*dz[5])*0.5-(L2*sin(z[5])*sin(z[6])*dz[5])*0.5   (L2*cos(z[5])*cos(z[6])*dz[5])*0.5-(L2*sin(z[5])*sin(z[6])*dz[6])*0.5   0   0   0
+            -L1*cos(z[1])*dz[1]   -L2*cos(z[2])*dz[2]   0   -(L1*cos(z[4])*dz[4])*0.5   (sqrt(3)*L2*sin(z[5])*sin(z[6])*dz[5])*0.5-(sqrt(3)*L2*cos(z[5])*cos(z[6])*dz[6])*0.5-(L2*cos(z[5])*dz[5])*0.5   (sqrt(3)*L2*sin(z[5])*sin(z[6])*dz[6])*0.5-(sqrt(3)*L2*cos(z[5])*cos(z[6])*dz[5])*0.5   0   0   0
+            -L1*sin(z[1])*dz[1]   -L2*cos(z[3])*sin(z[2])*dz[2]-L2*cos(z[2])*sin(z[3])*dz[3]   -L2*cos(z[2])*sin(z[3])*dz[2]-L2*cos(z[3])*sin(z[2])*dz[3]   L1*sin(z[4])*dz[4]   L2*cos(z[6])*sin(z[5])*dz[5]+L2*cos(z[5])*sin(z[6])*dz[6]   L2*cos(z[5])*sin(z[6])*dz[5]+L2*cos(z[6])*sin(z[5])*dz[6]   0   0   0
+            0   L2*cos(z[2])*cos(z[3])*dz[3]-L2*sin(z[2])*sin(z[3])*dz[2]   L2*cos(z[2])*cos(z[3])*dz[2]-L2*sin(z[2])*sin(z[3])*dz[3]   0   0   0   (sqrt(3)*L1*cos(z[7])*dz[7])*0.5   (L2*cos(z[8])*cos(z[9])*dz[9])*0.5+(sqrt(3)*L2*cos(z[8])*dz[8])*0.5-(L2*sin(z[8])*sin(z[9])*dz[8])*0.5   (L2*cos(z[8])*cos(z[9])*dz[8])*0.5-(L2*sin(z[8])*sin(z[9])*dz[9])*0.5
+            -L1*cos(z[1])*dz[1]   -L2*cos(z[2])*dz[2]   0   0   0   0   -(L1*cos(z[7])*dz[7])*0.5   (sqrt(3)*L2*cos(z[8])*cos(z[9])*dz[9])*0.5-(L2*cos(z[8])*dz[8])*0.5-(sqrt(3)*L2*sin(z[8])*sin(z[9])*dz[8])*0.5   (sqrt(3)*L2*cos(z[8])*cos(z[9])*dz[8])*0.5-(sqrt(3)*L2*sin(z[8])*sin(z[9])*dz[9])*0.5
+            -L1*sin(z[1])*dz[1]   -L2*cos(z[3])*sin(z[2])*dz[2]-L2*cos(z[2])*sin(z[3])*dz[3]   -L2*cos(z[2])*sin(z[3])*dz[2]-L2*cos(z[3])*sin(z[2])*dz[3]   0   0   0   L1*sin(z[7])*dz[7]   L2*cos(z[9])*sin(z[8])*dz[8]+L2*cos(z[8])*sin(z[9])*dz[9]   L2*cos(z[8])*sin(z[9])*dz[8]+L2*cos(z[9])*sin(z[8])*dz[9]
+        ]
+        dM = [
+            0   -L1*(L2*M3+LC2*M2)*(cos(z[2])*cos(z[3])*sin(z[1])*dz[1]-cos(z[2])*sin(z[1])*dz[2]-cos(z[1])*sin(z[2])*dz[1]+cos(z[1])*cos(z[3])*sin(z[2])*dz[2]+cos(z[1])*cos(z[2])*sin(z[3])*dz[3])   L1*sin(z[1])*sin(z[2])*sin(z[3])*dz[1]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[3])*sin(z[2])*dz[3]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[2])*sin(z[3])*dz[2]*(L2*M3+LC2*M2)   0   0   0   0   0   0
+            -L1*(L2*M3+LC2*M2)*(cos(z[2])*cos(z[3])*sin(z[1])*dz[1]-cos(z[2])*sin(z[1])*dz[2]-cos(z[1])*sin(z[2])*dz[1]+cos(z[1])*cos(z[3])*sin(z[2])*dz[2]+cos(z[1])*cos(z[2])*sin(z[3])*dz[3])   0   0   0   0   0   0   0   0
+            L1*sin(z[1])*sin(z[2])*sin(z[3])*dz[1]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[3])*sin(z[2])*dz[3]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[2])*sin(z[3])*dz[2]*(L2*M3+LC2*M2)   0   2*cos(z[2])*sin(z[2])*dz[2]*(J2+L2^2*M3+LC2^2*M2)   0   0   0   0   0   0
+            0   0   0   0   -L1*(L2*M3+LC2*M2)*(cos(z[5])*cos(z[6])*sin(z[4])*dz[4]-cos(z[5])*sin(z[4])*dz[5]-cos(z[4])*sin(z[5])*dz[4]+cos(z[4])*cos(z[6])*sin(z[5])*dz[5]+cos(z[4])*cos(z[5])*sin(z[6])*dz[6])   L1*sin(z[4])*sin(z[5])*sin(z[6])*dz[4]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[6])*sin(z[5])*dz[6]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[5])*sin(z[6])*dz[5]*(L2*M3+LC2*M2)   0   0   0
+            0   0   0   -L1*(L2*M3+LC2*M2)*(cos(z[5])*cos(z[6])*sin(z[4])*dz[4]-cos(z[5])*sin(z[4])*dz[5]-cos(z[4])*sin(z[5])*dz[4]+cos(z[4])*cos(z[6])*sin(z[5])*dz[5]+cos(z[4])*cos(z[5])*sin(z[6])*dz[6])   0   0   0   0   0
+            0   0   0   L1*sin(z[4])*sin(z[5])*sin(z[6])*dz[4]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[6])*sin(z[5])*dz[6]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[5])*sin(z[6])*dz[5]*(L2*M3+LC2*M2)   0   2*cos(z[5])*sin(z[5])*dz[5]*(J2+L2^2*M3+LC2^2*M2)   0   0   0
+            0   0   0   0   0   0   0   -L1*(L2*M3+LC2*M2)*(cos(z[8])*cos(z[9])*sin(z[7])*dz[7]-cos(z[8])*sin(z[7])*dz[8]-cos(z[7])*sin(z[8])*dz[7]+cos(z[7])*cos(z[9])*sin(z[8])*dz[8]+cos(z[7])*cos(z[8])*sin(z[9])*dz[9])   L1*sin(z[7])*sin(z[8])*sin(z[9])*dz[7]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[9])*sin(z[8])*dz[9]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[8])*sin(z[9])*dz[8]*(L2*M3+LC2*M2)
+            0   0   0   0   0   0   -L1*(L2*M3+LC2*M2)*(cos(z[8])*cos(z[9])*sin(z[7])*dz[7]-cos(z[8])*sin(z[7])*dz[8]-cos(z[7])*sin(z[8])*dz[7]+cos(z[7])*cos(z[9])*sin(z[8])*dz[8]+cos(z[7])*cos(z[8])*sin(z[9])*dz[9])   0   0
+            0   0   0   0   0   0   L1*sin(z[7])*sin(z[8])*sin(z[9])*dz[7]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[9])*sin(z[8])*dz[9]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[8])*sin(z[9])*dz[8]*(L2*M3+LC2*M2)   0   2*cos(z[8])*sin(z[8])*dz[8]*(J2+L2^2*M3+LC2^2*M2)
+        ]
+        dH_invM = [
+            dH[:,1:3]/m1   dH[:,4:6]/m2   dH[:,7:9]/m3
+        ] 
+        HinvM_dM =  HinvM*dM
+        temp = dH_invM - [
+            HinvM_dM[:,1:3]/m1   HinvM_dM[:,4:6]/m2   HinvM_dM[:,7:9]/m3
+        ]
+        green_term = temp*transpose(H) + HinvM*transpose(dH) # {dH*inv(M) - H*inv(M)*dM*inv(M)}*transpose(H) + H*inv(M)*transpose(dH)
+        blue_term = temp*cgBu + HinvM*[ # {dH*inv(M) - H*inv(M)*dM*inv(M)}*cgBu + HinvM*dcgBu
+            γ*dz[10]-du0[1]+L1*z[11]^2*(L2*M3+LC2*M2)*(cos(z[1])*cos(z[2])*dz[1]-sin(z[1])*sin(z[2])*dz[2]-cos(z[1])*cos(z[2])*cos(z[3])*dz[2]+cos(z[3])*sin(z[1])*sin(z[2])*dz[1]+cos(z[1])*sin(z[2])*sin(z[3])*dz[3])+g*sin(z[1])*dz[1]*(L1*(M2+M3)+LC1*M1)+2*L1*dz[11]*z[11]*(L2*M3+LC2*M2)*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))+L1*cos(z[3])*sin(z[1])*sin(z[2])*dz[1]*z[12]^2*(L2*M3+LC2*M2)+L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[3]*z[12]^2*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*sin(z[3])*dz[11]*z[12]*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*sin(z[3])*dz[12]*z[11]*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[3])*sin(z[2])*dz[12]*z[12]*(L2*M3+LC2*M2)-L1*cos(z[1])*cos(z[2])*cos(z[3])*dz[2]*z[12]^2*(L2*M3+LC2*M2)-2*L1*cos(z[1])*cos(z[2])*cos(z[3])*dz[3]*z[11]*z[12]*(L2*M3+LC2*M2)+2*L1*cos(z[2])*sin(z[1])*sin(z[3])*dz[1]*z[11]*z[12]*(L2*M3+LC2*M2)+2*L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[2]*z[11]*z[12]*(L2*M3+LC2*M2)
+            γ*dz[11]-cos(z[2])^2*dz[2]*z[12]^2*(J2+L2^2*M3+LC2^2*M2)+sin(z[2])^2*dz[2]*z[12]^2*(J2+L2^2*M3+LC2^2*M2)+L1*z[10]^2*(L2*M3+LC2*M2)*(cos(z[1])*cos(z[2])*dz[2]-sin(z[1])*sin(z[2])*dz[1]-cos(z[1])*cos(z[2])*cos(z[3])*dz[1]+cos(z[3])*sin(z[1])*sin(z[2])*dz[2]+cos(z[2])*sin(z[1])*sin(z[3])*dz[3])-2*cos(z[2])*sin(z[2])*dz[12]*z[12]*(J2+L2^2*M3+LC2^2*M2)+2*L1*dz[10]*z[10]*(L2*M3+LC2*M2)*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))+g*cos(z[3])*sin(z[2])*dz[2]*(L2*M3+LC2*M2)+g*cos(z[2])*sin(z[3])*dz[3]*(L2*M3+LC2*M2)
+            γ*dz[12]+sin(2*z[2])*dz[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)+sin(2*z[2])*dz[12]*z[11]*(J2+L2^2*M3+LC2^2*M2)+2*cos(2*z[2])*dz[2]*z[11]*z[12]*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[2])*sin(z[3])*dz[2]*(L2*M3+LC2*M2)+g*cos(z[3])*sin(z[2])*dz[3]*(L2*M3+LC2*M2)+L1*cos(z[1])*sin(z[2])*sin(z[3])*dz[1]*z[10]^2*(L2*M3+LC2*M2)+L1*cos(z[2])*sin(z[1])*sin(z[3])*dz[2]*z[10]^2*(L2*M3+LC2*M2)+L1*cos(z[3])*sin(z[1])*sin(z[2])*dz[3]*z[10]^2*(L2*M3+LC2*M2)+2*L1*sin(z[1])*sin(z[2])*sin(z[3])*dz[10]*z[10]*(L2*M3+LC2*M2)
+            γ*dz[13]-du0[2]+L1*z[14]^2*(L2*M3+LC2*M2)*(cos(z[4])*cos(z[5])*dz[4]-sin(z[4])*sin(z[5])*dz[5]-cos(z[4])*cos(z[5])*cos(z[6])*dz[5]+cos(z[6])*sin(z[4])*sin(z[5])*dz[4]+cos(z[4])*sin(z[5])*sin(z[6])*dz[6])+g*sin(z[4])*dz[4]*(L1*(M2+M3)+LC1*M1)+2*L1*dz[14]*z[14]*(L2*M3+LC2*M2)*(cos(z[5])*sin(z[4])-cos(z[4])*cos(z[6])*sin(z[5]))+L1*cos(z[6])*sin(z[4])*sin(z[5])*dz[4]*z[15]^2*(L2*M3+LC2*M2)+L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[6]*z[15]^2*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*sin(z[6])*dz[14]*z[15]*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*sin(z[6])*dz[15]*z[14]*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[6])*sin(z[5])*dz[15]*z[15]*(L2*M3+LC2*M2)-L1*cos(z[4])*cos(z[5])*cos(z[6])*dz[5]*z[15]^2*(L2*M3+LC2*M2)-2*L1*cos(z[4])*cos(z[5])*cos(z[6])*dz[6]*z[14]*z[15]*(L2*M3+LC2*M2)+2*L1*cos(z[5])*sin(z[4])*sin(z[6])*dz[4]*z[14]*z[15]*(L2*M3+LC2*M2)+2*L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[5]*z[14]*z[15]*(L2*M3+LC2*M2)
+            γ*dz[14]-cos(z[5])^2*dz[5]*z[15]^2*(J2+L2^2*M3+LC2^2*M2)+sin(z[5])^2*dz[5]*z[15]^2*(J2+L2^2*M3+LC2^2*M2)+L1*z[13]^2*(L2*M3+LC2*M2)*(cos(z[4])*cos(z[5])*dz[5]-sin(z[4])*sin(z[5])*dz[4]-cos(z[4])*cos(z[5])*cos(z[6])*dz[4]+cos(z[6])*sin(z[4])*sin(z[5])*dz[5]+cos(z[5])*sin(z[4])*sin(z[6])*dz[6])-2*cos(z[5])*sin(z[5])*dz[15]*z[15]*(J2+L2^2*M3+LC2^2*M2)+2*L1*dz[13]*z[13]*(L2*M3+LC2*M2)*(cos(z[4])*sin(z[5])-cos(z[5])*cos(z[6])*sin(z[4]))+g*cos(z[6])*sin(z[5])*dz[5]*(L2*M3+LC2*M2)+g*cos(z[5])*sin(z[6])*dz[6]*(L2*M3+LC2*M2)
+            γ*dz[15]+sin(2*z[5])*dz[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)+sin(2*z[5])*dz[15]*z[14]*(J2+L2^2*M3+LC2^2*M2)+2*cos(2*z[5])*dz[5]*z[14]*z[15]*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[5])*sin(z[6])*dz[5]*(L2*M3+LC2*M2)+g*cos(z[6])*sin(z[5])*dz[6]*(L2*M3+LC2*M2)+L1*cos(z[4])*sin(z[5])*sin(z[6])*dz[4]*z[13]^2*(L2*M3+LC2*M2)+L1*cos(z[5])*sin(z[4])*sin(z[6])*dz[5]*z[13]^2*(L2*M3+LC2*M2)+L1*cos(z[6])*sin(z[4])*sin(z[5])*dz[6]*z[13]^2*(L2*M3+LC2*M2)+2*L1*sin(z[4])*sin(z[5])*sin(z[6])*dz[13]*z[13]*(L2*M3+LC2*M2)
+            γ*dz[16]-du0[3]+L1*z[17]^2*(L2*M3+LC2*M2)*(cos(z[7])*cos(z[8])*dz[7]-sin(z[7])*sin(z[8])*dz[8]-cos(z[7])*cos(z[8])*cos(z[9])*dz[8]+cos(z[9])*sin(z[7])*sin(z[8])*dz[7]+cos(z[7])*sin(z[8])*sin(z[9])*dz[9])+g*sin(z[7])*dz[7]*(L1*(M2+M3)+LC1*M1)+2*L1*dz[17]*z[17]*(L2*M3+LC2*M2)*(cos(z[8])*sin(z[7])-cos(z[7])*cos(z[9])*sin(z[8]))+L1*cos(z[9])*sin(z[7])*sin(z[8])*dz[7]*z[18]^2*(L2*M3+LC2*M2)+L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[9]*z[18]^2*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*sin(z[9])*dz[17]*z[18]*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*sin(z[9])*dz[18]*z[17]*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[9])*sin(z[8])*dz[18]*z[18]*(L2*M3+LC2*M2)-L1*cos(z[7])*cos(z[8])*cos(z[9])*dz[8]*z[18]^2*(L2*M3+LC2*M2)-2*L1*cos(z[7])*cos(z[8])*cos(z[9])*dz[9]*z[17]*z[18]*(L2*M3+LC2*M2)+2*L1*cos(z[8])*sin(z[7])*sin(z[9])*dz[7]*z[17]*z[18]*(L2*M3+LC2*M2)+2*L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[8]*z[17]*z[18]*(L2*M3+LC2*M2)
+            γ*dz[17]-cos(z[8])^2*dz[8]*z[18]^2*(J2+L2^2*M3+LC2^2*M2)+sin(z[8])^2*dz[8]*z[18]^2*(J2+L2^2*M3+LC2^2*M2)+L1*z[16]^2*(L2*M3+LC2*M2)*(cos(z[7])*cos(z[8])*dz[8]-sin(z[7])*sin(z[8])*dz[7]-cos(z[7])*cos(z[8])*cos(z[9])*dz[7]+cos(z[9])*sin(z[7])*sin(z[8])*dz[8]+cos(z[8])*sin(z[7])*sin(z[9])*dz[9])-2*cos(z[8])*sin(z[8])*dz[18]*z[18]*(J2+L2^2*M3+LC2^2*M2)+2*L1*dz[16]*z[16]*(L2*M3+LC2*M2)*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))+g*cos(z[9])*sin(z[8])*dz[8]*(L2*M3+LC2*M2)+g*cos(z[8])*sin(z[9])*dz[9]*(L2*M3+LC2*M2)
+            γ*dz[18]+sin(2*z[8])*dz[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)+sin(2*z[8])*dz[18]*z[17]*(J2+L2^2*M3+LC2^2*M2)+2*cos(2*z[8])*dz[8]*z[17]*z[18]*(J2+L2^2*M3+LC2^2*M2)+g*cos(z[8])*sin(z[9])*dz[8]*(L2*M3+LC2*M2)+g*cos(z[9])*sin(z[8])*dz[9]*(L2*M3+LC2*M2)+L1*cos(z[7])*sin(z[8])*sin(z[9])*dz[7]*z[16]^2*(L2*M3+LC2*M2)+L1*cos(z[8])*sin(z[7])*sin(z[9])*dz[8]*z[16]^2*(L2*M3+LC2*M2)+L1*cos(z[9])*sin(z[7])*sin(z[8])*dz[9]*z[16]^2*(L2*M3+LC2*M2)+2*L1*sin(z[7])*sin(z[8])*sin(z[9])*dz[16]*z[16]*(L2*M3+LC2*M2)        
+        ]
+
+        dz[19:24] = (HinvM*transpose(H))\(blue_term - green_term*z[19:24])
+        
+        return z, dz
+    end
 end
 
 # OLD, delete eventually

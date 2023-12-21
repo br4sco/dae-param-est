@@ -467,24 +467,25 @@ function solve_delta(N::Int)
     L3 = θ[4]
     du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
     # delta_mdl = delta_robot_new(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
+    delta_mdl = delta_robot_newest(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
     # my_other_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), θ)
-    delta_mdl = delta_robot_gc_J1sens(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
+    # delta_mdl = delta_robot_gc_J1sens(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
     # delta_mdl_comp = delta_robot_gravitycomp(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
 
-    #     delta_prob = problem(delta_mdl, N, Ts)
-#     sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
-#     outmat = get_delta_output(sol, θ)
+    delta_prob = problem(delta_mdl, N, Ts)
+    sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
+    outmat = get_delta_output(sol, θ)
 
-#     # p1 = plot(-outmat[2,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
-#     # p2 = plot(outmat[1,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
-#     # p3 = plot(outmat[1,:], outmat[2,:], xlims=(-L2,L2), ylims=(-L2,L2), color=:blue, legend=false)
-#     # scatter!(p1, -outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
-#     # scatter!(p2, outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
-#     # scatter!(p3, outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue)
-#     # l = @layout [a b c]
-#     # plot(p1, p2, p3, layout=l)
+    # p1 = plot(-outmat[2,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
+    # p2 = plot(outmat[1,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
+    # p3 = plot(outmat[1,:], outmat[2,:], xlims=(-L2,L2), ylims=(-L2,L2), color=:blue, legend=false)
+    # scatter!(p1, -outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
+    # scatter!(p2, outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
+    # scatter!(p3, outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue)
+    # l = @layout [a b c]
+    # plot(p1, p2, p3, layout=l)
     
-#     animate_delta_gif(outmat, θ, "data/results/delta_gif.gif")
+    animate_delta_gif(outmat, θ, "data/results/delta_gif.gif")
 end
 
 function get_delta_output(sol, θ)
