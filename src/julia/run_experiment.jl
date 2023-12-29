@@ -485,6 +485,32 @@ function solve_delta(N::Int)
     animate_delta_gif(outmat, θ, "data/results/delta_gif.gif")
 end
 
+function debug_delta_sensitivity(N::Int)
+    J1_1 = 0.4
+    J1_2 = 0.41
+    θ1 = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, J1_1, 0.4, 9.81, 1.0]
+    θ2 = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, J1_2, 0.4, 9.81, 1.0]
+    # L0 = θ1[1]
+    # L1 = θ1[2]
+    # L2 = θ1[3]
+    # L3 = θ1[4]
+    du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
+    
+    delta_mdl1 = delta_robot_gc_J1sens(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ1)
+    delta_prob1 = problem(delta_mdl1, N, Ts)
+    sol1 = solve(delta_prob1, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
+    outmat1, sensmat1 = get_delta_output_with_J1sens(sol1, θ1)
+
+    delta_mdl2 = delta_robot_gc_J1sens(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ2)
+    delta_prob2 = problem(delta_mdl2, N, Ts)
+    sol2 = solve(delta_prob2, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
+    outmat2, sensmat2 = get_delta_output_with_J1sens(sol2, θ2)
+
+    out_sens_num = (outmat2-outmat1)./0.01
+
+    return out_sens_num, sensmat1
+end
+
 function get_delta_output(sol, θ)
     T = length(sol)
     outmat = zeros(3,T)
@@ -501,6 +527,28 @@ function get_delta_output(sol, θ)
                        θ[2]*sin(x[1]) + θ[3]*sin(x[2])*cos(x[3])]
     end
     return outmat
+end
+
+function get_delta_output_with_J1sens(sol, θ)
+    T = length(sol)
+    outmat  = zeros(3,T)
+    sensmat = zeros(3,T) 
+    # TODO: sol.u is not the recommended way to access the solution
+    for (i,x) = enumerate(sol.u)
+        # out = 
+        # [L2*sin(ϕ2)*sin(ϕ3)
+        #  L1*cos(ϕ1) + L2*cos(ϕ2) + L0 - L3
+        #  L1*sin(ϕ1) + L2*sin(ϕ2)*cos(ϕ3)]
+        # where
+        # L0 = θ[1], L1 = θ[2], L2 = θ[3], L4 = θ[4]
+        outmat[:,i]  = [θ[3]*sin(x[2])*sin(x[3])
+                        θ[2]*cos(x[1]) + θ[3]*cos(x[2]) + θ[1] - θ[4]
+                        θ[2]*sin(x[1]) + θ[3]*sin(x[2])*cos(x[3])]
+        sensmat[:,i] = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
+                        -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
+                        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]]   # Partial derivative wrt p is zero for J1
+    end
+    return outmat, sensmat
 end
 
 function animate_delta_gif(outmat::Matrix{Float64}, θ::Vector{Float64}, file_name::String)
