@@ -11,7 +11,7 @@ Random.seed!(seed)
 struct ExperimentData
     # Y is the measured output of system, contains N+1 rows and E columns
     # (+1 because of an additional sample at t=0)
-    Y::Array{Float64,2}
+    Y::Matrix{Float64}
     # u is the function specifying the input of the system
     u::Function
     # get_all_ηs encodes what information of the disturbance model is known
@@ -19,7 +19,7 @@ struct ExperimentData
     # given only the free parameters
     get_all_ηs::Function
     # Array containing lower and upper bound of a disturbance parameter in each row
-    dist_par_bounds::Array{Float64, 2}
+    dist_par_bounds::Matrix{Float64}
     # W_meta is the metadata of the disturbance, containting e.g. dimensions
     W_meta::DisturbanceMetaData
     # Nw is a lower bound on the number of available samples of the disturbance and input
@@ -38,7 +38,7 @@ struct AdjointData
     sols::Array{DAESolution,1}
     N::Int
     Ts::Float64 # TODO: No need to pass this I think, Ts already global?
-    p::Array{Float64,1}
+    p::Vector{Float64}
     xp0::Matrix{Float64}
 end
 
@@ -77,17 +77,17 @@ M_rate_max = min(4, M)#100#8#4#16
 # M_rate(t::Int) = (t÷50+1)*M_rate_max
 M_rate(t::Int) = M_rate_max
 
-mangle_XW(XW::Array{Array{Float64, 1}, 2}) =
-  hcat([vcat(XW[:, m]...) for m = 1:size(XW,2)]...)
+mangle_XWs(XWs::Array{Vector{Float64}, 2}) =
+  hcat([vcat(XWs[:, m]...) for m = 1:size(XWs,2)]...)
 
-demangle_XW(XW::Array{Float64, 2}, n_tot::Int) =
+demangle_XW(XW::Matrix{Float64}, n_tot::Int) =
     [XW[(i-1)*n_tot+1:i*n_tot, m] for i=1:(size(XW,1)÷n_tot), m=1:size(XW,2)]
 
 # NOTE: SCALAR_OUTPUT is assumed
 # NOTE: The realizaitons Ym and jacYm must be independent for this to return
 # an unbiased estimate of the cost function gradient
 function get_cost_gradient(Y::Vector{Float64}, Ym::Matrix{Float64}, jacsYm::Vector{Matrix{Float64}}, N_trans::Int=0)
-    # N = size(Y,1)-1, since Y also contains the zeroth sample.
+    # N = size(Y,1)÷y_len-1, since Y also contains the zeroth sample.
     # While we sum over t0, t1, ..., tN, the error at t0 will always be zero
     # due to known initial conditions which is why we divide by N instead of N+1
 
@@ -118,7 +118,7 @@ end
 # This computes the gradient in a less vectorized way, but more similar to the structure of the estimator computed by the adjoint method
 # Should only really be used to compare performance of forward sensitivity analysis to adjoint method performance
 function get_cost_gradient_alt(Y::Vector{Float64}, Ym::Matrix{Float64}, jacsYm::Vector{Matrix{Float64}}, N_trans::Int=0)
-    # # N = size(Y,1)-1, since Y also contains the zeroth sample.
+    # # N = size(Y,1)÷y_len-1, since Y also contains the zeroth sample.
     # # While we sum over t0, t1, ..., tN, the error at t0 will always be zero
     # # due to known initial conditions which is why we divide by N instead of N+1
 
@@ -151,7 +151,7 @@ function get_cost_gradient_alt(Y::Vector{Float64}, Ym::Matrix{Float64}, jacsYm::
 end
 
 # NOTE: SCALAR_OUTPUT is assumed
-function get_cost_value(Y::Array{Float64,1}, Ym::Array{Float64,2}, N_trans::Int=0)
+function get_cost_value(Y::Vector{Float64}, Ym::Matrix{Float64}, N_trans::Int=0)
     (1/(size(Y,1)-N_trans-1))*sum( ( Y[N_trans+1:end] - mean(Ym[N_trans+1:end,:], dims=2) ).^2 )
 end
 
@@ -177,7 +177,7 @@ end
 
 # We do linear interpolation between exact values because it's fast
 # n is the dimension of one sample of the state
-function interpw(W::Array{Float64, 2}, m::Int, n::Int)
+function interpw(W::Matrix{Float64}, m::Int, n::Int)
     function w(t::Float64)
         # tₖ = kδ <= t <= (k+1)δ = tₖ₊₁
         # => The rows corresponding to tₖ start at index k*n+1
@@ -190,8 +190,8 @@ function interpw(W::Array{Float64, 2}, m::Int, n::Int)
 end
 
 # This function relies on XW being mangled
-function mk_noise_interp(C::Array{Float64, 2},
-                         XW::Array{Float64, 2},
+function mk_noise_interp(C::Matrix{Float64},
+                         XW::Matrix{Float64},
                          m::Int,
                          δ::Float64)
 
@@ -212,8 +212,8 @@ function mk_noise_interp(C::Array{Float64, 2},
   end
 end
 
-function mk_xw_interp(C::Array{Float64, 2},
-    XW::Array{Float64, 2},
+function mk_xw_interp(C::Matrix{Float64},
+    XW::Matrix{Float64},
     m::Int,
     δ::Float64)
 
@@ -245,9 +245,9 @@ function mk_v_ZOH(Zmm::Matrix{Float64}, δ::Float64)
 end
 
 # Function for using conditional interpolation
-function mk_newer_noise_interp(a_vec::AbstractArray{Float64, 1},
-                               C::Array{Float64, 2},
-                               XW::Array{Array{Float64, 1}, 2},
+function mk_newer_noise_interp(a_vec::AbstractVector{Float64},
+                               C::Matrix{Float64},
+                               XW::Array{Vector{Float64}, 2},
                                m::Int,
                                n_in::Int,
                                δ::Float64,
@@ -344,7 +344,7 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # NOTE: If number and location of free parameters change, the sensitivity TODO: There must be a nicer solution to this
 # functions defined in the code must also be changed
 # const free_dyn_pars_true = [k]                    # true value of all free parameters
-# get_all_θs(pars::Array{Float64,1}) = [m, L, g, pars[1]]
+# get_all_θs(pars::Vector{Float64}) = [m, L, g, pars[1]]
 # dyn_par_bounds = [0.1 Inf]    # Lower and upper bounds of each free dynamic parameter
 # NOTE: Has to be changed when number of free dynamical parameters is changed.
 # Specifically:
@@ -362,21 +362,21 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 if model_id == PENDULUM
     const free_dyn_pars_true = [m, L, k]# True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
-    get_all_θs(pars::Array{Float64,1}) = [pars[1], pars[2], g, pars[3]]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Vector{Float64}) = [pars[1], pars[2], g, pars[3]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1, 1.0, 1.0, 0.1, 1.0, 0.1]
-    model_sens_to_use = pendulum_sensitivity_sans_g_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [0.1, 1.0, 1.0]#, 0.1, 1.0, 0.1]
+    model_sens_to_use = pendulum_sensitivity_sans_g#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_sans_g
-    model_adj_to_use_dist_sens = my_pendulum_adjoint_sans_g_with_dist_sens_3
+    model_adj_to_use_dist_sens = my_pendulum_adjoint_sans_g#_with_dist_sens_3
     model_stepbystep = pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
 elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
     const num_dyn_vars = 2
-    get_all_θs(pars::Array{Float64,1}) = pars#free_dyn_pars_true
+    get_all_θs(pars::Vector{Float64}) = pars#free_dyn_pars_true
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.01 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
@@ -386,9 +386,9 @@ elseif model_id == MOH_MDL
     model_adj_to_use = mohamed_adjoint_new
     model_stepbystep = mohamed_stepbystep
 elseif model_id == DELTA
-    const free_dyn_pars_true = [J1, J2]
+    const free_dyn_pars_true = [J1]
     const num_dyn_vars = 24
-    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, pars[1], pars[2], g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, pars[1], J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     dyn_par_bounds = [0.01 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [0.1]
@@ -415,7 +415,7 @@ learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
 # ]
 if model_id == PENDULUM
     f(x::Vector{Float64}) = x[7]               # applied on the state at each step
-    f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28], x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]#, x[35], x[42], x[49]]#, x[28]]##[x[14], x[21], x[28], x[35], x[42]]   # NOTE: Hard-coded right now
     # f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]                                                                                           #tuesday debug starting here
     f_sens_deb(x::Vector{Float64}) = x[8:end]
 elseif model_id == MOH_MDL
@@ -423,13 +423,23 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64}) = [x[3]]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
+    # If output is all three servo angles
     f(x::Vector{Float64}) = [x[1],x[4],x[7]]    # All three servo angles
     f_sens(x::Vector{Float64}) = [x[25],x[28],x[31]]
-    # f_sens_deb(x::Vector{Float64}) = x[3:4]
+    # If output is position of end effector
+    f(x::Vector{Float64}) = [L2*sin(x[2])*sin(x[3])
+        L1*cos(x[1]) + L2*cos(x[2]) + L0 - L3
+        L1*sin(x[1]) + L2*sin(x[2])*cos(x[3])]
+    f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27] # Currently sensitivity wrt to J1
+        -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
+        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]]
 end
-f_debug(x::Array{Float64,1}) = x
-# f_sens(x::Array{Float64,1}) = [x[14], x[21], x[28]]
-# f_sens(x::Array{Float64,1}) = [x[14], x[21]]
+
+y_len = length(f(ones(num_dyn_vars)))
+
+f_debug(x::Vector{Float64}) = x
+# f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]
+# f_sens(x::Vector{Float64}) = [x[14], x[21]]
 # NOTE: Has to be changed when number of free  parameters is changed.
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
 h(sol) = apply_outputfun_mvar(f, sol)                            # for our model                                             # USED
@@ -440,13 +450,13 @@ h_debug(sol) = apply_outputfun_mvar(f_debug, sol)
 h_sens_deb(sol) = apply_two_outputfun_twomvar(f_debug, f_sens_deb, sol)
 
 const num_dyn_pars = length(free_dyn_pars_true)#size(dyn_par_bounds, 1)
-realize_model_sens(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
-    model_sens_to_use(φ0, u, w, get_all_θs(pars)),
+realize_model_sens(u::Function, w::Function, pars::Vector{Float64}, N::Int, du0::Vector{Float64}=Vector{Float64}(undef, 0)) = problem(
+    model_sens_to_use(φ0, u, w, du0, get_all_θs(pars)),
     N,
     Ts,
 )
-realize_model(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int) = problem(
-    model_to_use(φ0, u, w, get_all_θs(free_dyn_pars)),
+realize_model(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, du0::Vector{Float64}=Vector{Float64}(undef, 0)) = problem(
+    model_to_use(φ0, u, w, du0, get_all_θs(free_dyn_pars)),
     N,
     Ts,
 )
@@ -465,9 +475,15 @@ function solve_delta(N::Int)
     L1 = θ[2]
     L2 = θ[3]
     L3 = θ[4]
-    du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
     
+
+    du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
     delta_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
+    # ------------- Two different input alternatives -------------
+    # input  = readdlm("data/experiments/100_delta/U.csv", ',')
+    # u(t::Float64) = interpw(input, 1, 1)(t) # NOTE: This doesn't re-compute interpw every time, does it?
+    # du0 = 5*((u(0.001)[1]-u(0.0)[1])/0.001)*[1.;1.;1.]
+    # delta_mdl = delta_robot(0.0, t->5*u(t)[1]*[1.;1.;1.], t->zeros(3), du0, θ)
 
     delta_prob = problem(delta_mdl, N, Ts)
     sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
@@ -483,6 +499,7 @@ function solve_delta(N::Int)
     # plot(p1, p2, p3, layout=l)
     
     animate_delta_gif(outmat, θ, "data/results/delta_gif.gif")
+    return outmat
 end
 
 function debug_delta_sensitivity(N::Int)
@@ -576,31 +593,31 @@ end
 
 # ----------------------------------------------------------------------------------------
 
-solvew_sens(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
-  realize_model_sens(u, w, free_dyn_pars, N),
+solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
+  realize_model_sens(u, w, free_dyn_pars, N, (u(0.001)-u(0.0))/0.001),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
   kwargs...,
 )
-solve_sens_customstep(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int, myTs::Float64; kwargs...) = solve(
-  realize_model_sens(u, w, free_dyn_pars, N),
+solve_sens_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, myTs::Float64; kwargs...) = solve(
+  realize_model_sens(u, w, free_dyn_pars, N, (u(0.001)-u(0.0))/0.001),
   saveat = 0:myTs:(N*Ts-0.00001),
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
   kwargs...,
 )
-solvew(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
-  realize_model(u, w, free_dyn_pars, N),
+solvew(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
+  realize_model(u, w, free_dyn_pars, N, (u(0.001)-u(0.0))/0.001),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
   kwargs...,
 )
-solve_customstep(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::Int, myTs::Float64; kwargs...) = solve(
+solve_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, myTs::Float64; kwargs...) = solve(
     realize_model(u, w, free_dyn_pars, N),
     saveat = 0:myTs:(N*Ts-0.00001),
     abstol = abstol,
@@ -612,13 +629,14 @@ solve_customstep(u::Function, w::Function, free_dyn_pars::Array{Float64, 1}, N::
 # data-set output function
 h_data(sol) = apply_outputfun_mvar(x -> f(x) + σ * randn(size(f(x))), sol)
 
-function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
+function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     start_datetime = now()
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     u = exp_data.u
     Y = exp_data.Y
-    N = size(Y,1)-1
+    # TODO: Is this stacked way of saving multidimensional Y really the best? Maybe
+    N = size(Y,1)÷y_len-1    # TODO: This -1 is rly because I generate too few samples, we want this N to turn out e.g. equal to 100 but it ends up being 99
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -629,13 +647,13 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
 
     @assert (length(pars0) == num_dyn_pars+length(dist_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
     @assert (size(dyn_par_bounds, 1) == num_dyn_pars) "Please provide bounds for exactly all free dynamic parameters"
-    @assert (length(const_learning_rate) == length(pars0)) "The learning rate must have the same number of components as the number of parameters to be identified"
+    @assert (length(const_learning_rate) == length(pars0)) "The learning rate must have the same number of components as the number of parameters to be identified, currently is has $(length(const_learning_rate)) instead of $(length(pars0))"
 
     if !isdir(joinpath(data_dir, "tmp/"))
         mkdir(joinpath(data_dir, "tmp/"))
     end
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
 
     # === We then optimize parameters for the baseline model ===
@@ -792,7 +810,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         W_meta = exp_data.W_meta
         nx = W_meta.nx
         n_out = W_meta.n_out
-        N = size(exp_data.Y, 1)-1
+        N = size(exp_data.Y, 1)÷y_len-1
 
         η = exp_data.get_all_ηs(free_pars)
 
@@ -818,7 +836,7 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
         W_meta = exp_data.W_meta
         nx = W_meta.nx
         n_out = W_meta.n_out
-        N = size(exp_data.Y, 1)-1
+        N = size(exp_data.Y, 1)÷y_len-1
 
         η = exp_data.get_all_ηs(free_pars)
 
@@ -891,11 +909,11 @@ function get_estimates(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
     return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, durations
 end
 
-function get_outputs(expid::String, pars0::Array{Float64,1})
+function get_outputs(expid::String, pars0::Vector{Float64})
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -907,7 +925,7 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
 
     @assert (length(pars0) == num_dyn_pars+length(W_meta.free_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(pars0)
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
@@ -943,9 +961,9 @@ function get_outputs(expid::String, pars0::Array{Float64,1})
     # XWm = simulate_noise_process(dmdl, Zm)
     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-    calc_mean_y_N_prop(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+    calc_mean_y_N_prop(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew_sens(u, t -> wmm(m)(t), free_pars, N) |> h_comp
-    calc_mean_y_prop(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, free_pars, m)
+    calc_mean_y_prop(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N_prop(N, free_pars, m)
     Ym_prop, sens_m_prop = solve_in_parallel_sens(m -> calc_mean_y_prop(pars0, m), ms)
     Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
 
@@ -959,6 +977,10 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     XW     = readdlm(joinpath(data_dir, expid*"/XW.csv"), ',')
     W_meta_raw, W_meta_names =
         readdlm(joinpath(data_dir, expid*"/meta_W.csv"), ',', header=true)
+
+    U_meta_raw, U_meta_names = 
+        readdlm(joinpath(data_dir, expid*"/meta_U.csv"), ',', header=true)
+    n_u_out = Int(U_meta_raw[1,3])
 
     # NOTE: These variable assignments are based on the names in W_meta_names,
     # but hard-coded, so if W_meta_names is changed then there is no guarantee
@@ -994,7 +1016,7 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Array of tuples containing lower and upper bound for each free disturbance parameter
     # dist_par_bounds = Array{Float64}(undef, 0, 2)
     dist_par_bounds = [-Inf Inf; -Inf Inf; -Inf Inf]#[0 Inf; 0 Inf; -Inf Inf]
-    function get_all_ηs(free_pars::Array{Float64, 1})
+    function get_all_ηs(free_pars::Vector{Float64})
         # If copy() is not used here, some funky stuff that I don't fully understand happens.
         # I think essentially η_true stops being defined after function returns, so
         # setting all_η to its value doesn't behave quite as I expected
@@ -1014,24 +1036,25 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds)
 
     # Exact interpolation
-    mk_we(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1}) =
+    mk_we(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1}) =
         (m::Int) -> mk_newer_noise_interp(
-        a_vec::AbstractArray{Float64, 1}, C_true, XW, m, n_in, δ, isws)
-    # Linear interpolation. Not recommended DEBUG
-    # mk_we(XW::Array{Array{Float64,1},2}, isws::Array{InterSampleWindow, 1}) =
-    #     (m::Int) -> mk_noise_interp(C_true, mangle_XW(XW), m, δ)
+        a_vec::AbstractVector{Float64}, C_true, XWs, m, n_in, δ, isws)
+    # Linear interpolation. Not recommended DEBUG.
+    # mk_we(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1}) =
+    #     (m::Int) -> mk_noise_interp(C_true, mangle_XWs(XWs), m, δ)
 
-    u(t::Float64) = interpw(input, 1, 1)(t)
+    @warn "Scaling input down by a factor of 0.5 because of convergence issues"
+    u(t::Float64) = 0.5*interpw(input, 1, n_u_out)(t)
 
     # === We first generate the output of the true system ===
-    function calc_Y(XW::Array{Array{Float64, 1},2}, isws::Array{InterSampleWindow, 1})
-        # NOTE: This XW should be non-mangled, which is why we don't divide by n_tot
-        @assert (Nw <= size(XW, 1)) "Disturbance data size mismatch ($(Nw) > $(size(XW, 1)))"
-        @warn "Using E=1 instead of size of XW when generating Y!"
+    function calc_Y(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1})
+        # NOTE: XWs should be non-mangled, which is why we don't divide by n_tot
+        @assert (Nw <= size(XWs, 1)) "Disturbance data size mismatch ($(Nw) > $(size(XWs, 1)))"
+        @warn "Using E=1 instead of size of XWs when generating Y!"
         # E = size(XW, 2)
         E = 1
         es = collect(1:E)
-        we = mk_we(XW, isws)
+        we = mk_we(XWs, isws)
         # solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
         Y, _ = solve_in_parallel_multivar_flat(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
         return Y
@@ -1061,14 +1084,14 @@ end
 
 function perform_SGD_adam(
     get_grad_estimate::Function,
-    pars0::Array{Float64,1},                        # Initial guess for parameters
-    bounds::Array{Float64, 2},                      # Parameter bounds
+    pars0::Vector{Float64},                        # Initial guess for parameters
+    bounds::Matrix{Float64},                      # Parameter bounds
     learning_rate::Function=learning_rate_vec;
     tol::Float64=1e-6,
     maxiters=200,
     verbose=false,
-    betas::Array{Float64,1} = [0.9, 0.999])   # betas are the decay parameters of moment estimates
-    # betas::Array{Float64,1} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
+    betas::Vector{Float64} = [0.9, 0.999])   # betas are the decay parameters of moment estimates
+    # betas::Vector{Float64} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
 
     eps = 0.#1e-8
     q = 20  # TODO: This is a little arbitrary, but because of low tolerance, the stopping criterion is never reached anyway
@@ -1109,16 +1132,16 @@ end
 # Also adds time-varying beta_1, dependent on the new hyper-parameter λ
 function perform_SGD_adam_new(
     get_grad_estimate::Function,
-    pars0::Array{Float64,1},                        # Initial guess for parameters
-    bounds::Array{Float64, 2},                      # Parameter bounds
+    pars0::Vector{Float64},                        # Initial guess for parameters
+    bounds::Matrix{Float64},                      # Parameter bounds
     learning_rate::Function=learning_rate_vec_red;
     tol::Float64=1e-6,
     maxiters=200,
     verbose=false,
-    betas::Array{Float64,1} = [0.9, 0.999],
+    betas::Vector{Float64} = [0.9, 0.999],
     # λ = 0.5)   # betas are the decay parameters of moment estimates   # NOTE: I used to use this, then I started deubbing adjoint on 17/10/2023
     λ = 1-1e-4)   # betas are the decay parameters of moment estimates
-    # betas::Array{Float64,1} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
+    # betas::Vector{Float64} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
 
     eps = 0.#1e-8
     q = 20# TODO: This is a little arbitrary, but because of low tolerance, the stopping criterion is never reached anyway
@@ -1161,7 +1184,7 @@ end
 
 # Row i of bounds should have two columns, where first element is lower bound
 # for parameter i, and second element is upper bound for parameter i
-function project_on_bounds!(vec::Array{Float64,1}, bounds::Array{Float64,2})
+function project_on_bounds!(vec::Vector{Float64}, bounds::Matrix{Float64})
     low_inds = findall(vec .< bounds[:,1])
     high_inds = findall(vec .> bounds[:,2])
     vec[low_inds] = bounds[low_inds, 1]
@@ -1169,7 +1192,7 @@ function project_on_bounds!(vec::Array{Float64,1}, bounds::Array{Float64,2})
     nothing
 end
 
-function plot_outputs(Y_ref::Array{Float64, 1}, Y_base::Array{Float64, 1}, Y_prop::Array{Float64, 1}, Y_mean_prop::Array{Float64, 1})
+function plot_outputs(Y_ref::Vector{Float64}, Y_base::Vector{Float64}, Y_prop::Vector{Float64}, Y_mean_prop::Vector{Float64})
     t = 1:size(Y_ref, 1)
     mse_base = round(mean((Y_ref-Y_base).^2), sigdigits=3)
     mse_prop= round(mean((Y_ref-Y_prop).^2), sigdigits=3)
@@ -1183,11 +1206,11 @@ end
 # Simulates system with specified white noise
 function simulate_system(
     exp_data::ExperimentData,
-    free_pars::Array{Float64,1},
+    free_pars::Vector{Float64},
     M::Int,
     dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1},
-    Zm::Array{Array{Float64,2},1})::Array{Float64,2}
+    Zm::Array{Matrix{Float64},1})::Matrix{Float64}
 
     W_meta = exp_data.W_meta
     nx = W_meta.nx
@@ -1195,7 +1218,7 @@ function simulate_system(
     n_out = W_meta.n_out
     n_tot = nx*n_in
     dη = length(W_meta.η)
-    N = size(exp_data.Y, 1)-1
+    N = size(exp_data.Y, 1)÷y_len-1
 
     # TODO: HERE! what requirements are there on free_pars matching get_all_θs?? herererere
     p = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
@@ -1213,19 +1236,19 @@ function simulate_system(
     # XWm = simulate_noise_process(dmdl, Zm)
     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-    calc_mean_y_N(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+    calc_mean_y_N(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h
-    calc_mean_y(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, free_pars, m)
+    calc_mean_y(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, free_pars, m)
     return solve_in_parallel(m -> calc_mean_y(free_pars, m), collect(1:M))   # Returns Ym
 end
 
 # Simulates system with newly generated white noise
 function simulate_system(
     exp_data::ExperimentData,
-    free_pars::Array{Float64,1},
+    free_pars::Vector{Float64},
     M::Int,
     dist_sens_inds::Array{Int64, 1},
-    isws::Array{InterSampleWindow,1})::Array{Float64,2}
+    isws::Array{InterSampleWindow,1})::Matrix{Float64}
 
     W_meta = exp_data.W_meta
     nx = W_meta.nx
@@ -1239,16 +1262,16 @@ end
 # Computes adjoint sensitivity with specified white noise
 function get_adjoint_sensitivity(
     exp_data::ExperimentData,
-    free_pars::Array{Float64,1},
+    free_pars::Vector{Float64},
     M::Int,
     dist_sens_inds::Array{Int64, 1},
     isws::Array{InterSampleWindow,1},
-    Zm::Array{Array{Float64,2},1})::Array{Float64,1}
+    Zm::Array{Matrix{Float64},1})::Vector{Float64}
 
     W_meta = exp_data.W_meta
     nx = W_meta.nx
     n_out = W_meta.n_out
-    N = size(exp_data.Y, 1)-1
+    N = size(exp_data.Y, 1)÷y_len-1
     u = exp_data.u
     η = exp_data.get_all_ηs(free_pars)
     Y = exp_data.Y
@@ -1289,10 +1312,10 @@ end
 # Computes adjoint sensitivity with newly generated white noise
 function get_adjoint_sensitivity(
     exp_data::ExperimentData,
-    free_pars::Array{Float64,1},
+    free_pars::Vector{Float64},
     M::Int,
     dist_sens_inds::Array{Int64, 1},
-    isws::Array{InterSampleWindow,1})::Array{Float64,1}
+    isws::Array{InterSampleWindow,1})::Vector{Float64}
 
     W_meta = exp_data.W_meta
     nx = W_meta.nx
@@ -1306,11 +1329,11 @@ end
 # Simulates system with specified white noise
 function simulate_system_sens(
     exp_data::ExperimentData,
-    free_pars::Array{Float64,1},
+    free_pars::Vector{Float64},
     M::Int,
     dist_sens_inds::Array{Int64, 1},    # TODO: Aren't these included in exp_data? Why pass them separately then? Just seems random
     isws::Array{InterSampleWindow,1},
-    Zm::Array{Array{Float64,2},1})::Tuple{Array{Float64,2}, Array{Array{Float64,2},1}}
+    Zm::Array{Matrix{Float64},1})::Tuple{Matrix{Float64}, Array{Matrix{Float64},1}}
 
     W_meta = exp_data.W_meta
     nx = W_meta.nx
@@ -1318,7 +1341,7 @@ function simulate_system_sens(
     n_out = W_meta.n_out
     # n_tot = nx*n_in
     # dη = length(W_meta.η)
-    N = size(exp_data.Y, 1)-1
+    N = size(exp_data.Y, 1)÷y_len-1
     # dist_par_inds = W_meta.free_par_inds
 
     η = exp_data.get_all_ηs(free_pars)
@@ -1336,19 +1359,19 @@ function simulate_system_sens(
     # XWm = simulate_noise_process(dmdl, Zm)
     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), dmdl.Cd, XWm, m, n_in, δ, isws)
 
-    calc_mean_y_N(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+    calc_mean_y_N(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew_sens(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h_comp
-    calc_mean_y(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, free_pars, m)
+    calc_mean_y(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, free_pars, m)
     return solve_in_parallel_sens(m -> calc_mean_y(free_pars, m), collect(1:M))  # Returns Ym and JacsYm
 end
 
 # Simulates system with newly generated white noise
 function simulate_system_sens(
     exp_data::ExperimentData,
-    free_pars::Array{Float64,1},
+    free_pars::Vector{Float64},
     M::Int,
     dist_sens_inds::Array{Int64, 1},
-    isws::Array{InterSampleWindow,1})::Tuple{Array{Float64,2}, Array{Array{Float64,2},1}}
+    isws::Array{InterSampleWindow,1})::Tuple{Matrix{Float64}, Array{Matrix{Float64},1}}
 
     W_meta = exp_data.W_meta
     nx = W_meta.nx
@@ -1374,13 +1397,13 @@ function write_results_to_file(path::String, opt_pars_baseline, opt_pars_propose
 end
 
 # NOTE: Only generate baseline cost function
-function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::Array{Float64,1}, step_num::Int, N_trans::Int = 0)
+function generate_cost_func(expid::String, pars0::Vector{Float64}, step_sizes::Vector{Float64}, step_num::Int, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
     # N = 200
     # @warn "Using N=200 instead of default!!!!!!!!!!"
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1391,7 +1414,7 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     debug_store = fill(NaN, N+1, 2*step_num+1)
 
@@ -1446,13 +1469,13 @@ function generate_cost_func(expid::String, pars0::Array{Float64,1}, step_sizes::
 end
 
 # NOTE: Only genererates proposed cost function
-function sample_cost_func(expid::String, par_vec::Array{Array{Float64,1},1}, N_trans::Int = 0)
+function sample_cost_func(expid::String, par_vec::Array{Vector{Float64},1}, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
     # N = 200
     # @warn "Using N=200 instead of default!!!!!!!!!!"
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1463,7 +1486,7 @@ function sample_cost_func(expid::String, par_vec::Array{Array{Float64,1},1}, N_t
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     Zm = [randn(Nw, n_tot) for m = 1:M]
 
@@ -1482,13 +1505,13 @@ function sample_cost_func(expid::String, par_vec::Array{Array{Float64,1},1}, N_t
 end
 
 # NOTE: Only genererates proposed cost function gradient (using forward sensitivity). TODO: Also get baseline?
-function sample_cost_func_grad(expid::String, par_vec::Array{Array{Float64,1},1}, N_trans::Int = 0)
+function sample_cost_func_grad(expid::String, par_vec::Array{Vector{Float64},1}, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
     # N = 200
     # @warn "Using N=200 instead of default!!!!!!!!!!"
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1499,7 +1522,7 @@ function sample_cost_func_grad(expid::String, par_vec::Array{Array{Float64,1},1}
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     Zm = [randn(Nw, n_tot) for m = 1:2M]
 
@@ -1524,7 +1547,7 @@ function debug_cost_and_min(expid::String, N_trans::Int=0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1535,7 +1558,7 @@ function debug_cost_and_min(expid::String, N_trans::Int=0)
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -1606,7 +1629,7 @@ function debug_cost_and_min_2par(expid::String, N_trans::Int=0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1617,7 +1640,7 @@ function debug_cost_and_min_2par(expid::String, N_trans::Int=0)
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -1695,7 +1718,7 @@ function det_debug_cost_and_min(expid::String, N_trans::Int=0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1706,7 +1729,7 @@ function det_debug_cost_and_min(expid::String, N_trans::Int=0)
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -1771,7 +1794,7 @@ function debug_cost_and_min_2dist(expid::String, N_trans::Int=0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1782,7 +1805,7 @@ function debug_cost_and_min_2dist(expid::String, N_trans::Int=0)
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -1902,14 +1925,14 @@ function crazy_debug_plotter()
 end
 
 # To be used with debug_cost_and_min()-above
-function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0)
+function minimizer_helper(expid::String, pars0::Vector{Float64}, N_trans::Int=0)
     # TODO: We don't really need to get experiment data here, we should already have it in wrapper function!!!!!!! Or is it easiest to fetch? Perhaps not Y?
     start_datetime = now()
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     u = exp_data.u
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -1920,13 +1943,13 @@ function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0
 
     @assert (length(pars0) == num_dyn_pars+length(dist_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
     @assert (size(dyn_par_bounds, 1) == num_dyn_pars) "Please provide bounds for exactly all free dynamic parameters"
-    @assert (length(const_learning_rate) == length(pars0)) "The learning rate must have the same number of components as the number of parameters to be identified"
+    @assert (length(const_learning_rate) == length(pars0)) "The learning rate must have the same number of components as the number of parameters to be identified, currently is has $(length(const_learning_rate)) instead of $(length(pars0))"
 
     if !isdir(joinpath(data_dir, "tmp/"))
         mkdir(joinpath(data_dir, "tmp/"))
     end
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
 
     E = 1
@@ -2033,7 +2056,7 @@ function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0
         W_meta = exp_data.W_meta
         nx = W_meta.nx
         n_out = W_meta.n_out
-        N = size(exp_data.Y, 1)-1
+        N = size(exp_data.Y, 1)÷y_len-1
 
         η = exp_data.get_all_ηs(free_pars)
 
@@ -2059,7 +2082,7 @@ function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0
         W_meta = exp_data.W_meta
         nx = W_meta.nx
         n_out = W_meta.n_out
-        N = size(exp_data.Y, 1)-1
+        N = size(exp_data.Y, 1)÷y_len-1
 
         η = exp_data.get_all_ηs(free_pars)
 
@@ -2109,14 +2132,14 @@ function minimizer_helper(expid::String, pars0::Array{Float64,1}, N_trans::Int=0
 end
 
 # To be used with debug_cost_and_min()-above
-function det_minimizer_helper(expid::String, pars0::Array{Float64,1}, Z::Vector{Matrix{Float64}}, N_trans::Int=0)
+function det_minimizer_helper(expid::String, pars0::Vector{Float64}, Z::Vector{Matrix{Float64}}, N_trans::Int=0)
     # TODO: We don't really need to get experiment data here, we should already have it in wrapper function!!!!!!! Or is it easiest to fetch? Perhaps not Y?
     start_datetime = now()
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     u = exp_data.u
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -2127,13 +2150,13 @@ function det_minimizer_helper(expid::String, pars0::Array{Float64,1}, Z::Vector{
 
     @assert (length(pars0) == num_dyn_pars+length(dist_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
     @assert (size(dyn_par_bounds, 1) == num_dyn_pars) "Please provide bounds for exactly all free dynamic parameters"
-    @assert (length(const_learning_rate) == length(pars0)) "The learning rate must have the same number of components as the number of parameters to be identified"
+    @assert (length(const_learning_rate) == length(pars0)) "The learning rate must have the same number of components as the number of parameters to be identified, currently is has $(length(const_learning_rate)) instead of $(length(pars0))"
 
     if !isdir(joinpath(data_dir, "tmp/"))
         mkdir(joinpath(data_dir, "tmp/"))
     end
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
 
     E = 1
@@ -2238,7 +2261,7 @@ function det_minimizer_helper(expid::String, pars0::Array{Float64,1}, Z::Vector{
         W_meta = exp_data.W_meta
         nx = W_meta.nx
         n_out = W_meta.n_out
-        N = size(exp_data.Y, 1)-1
+        N = size(exp_data.Y, 1)÷y_len-1
 
         η = exp_data.get_all_ηs(free_pars)
 
@@ -2264,7 +2287,7 @@ function det_minimizer_helper(expid::String, pars0::Array{Float64,1}, Z::Vector{
         W_meta = exp_data.W_meta
         nx = W_meta.nx
         n_out = W_meta.n_out
-        N = size(exp_data.Y, 1)-1
+        N = size(exp_data.Y, 1)÷y_len-1
 
         η = exp_data.get_all_ηs(free_pars)
 
@@ -2404,11 +2427,11 @@ function contour_2distsens_anim(trace_address="data/results/from_Alsvin/20k_only
     gif(anim, file_name, fps = 15)
 end
 
-function debug_dist_sens(expid::String, pars0::Array{Float64,1}, Δ::Float64=0.01)
+function debug_dist_sens(expid::String, pars0::Vector{Float64}, Δ::Float64=0.01)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -2420,7 +2443,7 @@ function debug_dist_sens(expid::String, pars0::Array{Float64,1}, Δ::Float64=0.0
 
     @assert (length(pars0) == num_dyn_pars+length(W_meta.free_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(pars0)
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
@@ -2452,9 +2475,9 @@ function debug_dist_sens(expid::String, pars0::Array{Float64,1}, Δ::Float64=0.0
     XWm = simulate_noise_process_mangled(dmdl, Z_sens)
     wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
 
-    calc_mean_y_N_prop(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+    calc_mean_y_N_prop(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew_sens(u, t -> wmm(m)(t), free_pars, N) |> h_comp
-    calc_mean_y_prop(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop(N, free_pars, m)
+    calc_mean_y_prop(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N_prop(N, free_pars, m)
     Ym_prop, sens_m_prop = solve_in_parallel_sens(m -> calc_mean_y_prop(pars0, m), ms)
     Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
 
@@ -2481,9 +2504,9 @@ function debug_dist_sens(expid::String, pars0::Array{Float64,1}, Δ::Float64=0.0
     wmm1(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
     println("Approx a1 sens: $((wmm1(1)(0.07)[1]-val[1])/Δ)")
 
-    calc_mean_y_N_prop1(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+    calc_mean_y_N_prop1(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew_sens(u, t -> wmm1(m)(t), free_pars, N) |> h_comp
-    calc_mean_y_prop1(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop1(N, free_pars, m)
+    calc_mean_y_prop1(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N_prop1(N, free_pars, m)
     Ym_prop1, sens_m_prop1 = solve_in_parallel_sens(m -> calc_mean_y_prop1(pars0, m), ms)
     Y_mean_prop1 = reshape(mean(Ym_prop1, dims = 2), :)
 
@@ -2495,9 +2518,9 @@ function debug_dist_sens(expid::String, pars0::Array{Float64,1}, Δ::Float64=0.0
     wmm2(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
     println("Approx a2 sens: $((wmm2(1)(0.07)[1]-val[1])/Δ)")
 
-    calc_mean_y_N_prop2(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+    calc_mean_y_N_prop2(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew_sens(u, t -> wmm2(m)(t), free_pars, N) |> h_comp
-    calc_mean_y_prop2(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop2(N, free_pars, m)
+    calc_mean_y_prop2(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N_prop2(N, free_pars, m)
     Ym_prop2, sens_m_prop2 = solve_in_parallel_sens(m -> calc_mean_y_prop2(pars0, m), ms)
     Y_mean_prop2 = reshape(mean(Ym_prop1, dims = 2), :)
 
@@ -2509,9 +2532,9 @@ function debug_dist_sens(expid::String, pars0::Array{Float64,1}, Δ::Float64=0.0
     wmm3(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
     println("Approx c sens: $((wmm3(1)(0.07)[1]-val[1])/Δ)")
 
-    calc_mean_y_N_prop3(N::Int, free_pars::Array{Float64, 1}, m::Int) =
+    calc_mean_y_N_prop3(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew_sens(u, t -> wmm3(m)(t), free_pars, N) |> h_comp
-    calc_mean_y_prop3(free_pars::Array{Float64, 1}, m::Int) = calc_mean_y_N_prop3(N, free_pars, m)
+    calc_mean_y_prop3(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N_prop3(N, free_pars, m)
     Ym_prop3, sens_m_prop3 = solve_in_parallel_sens(m -> calc_mean_y_prop3(pars0, m), ms)
     Y_mean_prop3 = reshape(mean(Ym_prop1, dims = 2), :)
 
@@ -2556,11 +2579,11 @@ function debug_dist_sens(expid::String, pars0::Array{Float64,1}, Δ::Float64=0.0
     return numrate1, numrate2, numrate3, sens1, sens2, sens3, costests, costsens, res_tup, detcostres
 end
 
-function debug_det_costs(Y::Array{Float64,2}, Ym_prop::Array{Float64,2},
-        Ym_prop1::Array{Float64,2}, Ym_prop2::Array{Float64,2},
-        Ym_prop3::Array{Float64,2}, sens1::Array{Float64,2},
-        sens2::Array{Float64,2}, sens3::Array{Float64,2}, Δ::Float64, N_trans::Int = 0)
-    N = size(Y,1)-1
+function debug_det_costs(Y::Matrix{Float64}, Ym_prop::Matrix{Float64},
+        Ym_prop1::Matrix{Float64}, Ym_prop2::Matrix{Float64},
+        Ym_prop3::Matrix{Float64}, sens1::Matrix{Float64},
+        sens2::Matrix{Float64}, sens3::Matrix{Float64}, Δ::Float64, N_trans::Int = 0)
+    N = size(Y,1)÷y_len-1
 
     E = size(Y,2)
     derivs1 = Matrix{Float64}(undef, M, E)
@@ -2678,7 +2701,7 @@ function estimate_gradient_directions(expid::String, N_trans::Int = 0)
     W_meta = exp_data.W_meta
     u = exp_data.u
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -2695,7 +2718,7 @@ function estimate_gradient_directions(expid::String, N_trans::Int = 0)
         mkdir(joinpath(data_dir, "tmp/"))
     end
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
 
     function get_gradient_estimate_base(y, dummy_input, free_pars)
         Yb, jacB = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> h_comp
@@ -2737,7 +2760,7 @@ function estimate_gradient_directions(expid::String, N_trans::Int = 0)
     return pars_to_try, gradBs, gradPs
 end
 
-function compute_forward_difference_derivative(x_vals::Array{Float64,1}, y_vals::Array{Float64,1})
+function compute_forward_difference_derivative(x_vals::Vector{Float64}, y_vals::Vector{Float64})
     @assert (length(x_vals) == length(y_vals)) "x_vals and y_vals must contain the same number of elements"
     diff = zeros(size(y_vals))
     for i=1:length(y_vals)-1
@@ -2754,7 +2777,7 @@ function test_disturbance_sensitivities(expid::String)
     W_meta = exp_data.W_meta
     u = exp_data.u
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -2796,7 +2819,7 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -2806,7 +2829,7 @@ function debug_adjoint_stochastic(expid::String, N_trans::Int=0)
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(free_dyn_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
     η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
@@ -3027,7 +3050,7 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -3037,7 +3060,7 @@ function solve_adjoint_deterministic(expid::String, N_trans::Int=0, my_ind::Int=
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(free_dyn_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
     η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
@@ -3218,7 +3241,7 @@ function debug_adjoint_deterministic(expid::String, N_trans::Int=0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -3228,7 +3251,7 @@ function debug_adjoint_deterministic(expid::String, N_trans::Int=0)
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(free_dyn_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
     η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
@@ -3385,7 +3408,7 @@ function debug_adjoint_semistochastic(expid::String, N_trans::Int=0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -3395,7 +3418,7 @@ function debug_adjoint_semistochastic(expid::String, N_trans::Int=0)
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(free_dyn_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
     η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
@@ -3557,7 +3580,7 @@ function debug_adjoint_semistochastic_mvar(expid::String, N_trans::Int=0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -3567,7 +3590,7 @@ function debug_adjoint_semistochastic_mvar(expid::String, N_trans::Int=0)
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(free_dyn_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
     η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
@@ -3734,7 +3757,7 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -3744,7 +3767,7 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(free_dyn_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
     η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
@@ -3944,7 +3967,7 @@ function clean_adjoint_debug_distsens(expid::String, N_trans::Int=0, my_ind::Int
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -3955,7 +3978,7 @@ function clean_adjoint_debug_distsens(expid::String, N_trans::Int=0, my_ind::Int
     dist_par_inds = W_meta.free_par_inds
     # num_free_pars = num_dyn_pars + length(dist_par_inds)
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     free_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])
     p = get_all_parameters(free_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
@@ -4168,7 +4191,7 @@ function clean_adjoint_stochastic(expid::String, N_trans::Int=0, my_ind::Int=1)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -4178,7 +4201,7 @@ function clean_adjoint_stochastic(expid::String, N_trans::Int=0, my_ind::Int=1)
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(free_dyn_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
     η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
@@ -4313,7 +4336,7 @@ function debug_new_matrix_exponentials(expid::String, N_trans::Int=0, my_ind::In
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -4325,7 +4348,7 @@ function debug_new_matrix_exponentials(expid::String, N_trans::Int=0, my_ind::In
 
     all_pars_true = vcat(free_dyn_pars_true, W_meta.η[dist_par_inds])
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(all_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
     η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
@@ -4349,7 +4372,7 @@ function ultimate_adjoint_debug(expid::String, δp::Float64=0.01, N_trans::Int64
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -4359,7 +4382,7 @@ function ultimate_adjoint_debug(expid::String, δp::Float64=0.01, N_trans::Int64
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(free_dyn_pars_true)
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
@@ -4744,7 +4767,7 @@ function get_benchmarking_problems(expid::String, N_trans::Int=0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     u = exp_data.u
     Nw = exp_data.Nw
     nx = W_meta.nx
@@ -4754,7 +4777,7 @@ function get_benchmarking_problems(expid::String, N_trans::Int=0)
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
-    get_all_parameters(free_pars::Array{Float64, 1}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
+    get_all_parameters(free_pars::Vector{Float64}) = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     p = get_all_parameters(free_dyn_pars_true) # All true parameters
     θ = p[1:dθ]                                # All true dynamical parameters
     η = p[dθ+1: dθ+dη]                         # All true disturbance parameters
@@ -4863,7 +4886,7 @@ end
 # NOTE: Works only for scalar parameter!!!
 # param_set_i[j,k] should contain optimal parameters corresponding to method i,
 # time horizon Ns[j] and data-set k
-function plot_parameter_boxplots(param_set_1::Array{Float64,2}, param_set_2::Array{Float64, 2}, Ns::Array{Int, 1})
+function plot_parameter_boxplots(param_set_1::Matrix{Float64}, param_set_2::Matrix{Float64}, Ns::Array{Int, 1})
     # θhatbs =
     # map(N -> calc_theta_hats(outputs.θs, outputs.Y, outputs.Yb, N_trans, N), Ns)
     # θhatms =
@@ -4886,12 +4909,12 @@ function plot_parameter_boxplots(param_set_1::Array{Float64,2}, param_set_2::Arr
     hline!(p, free_dyn_pars_true, label = L"\theta_0", linestyle = :dot, linecolor = :gray)
 end
 
-function simulate_experiment(expid::String, pars::Array{Float64, 1}, Zm::Array{Array{Float64,2},1})
+function simulate_experiment(expid::String, pars::Vector{Float64}, Zm::Array{Matrix{Float64},1})
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     u = exp_data.u
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -4904,7 +4927,7 @@ function simulate_experiment(expid::String, pars::Array{Float64, 1}, Zm::Array{A
     return Ym, Zm
 end
 
-function simulate_experiment(expid::String, pars::Array{Float64, 1})
+function simulate_experiment(expid::String, pars::Vector{Float64})
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Nw = exp_data.Nw
@@ -4917,7 +4940,7 @@ function simulate_experiment(expid::String, pars::Array{Float64, 1})
     simulate_experiment(expid, pars, Zm)
 end
 
-function simulate_experiment_debug(expid::String, pars::Array{Float64, 1})
+function simulate_experiment_debug(expid::String, pars::Vector{Float64})
     input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')
     u(t::Float64) = interpw(input, 1, 1)(t)
     # Ym = solvew(u, t -> 0.0, pars, 4999 ) |> h
@@ -4959,11 +4982,11 @@ function read_from_backup(dir::String, E::Int)
     return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed
 end
 
-function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
+function debug_minimization(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -4974,7 +4997,7 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # === Optimizing parameters for the baseline model ===
     function baseline_model_parametrized(δ, dummy_input, pars)
@@ -5072,9 +5095,9 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
         # XWm = simulate_noise_process(dmdl, Zm)
         # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-        calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
+        calc_mean_y_N(N::Int, pars::Vector{Float64}, m::Int) =
             solvew(u, t -> wmm(m)(t), pars, N) |> h
-        calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+        calc_mean_y(pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, pars, m)
         Ym = solve_in_parallel(m -> calc_mean_y(pars, m), ms)
         return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
     end
@@ -5144,11 +5167,11 @@ function debug_minimization(expid::String, pars0::Array{Float64,1}, N_trans::Int
     return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, base_cost_vals, prop_cost_vals, trace_costs, base_par_vals, prop_par_vals, grad_trace
 end
 
-function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
+function debug_minimization_2pars(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -5159,7 +5182,7 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # === Optimizing parameters for the baseline model ===
     @info "Finding optimal parameters for baseline model"
@@ -5252,9 +5275,9 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
         # XWm = simulate_noise_process(dmdl, Zm)
         # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-        calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
+        calc_mean_y_N(N::Int, pars::Vector{Float64}, m::Int) =
             solvew(u, t -> wmm(m)(t), pars, N) |> h
-        calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+        calc_mean_y(pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, pars, m)
         Ym = solve_in_parallel(m -> calc_mean_y(pars, m), ms)
         return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
     end
@@ -5356,11 +5379,11 @@ function debug_minimization_2pars(expid::String, pars0::Array{Float64,1}, N_tran
     return opt_pars_baseline, opt_pars_proposed, trace_base, trace_proposed, base_cost_vals, prop_cost_vals, base_par_vals, prop_par_vals, base_cost_true, prop_cost_true
 end
 
-function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{Float64,1}=[0.5, 4.25, 11.0, 4.25])
+function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Vector{Float64}=[0.5, 4.25, 11.0, 4.25])
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -5371,7 +5394,7 @@ function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{F
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -5398,9 +5421,9 @@ function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{F
         # XWm = simulate_noise_process(dmdl, Zm)
         # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-        calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
+        calc_mean_y_N(N::Int, pars::Vector{Float64}, m::Int) =
             solvew(u, t -> wmm(m)(t), pars, N) |> h
-        calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+        calc_mean_y(pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, pars, m)
         Ym = solve_in_parallel(m -> calc_mean_y(pars, m), ms)
         return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
     end
@@ -5521,11 +5544,11 @@ function debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{F
     return all_pars, cost_vals, par_vecs, min_ind, opt_pars_proposed, trace_proposed, grad_trace
 end
 
-function simplified_debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Array{Float64,1}=[0.5, 4.25, 11.0, 4.25])
+function simplified_debug_minimization_full(expid::String, N_trans::Int = 0; pars0::Vector{Float64}=[0.5, 4.25, 11.0, 4.25])
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -5536,7 +5559,7 @@ function simplified_debug_minimization_full(expid::String, N_trans::Int = 0; par
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -5637,11 +5660,11 @@ function simplified_debug_minimization_full(expid::String, N_trans::Int = 0; par
     return mpars, Lpars, gpars, kpars, cost_vals
 end
 
-function debug_minimization_full_along_curve(expid::String, N_trans::Int = 0; pars0::Array{Float64,1}=[0.5, 4.25, 11.0, 4.25])
+function debug_minimization_full_along_curve(expid::String, N_trans::Int = 0; pars0::Vector{Float64}=[0.5, 4.25, 11.0, 4.25])
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -5656,7 +5679,7 @@ function debug_minimization_full_along_curve(expid::String, N_trans::Int = 0; pa
     # true_pars_all = [0.31, 6.23, 9.725, 6.2]
     true_pars_all = [0.3072846387299368, 6.2553202969939505, 9.763055279858479, 6.159898907321155]
     # true_pars_all = [0.3, 6.25, 9.81, 6.25]
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -5724,9 +5747,9 @@ function debug_minimization_full_along_curve(expid::String, N_trans::Int = 0; pa
         # XWm = simulate_noise_process(dmdl, Zm)
         # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
-        calc_mean_y_N(N::Int, pars::Array{Float64, 1}, m::Int) =
+        calc_mean_y_N(N::Int, pars::Vector{Float64}, m::Int) =
             solvew(u, t -> wmm(m)(t), pars, N) |> h
-        calc_mean_y(pars::Array{Float64, 1}, m::Int) = calc_mean_y_N(N, pars, m)
+        calc_mean_y(pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, pars, m)
         Ym = solve_in_parallel(m -> calc_mean_y(pars, m), ms)
         return reshape(mean(Ym[N_trans+1:end,:], dims = 2), :) # Returns 1D-array
     end
@@ -5822,7 +5845,7 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -5833,7 +5856,7 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -5885,7 +5908,7 @@ function gridsearch_3distsens(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -5896,7 +5919,7 @@ function gridsearch_3distsens(expid::String, N_trans::Int = 0)
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -5993,7 +6016,7 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6004,7 +6027,7 @@ function newdebug_alongcurve(expid::String, N_trans::Int = 0)
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6057,7 +6080,7 @@ function Ym1000_alongcurve(expid::String, Ym1000::Vector{Vector{Matrix{Float64}}
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6068,7 +6091,7 @@ function Ym1000_alongcurve(expid::String, Ym1000::Vector{Vector{Matrix{Float64}}
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6130,7 +6153,7 @@ function newdebug_separatedim(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6141,7 +6164,7 @@ function newdebug_separatedim(expid::String, N_trans::Int = 0)
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6218,7 +6241,7 @@ function gridsearch_debug(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6231,7 +6254,7 @@ function gridsearch_debug(expid::String, N_trans::Int = 0)
 
     num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
 
-    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    # get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6295,7 +6318,7 @@ function gridsearch_k_1distsens(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6308,7 +6331,7 @@ function gridsearch_k_1distsens(expid::String, N_trans::Int = 0)
 
     num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
 
-    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    # get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6381,7 +6404,7 @@ function gridsearch_2distsens(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6394,7 +6417,7 @@ function gridsearch_2distsens(expid::String, N_trans::Int = 0)
 
     num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
 
-    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    # get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6454,7 +6477,7 @@ function ultimate_2distsens_debug(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6471,7 +6494,7 @@ function ultimate_2distsens_debug(expid::String, N_trans::Int = 0)
 
     num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
 
-    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    # get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6514,7 +6537,7 @@ function ultimate_2distsens_debug(expid::String, N_trans::Int = 0)
                     # XWm = simulate_noise_process_mangled(dmdl, Zm)
                     wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
 
-                    calc_mean_y(free_pars::Array{Float64, 1}, m::Int) = solvew(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h
+                    calc_mean_y(free_pars::Vector{Float64}, m::Int) = solvew(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h
                     Ym = mean(solve_in_parallel(m -> calc_mean_y(free_dyn_pars_true, m), collect(1:M)), dims=2)
                     # cost_vals[e][i1, i2] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
                     pend_costs[e][i1, i2] = mean((Y[N_trans+1:end, 3].-Ym[N_trans+1:end]).^2)
@@ -6573,7 +6596,7 @@ function gridsearch_2distsens_directional(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6586,7 +6609,7 @@ function gridsearch_2distsens_directional(expid::String, N_trans::Int = 0)
 
     num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
 
-    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    # get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6664,7 +6687,7 @@ function gridsearch_with_grad_2distsens(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6677,7 +6700,7 @@ function gridsearch_with_grad_2distsens(expid::String, N_trans::Int = 0)
 
     num_free_pars = length(free_dyn_pars_true) + length(dist_sens_inds)
 
-    # get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    # get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6745,7 +6768,7 @@ function get_3par_plottable(all_pars, cost_vals)
     firstfixed = Array{Tuple()}
 end
 
-function allpar_viz_1par(all_pars::Array{Float64,2}, cost_vals::Array{Float64,1}, par_vecs::Array{Array{Float64,1},1}, var_par_ind::Int, fixed_pars::Array{Float64,1})
+function allpar_viz_1par(all_pars::Matrix{Float64}, cost_vals::Vector{Float64}, par_vecs::Array{Vector{Float64},1}, var_par_ind::Int, fixed_pars::Vector{Float64})
     num_pars = size(par_vecs, 1)
     @assert length(fixed_pars) == num_pars-1 "All parameters except one have to be fixed"
 
@@ -6766,7 +6789,7 @@ function allpar_viz_1par(all_pars::Array{Float64,2}, cost_vals::Array{Float64,1}
     return perm, all_pars_sorted, cost_vals_sorted, indices_to_keep
 end
 
-function allpar_viz_2par(all_pars::Array{Float64,2}, cost_vals::Array{Float64,1}, par_vecs::Array{Array{Float64,1},1}, var_par_inds::Array{Int,1}, fixed_pars::Array{Float64,1})
+function allpar_viz_2par(all_pars::Matrix{Float64}, cost_vals::Vector{Float64}, par_vecs::Array{Vector{Float64},1}, var_par_inds::Array{Int,1}, fixed_pars::Vector{Float64})
     num_pars = size(par_vecs, 1)
     @assert length(fixed_pars) == num_pars-2 "All parameters except two have to be fixed"
 
@@ -6797,7 +6820,7 @@ function allpar_viz_2par(all_pars::Array{Float64,2}, cost_vals::Array{Float64,1}
     return perm, all_pars_sorted, cost_vals_sorted, indices_to_keep, cost_mat
 end
 
-function alt_viz_2par(all_pars::Array{Float64,2}, cost_vals::Array{Float64,1}, par_vecs::Array{Array{Float64,1},1}, plot_par_inds::Array{Int,1})
+function alt_viz_2par(all_pars::Matrix{Float64}, cost_vals::Vector{Float64}, par_vecs::Array{Vector{Float64},1}, plot_par_inds::Array{Int,1})
     @assert length(plot_par_inds) == 2 "Can only plot with respect to two parameters at a time (length(plot_par_inds) must be 2)"
     num_pars = size(par_vecs, 1)
     non_plot_inds = setdiff(1:num_pars, plot_par_inds)
@@ -6860,11 +6883,11 @@ function find_index_allpar(all_pars, desired_pars)
     index = intersect(intersect(intersect(minds, Linds), ginds), kinds)
 end
 
-function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans::Int = 0)
+function debug_2par_simulation(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6878,18 +6901,18 @@ function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans:
     E = 1
 
     # Overwrites solvew()-functions
-    realize_model_sens1(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
+    realize_model_sens1(u::Function, w::Function, pars::Vector{Float64}, N::Int) = problem(
       pendulum_sensitivity(φ0, u, w, get_all_θs(pars)),
       N,
       Ts,
     )
-    realize_model_sens2(u::Function, w::Function, pars::Array{Float64, 1}, N::Int) = problem(
+    realize_model_sens2(u::Function, w::Function, pars::Vector{Float64}, N::Int) = problem(
       pendulum_sensitivity2(φ0, u, w, get_all_θs(pars)),
       N,
       Ts,
     )
 
-    solvew_sens1(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
+    solvew_sens1(u::Function, w::Function, pars::Vector{Float64}, N::Int; kwargs...) = solve(
       realize_model_sens1(u, w, pars, N),
       saveat = 0:Ts:(N*Ts),
       abstol = abstol,
@@ -6897,7 +6920,7 @@ function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans:
       maxiters = maxiters;
       kwargs...,
     )
-    solvew_sens2(u::Function, w::Function, pars::Array{Float64, 1}, N::Int; kwargs...) = solve(
+    solvew_sens2(u::Function, w::Function, pars::Vector{Float64}, N::Int; kwargs...) = solve(
       realize_model_sens1(u, w, pars, N),
       saveat = 0:Ts:(N*Ts),
       abstol = abstol,
@@ -6906,7 +6929,7 @@ function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans:
       kwargs...,
     )
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # === Computing cost function of baseline model
     # base_par_vals1 = collect( (pars0[1]-2.0):0.1:(pars0[1]+2.0))
@@ -6933,11 +6956,11 @@ function debug_2par_simulation(expid::String, pars0::Array{Float64, 1}, N_trans:
     return base_par_vals, second_par, base_cost_vals, base_cost_vals1, base_cost_vals2
 end
 
-function debug_grad_norm(expid::String, pars0::Array{Float64,1}, N_trans::Int = 0)
+function debug_grad_norm(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -6948,7 +6971,7 @@ function debug_grad_norm(expid::String, pars0::Array{Float64,1}, N_trans::Int = 
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
     dist_sens_inds = W_meta.free_par_inds
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     # E = size(Y, 2)
     # DEBUG
@@ -6988,11 +7011,11 @@ function debug_grad_norm(expid::String, pars0::Array{Float64,1}, N_trans::Int = 
     # return opt_pars_baseline, opt_pars_proposed, trace_base, trace_proposed, base_cost_vals, prop_cost_vals, trace_costs, base_par_vals, prop_par_vals, opt_pars_proposed_LSQ, grad_norms
 end
 
-function debug_proposed_cost_func(expid::String, par_vector::Array{Array{Float64,1},1}, N_trans::Int = 0)
+function debug_proposed_cost_func(expid::String, par_vector::Array{Vector{Float64},1}, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -7002,7 +7025,7 @@ function debug_proposed_cost_func(expid::String, par_vector::Array{Array{Float64
     u = exp_data.u
     par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     Ms = [1, 10, 100, 500]
     Mmax = maximum(Ms)
@@ -7041,11 +7064,11 @@ function debug_proposed_cost_func(expid::String, par_vector::Array{Array{Float64
     return costs, cost_gradients
 end
 
-function debug_output_jacobian_dynamics(expid::String, pars::Array{Float64, 1})
+function debug_output_jacobian_dynamics(expid::String, pars::Vector{Float64})
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -7054,7 +7077,7 @@ function debug_output_jacobian_dynamics(expid::String, pars::Array{Float64, 1})
     dη = length(W_meta.η)
     u = exp_data.u
 
-    get_all_parameters(pars::Array{Float64, 1}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
     step = 0.01
     # Each rows represents the displacement of one variable used for estimating jacobian
@@ -7078,12 +7101,12 @@ function debug_output_jacobian_dynamics(expid::String, pars::Array{Float64, 1})
     return sens, Jac_est
 end
 
-function debug_output_jacobian_disturbance(expid::String, pars::Array{Float64,1})
+function debug_output_jacobian_disturbance(expid::String, pars::Vector{Float64})
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     u = exp_data.u
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -7097,7 +7120,7 @@ function debug_output_jacobian_disturbance(expid::String, pars::Array{Float64,1}
     n_out = W_meta.n_out
     n_tot = nx*n_in
     dη = length(W_meta.η)
-    N = size(exp_data.Y, 1)-1
+    N = size(exp_data.Y, 1)÷y_len-1
     Zm = [randn(Nw, n_tot)]
 
     step = 0.01
@@ -7151,7 +7174,7 @@ function debug_input_effect(expid::String, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
-    N = size(Y,1)-1
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -7202,15 +7225,15 @@ end
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 function perform_SGD_adam_debug(
     get_grad_estimate::Function,
-    pars0::Array{Float64,1},                        # Initial guess for parameters
-    bounds::Array{Float64, 2},                      # Parameter bounds
+    pars0::Vector{Float64},                        # Initial guess for parameters
+    bounds::Matrix{Float64},                      # Parameter bounds
     learning_rate::Function=learning_rate_vec_red;
     tol::Float64=1e-6,
     maxiters=200,
     verbose=false,
-    betas::Array{Float64,1} = [0.9, 0.999],
+    betas::Vector{Float64} = [0.9, 0.999],
     λ = 0.5)   # betas are the decay parameters of moment estimates
-    # betas::Array{Float64,1} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
+    # betas::Vector{Float64} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
 
     eps = 0.#1e-8
     q = 20# TODO: This is a little arbitrary, but because of low tolerance, the stopping criterion is never reached anyway
@@ -7260,14 +7283,14 @@ end
 
 # function perform_SGD_adam_debug(
 #     get_grad_estimate_debug::Function,
-#     pars0::Array{Float64,1},                        # Initial guess for parameters
-#     bounds::Array{Float64, 2},                      # Parameter bounds
+#     pars0::Vector{Float64},                        # Initial guess for parameters
+#     bounds::Matrix{Float64},                      # Parameter bounds
 #     learning_rate::Function=learning_rate_vec;
 #     tol::Float64=1e-4,
 #     maxiters=200,
 #     verbose=false,
-#     betas::Array{Float64,1} = [0.9, 0.999])   # betas are the decay parameters of moment estimates
-#     # betas::Array{Float64,1} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
+#     betas::Vector{Float64} = [0.9, 0.999])   # betas are the decay parameters of moment estimates
+#     # betas::Vector{Float64} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
 #
 #     eps = 0.#1e-8
 #     q = 20
@@ -7315,7 +7338,7 @@ function test_SGD_on_known_cost()
     H = k.*[1 0; 0 a]
     c = k.*[1;1]
     σ = 1e-7
-    # function get_gradient_estimate(pars::Array{Float64,1}, M::Int)
+    # function get_gradient_estimate(pars::Vector{Float64}, M::Int)
     #     x =
     # end
 
@@ -7329,7 +7352,7 @@ function test_SGD_on_known_cost()
     return pars_opt, true_opt, trace, opt_cost, true_opt_cost
 end
 
-function visualize_SGD_search(par_vals::Array{Float64,1}, cost_vals::Array{Float64, 1}, SGD_trace::Array{Array{Float64, 1},1}, opt_par::Float64; file_name = "SGD.gif")
+function visualize_SGD_search(par_vals::Vector{Float64}, cost_vals::Vector{Float64}, SGD_trace::Array{Vector{Float64},1}, opt_par::Float64; file_name = "SGD.gif")
     anim = @animate for i = 1:length(SGD_trace)
         p = plot(par_vals, cost_vals, label="Cost Function")
         vline!(p, [opt_par], label="Final parameter")
@@ -7347,7 +7370,7 @@ end
 # SGD_traces should be an array with E elements, where each element is an array
 # of parameters that the optimization has gone through, and where every
 # parameter is an array of Float64-values
-function Roberts_gif_generator(par_vals::Array{Float64,1}, cost_vals::Array{Float64, 2}, SGD_traces::Array{Array{Array{Float64,1},1},1}, opt_pars::Array{Float64, 1})
+function Roberts_gif_generator(par_vals::Vector{Float64}, cost_vals::Matrix{Float64}, SGD_traces::Array{Array{Vector{Float64},1},1}, opt_pars::Vector{Float64})
     for i = 1:1
         visualize_SGD_search(par_vals, cost_vals[:,i], SGD_traces[i], opt_pars[i], file_name="newer_stopping_criterion_Mrate4_new$(i).gif")
     end

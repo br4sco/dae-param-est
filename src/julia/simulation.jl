@@ -15,18 +15,18 @@ include("delta_robot_helper.jl")
 struct Model
   f!::Function                  # residual function
   jac!::Function               # jacobian function
-  x0::Array{Float64, 1}         # initial values of x
-  dx0::Array{Float64, 1}        # initial values of x'
+  x0::Vector{Float64}         # initial values of x
+  dx0::Vector{Float64}        # initial values of x'
   dvars::Array{Bool, 1}         # bool array indicating differential variables
-  ic_check::Array{Float64, 1}   # residual at t0 (DEBUG)
+  ic_check::Vector{Float64}   # residual at t0 (DEBUG)
 end
 
 struct Model_ode
     f::Function             # ODE Function
-    x0::Array{Float64, 1}   # initial values of x
+    x0::Vector{Float64}   # initial values of x
 end
 
-function interpolation(T::Float64, xs::Array{Float64, 1})
+function interpolation(T::Float64, xs::Vector{Float64})
   let ts = range(0, T, length=length(xs))
     LinearInterpolation(ts, xs)
   end
@@ -843,7 +843,7 @@ function get_delta_initial_comp(θ, ut0, du0, w0)
     end
 end
 
-function pendulum_new(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_new(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -885,7 +885,7 @@ function pendulum_new(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 
 end
 
 # Sensitivity only with respect to disturbance parameter, no dynamic parameter
-function pendulum_dist_sens_1(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_dist_sens_1(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -948,7 +948,7 @@ function pendulum_dist_sens_1(Φ::Float64, u::Function, w::Function, θ::Array{F
 end
 
 # Sensitivity with respect to two disturbance parameters, no dynamic parameter
-function pendulum_dist_sens_2(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_dist_sens_2(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1024,7 +1024,7 @@ function pendulum_dist_sens_2(Φ::Float64, u::Function, w::Function, θ::Array{F
 end
 
 # Sensitivity with respect to "all" disturbance parameters, no dynamic parameter
-function pendulum_dist_sens_3(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_dist_sens_3(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1112,7 +1112,7 @@ function pendulum_dist_sens_3(Φ::Float64, u::Function, w::Function, θ::Array{F
     end
 end
 
-function pendulum_sensitivity_k(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_k(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1178,7 +1178,7 @@ function pendulum_sensitivity_k(Φ::Float64, u::Function, w::Function, θ::Array
     end
 end
 
-function pendulum_sensitivity_L(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_L(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1279,7 +1279,7 @@ function pendulum_sensitivity_L(Φ::Float64, u::Function, w::Function, θ::Array
     end
 end
 
-function pendulum_sensitivity_m(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_m(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1377,7 +1377,7 @@ function pendulum_sensitivity_m(Φ::Float64, u::Function, w::Function, θ::Array
     end
 end
 
-function pendulum_sensitivity_g(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_g(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1446,7 +1446,7 @@ function pendulum_sensitivity_g(Φ::Float64, u::Function, w::Function, θ::Array
 end
 
 # NOTE: Doesn't actually support changing the value of pi
-function pendulum_sensitivity_deb(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_deb(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         my_ind = 2
@@ -1547,7 +1547,7 @@ function pendulum_sensitivity_deb(Φ::Float64, u::Function, w::Function, θ::Arr
 end
 
 # NOTE: Doesn't actually support changing the value of pi
-function pendulum_sensitivity_deb_0p01(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_deb_0p01(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         my_ind = 2
@@ -1658,7 +1658,7 @@ function pendulum_sensitivity_deb_0p01(Φ::Float64, u::Function, w::Function, θ
     end
 end
 
-function pendulum_sensitivity_Lk(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_Lk(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1772,7 +1772,7 @@ function pendulum_sensitivity_Lk(Φ::Float64, u::Function, w::Function, θ::Arra
     end
 end
 
-function pendulum_sensitivity_full(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_full(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1892,7 +1892,7 @@ function pendulum_sensitivity_full(Φ::Float64, u::Function, w::Function, θ::Ar
     end
 end
 
-function pendulum_sensitivity_sans_g(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_sans_g(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -1990,7 +1990,7 @@ function pendulum_sensitivity_sans_g(Φ::Float64, u::Function, w::Function, θ::
     end
 end
 
-function pendulum_sensitivity_sans_g_with_dist_sens_2(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_sans_g_with_dist_sens_2(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -2106,7 +2106,7 @@ function pendulum_sensitivity_sans_g_with_dist_sens_2(Φ::Float64, u::Function, 
     end
 end
 
-function pendulum_sensitivity_sans_g_with_dist_sens_3(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_sans_g_with_dist_sens_3(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -2235,7 +2235,7 @@ function pendulum_sensitivity_sans_g_with_dist_sens_3(Φ::Float64, u::Function, 
     end
 end
 
-function pendulum_sensitivity_sans_g_with_dist_sens_1(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_sans_g_with_dist_sens_1(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -2338,7 +2338,7 @@ function pendulum_sensitivity_sans_g_with_dist_sens_1(Φ::Float64, u::Function, 
     end
 end
 
-function pendulum_sensitivity_full_with_dist_sens_2(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_full_with_dist_sens_2(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -2486,7 +2486,7 @@ function pendulum_sensitivity_full_with_dist_sens_2(Φ::Float64, u::Function, w:
     end
 end
 
-function pendulum_sensitivity_Lk_with_dist_sens_1(Φ::Float64, u::Function, w_comp::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_Lk_with_dist_sens_1(Φ::Float64, u::Function, w_comp::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         # NOTE: In this function w_comp is edxected to have two elements: the
         # first should just be the disturbance w, and the second the sensitivity
@@ -2586,7 +2586,7 @@ function pendulum_sensitivity_Lk_with_dist_sens_1(Φ::Float64, u::Function, w_co
     end
 end
 
-function pendulum_sensitivity_Lk_with_dist_sens_2(Φ::Float64, u::Function, w_comp::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_Lk_with_dist_sens_2(Φ::Float64, u::Function, w_comp::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         # NOTE: In this function w_comp is edxected to have two elements: the
         # first should just be the disturbance w, and the second the sensitivity
@@ -2699,7 +2699,7 @@ function pendulum_sensitivity_Lk_with_dist_sens_2(Φ::Float64, u::Function, w_co
     end
 end
 
-function pendulum_sensitivity_k_with_dist_sens_1(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_k_with_dist_sens_1(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -2772,7 +2772,7 @@ function pendulum_sensitivity_k_with_dist_sens_1(Φ::Float64, u::Function, w::Fu
     end
 end
 
-function pendulum_sensitivity_k_with_dist_sens_2(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_k_with_dist_sens_2(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -2858,7 +2858,7 @@ function pendulum_sensitivity_k_with_dist_sens_2(Φ::Float64, u::Function, w::Fu
     end
 end
 
-function pendulum_sensitivity_k_with_dist_sens_3(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function pendulum_sensitivity_k_with_dist_sens_3(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -5503,7 +5503,7 @@ function my_pendulum_adjoint_deb(u::Function, w::Function, θ::Vector{Float64}, 
     end
 end
 
-function pendulum_adj_stepbystep_k(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+function pendulum_adj_stepbystep_k(Φ::Float64, u::Function, w::Function, θ::Vector{Float64}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
     @warn "pendulum_adj_stepbystep_k only adapted for k-parameter currently, no others"
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
@@ -5704,7 +5704,7 @@ function pendulum_adj_stepbystep_k(Φ::Float64, u::Function, w::Function, θ::Ar
     end
 end
 
-function pendulum_adj_stepbystep_L(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+function pendulum_adj_stepbystep_L(Φ::Float64, u::Function, w::Function, θ::Vector{Float64}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
     @warn "pendulum_adj_stepbystep_L only adapted for L-parameter currently, no others"
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
@@ -5898,7 +5898,7 @@ function pendulum_adj_stepbystep_L(Φ::Float64, u::Function, w::Function, θ::Ar
     end
 end
 
-function pendulum_adj_stepbystep_m(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+function pendulum_adj_stepbystep_m(Φ::Float64, u::Function, w::Function, θ::Vector{Float64}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
     @warn "pendulum_adj_stepbystep_m only adapted for m-parameter currently, no others"
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
@@ -6092,7 +6092,7 @@ function pendulum_adj_stepbystep_m(Φ::Float64, u::Function, w::Function, θ::Ar
     end
 end
 
-function pendulum_adj_stepbystep_g(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+function pendulum_adj_stepbystep_g(Φ::Float64, u::Function, w::Function, θ::Vector{Float64}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
     @warn "pendulum_adj_stepbystep_L only adapted for L-parameter currently, no others"
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
@@ -6266,7 +6266,7 @@ function pendulum_adj_stepbystep_g(Φ::Float64, u::Function, w::Function, θ::Ar
     end
 end
 
-function pendulum_adj_stepbystep_deb(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+function pendulum_adj_stepbystep_deb(Φ::Float64, u::Function, w::Function, θ::Vector{Float64}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
     @warn "pendulum_adj_stepbystep_deb only adapted for pi-parameter currently, no others"
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
@@ -6493,7 +6493,7 @@ function pendulum_adj_stepbystep_deb(Φ::Float64, u::Function, w::Function, θ::
     end
 end
 
-function deleteme_stepbystep_deb(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+function deleteme_stepbystep_deb(Φ::Float64, u::Function, w::Function, θ::Vector{Float64}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
     @warn "pendulum_adj_stepbystep_deb only adapted for pi-parameter currently, no others"
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
@@ -6645,7 +6645,7 @@ function deleteme_stepbystep_deb(Φ::Float64, u::Function, w::Function, θ::Arra
     end
 end
 
-function pendulum_adj_stepbystep_m_alt(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, x::Function, dx::Function, T::Float64)::Model
+function pendulum_adj_stepbystep_m_alt(Φ::Float64, u::Function, w::Function, θ::Vector{Float64}, y::Function, λ::Function, dλ::Function, x::Function, dx::Function, T::Float64)::Model
     @warn "pendulum_adj_stepbystep_m only adapted for m-parameter currently, no others"
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
@@ -6807,7 +6807,7 @@ end
 
 # FOR SOME REASON, IT TELLS ME THIS IS UNSTABLE WHEN i TRY TO SOLVE IT.
 # TODO: Delete me
-function partial_debugging(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
+function partial_debugging(Φ::Float64, u::Function, w::Function, θ::Vector{Float64}, y::Function, λ::Function, dλ::Function, T::Float64)::Model
     function f!(res, dx, x, θ, t)
         res[1]    = dx[1] - 2*sin(t)*cos(t)*cos(t-0.3) + (sin(t)^2)*sin(t-0.3)
         nothing
@@ -6825,7 +6825,7 @@ function partial_debugging(Φ::Float64, u::Function, w::Function, θ::Array{Floa
     Model(f!, t -> 0.0, x0, dx0, dvars, r0)
 end
 
-function model_mohamed(Φ::Float64, u::Function, w::Function, θ::Array{Float64,1})
+function model_mohamed(Φ::Float64, u::Function, w::Function, θ::Vector{Float64})
     # NOTE: Φ not used, just passed to have consistent interface
     function f!(res, dx, x, p, t)
         wt = w(t)[1]
@@ -6854,7 +6854,7 @@ function model_mohamed(Φ::Float64, u::Function, w::Function, θ::Array{Float64,
     Model(f!, t -> 0.0, x0, dx0, dvars, r0)
 end
 
-function mohamed_sens(Φ::Float64, u::Function, w::Function, p::Array{Float64,1})
+function mohamed_sens(Φ::Float64, u::Function, w::Function, p::Vector{Float64})
     θ = p[1]
     # NOTE: Φ not used, just passed to have consistent interface
     zeta(x, dx, t) = (θ*x[1] + u(t)[1] + w(t)[1])^2 + 1
@@ -6898,7 +6898,7 @@ function mohamed_sens(Φ::Float64, u::Function, w::Function, p::Array{Float64,1}
 end
 
 # Just writing it from scratch since a lot of time has passed and I've learned some stuff
-function mohamed_adjoint_new(u::Function, w::Function, p::Array{Float64, 1}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function)
+function mohamed_adjoint_new(u::Function, w::Function, p::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function)
     θ = p[1]
     np = size(xp0, 2)
     nx = size(xp0,1)
@@ -6970,7 +6970,7 @@ function mohamed_adjoint_new(u::Function, w::Function, p::Array{Float64, 1}, T::
     Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
 end
 
-function mohamed_λ1(u::Function, w::Function, p::Array{Float64, 1}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function)
+function mohamed_λ1(u::Function, w::Function, p::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function)
     θ = p[1]
     np = size(xp0, 2)
     nx = size(xp0,1)
@@ -7027,7 +7027,7 @@ function mohamed_λ1(u::Function, w::Function, p::Array{Float64, 1}, T::Float64,
     Model(f!, t -> 0.0, z0, dz0, dvars, r0)
 end
 
-# function mohamed_stepbystep(Φ::Float64, u::Function, w::Function, p::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)
+# function mohamed_stepbystep(Φ::Float64, u::Function, w::Function, p::Vector{Float64}, y::Function, λ::Function, dλ::Function, T::Float64)
 #     θ = p[1]
 #     # NOTE: Φ not used, just passed to have consistent interface
 #     zeta(dx, x, t) = (θ*x[1] + u(t)[1] + w(t)[1])^2 + 1
@@ -7095,7 +7095,7 @@ end
 #     Model(f!, t -> 0.0, x0, dx0, dvars, r0)
 # end
 
-function mohamed_stepbystep(Φ::Float64, u::Function, w::Function, p::Array{Float64, 1}, y::Function, λ::Function, dλ::Function, T::Float64)
+function mohamed_stepbystep(Φ::Float64, u::Function, w::Function, p::Vector{Float64}, y::Function, λ::Function, dλ::Function, T::Float64)
     θ = p[1]
     # np = size(xp0, 2)
     # nx = size(xp0,1)
@@ -7250,7 +7250,7 @@ function mohamed_stepbystep(Φ::Float64, u::Function, w::Function, p::Array{Floa
     Model(f!, t -> 0.0, x0, dx0, dvars, r0)
 end
 
-function mohamed_an_stepbystep(u__::Function, w__::Function, θs::Array{Float64, 1}, x_::Function, dx_::Function, xθ_::Function, dxθ_::Function, y_::Function, λ_::Function, dλ_::Function, T::Float64)
+function mohamed_an_stepbystep(u__::Function, w__::Function, θs::Vector{Float64}, x_::Function, dx_::Function, xθ_::Function, dxθ_::Function, y_::Function, λ_::Function, dλ_::Function, T::Float64)
     θ = θs[1]
 
     u_(t) = u__(t)[1]
@@ -7324,7 +7324,7 @@ function mohamed_an_stepbystep(u__::Function, w__::Function, θs::Array{Float64,
 end
 
 # TODO: Make into ODE instead?
-function mohamed_analytical(u::Function, w::Function, θ::Array{Float64,1})
+function mohamed_analytical(u::Function, w::Function, θ::Vector{Float64})
     # NOTE: Φ not used, just passed to have consistent interface
     function f!(res, dx, x, p, t)
         wt = w(t)[1]
@@ -7352,7 +7352,7 @@ function mohamed_analytical(u::Function, w::Function, θ::Array{Float64,1})
 end
 
 # DEBUG, TODO: Delete
-function trivial_model(Φ::Float64, u::Function, w_comp::Function, θ::Array{Float64, 1})::Model
+function trivial_model(Φ::Float64, u::Function, w_comp::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         # NOTE: In this function w_comp is edxected to have two elements: the
         # first should just be the disturbance w, and the second the sensitivity
@@ -7388,7 +7388,7 @@ function trivial_model(Φ::Float64, u::Function, w_comp::Function, θ::Array{Flo
     end
 end
 
-function fast_heat_transfer_reactor(V0::Float64, T0::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model
+function fast_heat_transfer_reactor(V0::Float64, T0::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
     let k0 = θ[1], k1 = θ[2], k2 = θ[3], k3 = θ[4], k4 = θ[5]
 
         # the residual function
@@ -7426,7 +7426,7 @@ function fast_heat_transfer_reactor(V0::Float64, T0::Float64, u::Function, w::Fu
     end
 end
 
-function pendulum_ode(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model_ode
+function pendulum_ode(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model_ode
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         # Similarly to the DAE-implementation, we don't use the ability of passing
         # the parameters to the function f. Instead, we create a new problem for
@@ -7438,7 +7438,7 @@ function pendulum_ode(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 
     end
 end
 
-function pendulum_sensitivity_ode(Φ::Float64, u::Function, w::Function, θ::Array{Float64, 1})::Model_ode
+function pendulum_sensitivity_ode(Φ::Float64, u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model_ode
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         # Similarly to the DAE-implementation, we don't use the ability of passing
         # the parameters to the function f. Instead, we create a new problem for
@@ -7453,7 +7453,7 @@ function pendulum_sensitivity_ode(Φ::Float64, u::Function, w::Function, θ::Arr
     end
 end
 
-function simple_model_sens(u::Function, w::Function, θ::Array{Float64, 1})::Model
+function simple_model_sens(u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
 
     function f(out, dx, x, p, t)
         wt = w(t)
@@ -7471,7 +7471,7 @@ function simple_model_sens(u::Function, w::Function, θ::Array{Float64, 1})::Mod
     Model(f, x -> x, x₀, dx₀, dvars, [0.0])
 end
 
-function simple_model(u::Function, w::Function, θ::Array{Float64, 1})::Model
+function simple_model(u::Function, w::Function, du0::Vector{Float64}, θ::Vector{Float64})::Model
 
     function f(out, dx, x, p, t)
         wt = w(t)
@@ -7555,17 +7555,17 @@ function apply_two_outputfun(h1, h2, sol)
     map(h1, sol.u), map(h2, sol.u)
 end
 
-function apply_outputfun_mvar(h, sol)
-  if sol.retcode != :Success
-    throw(ErrorException("Solution retcode: $(sol.retcode)"))
-  end
+function apply_outputfun_mvar(f, sol)
+    if sol.retcode != :Success
+        throw(ErrorException("Solution retcode: $(sol.retcode)"))
+    end
 
-  out_mat = zeros(length(sol.u), length(h(sol.u[1])))
-  for ind in 1:length(sol.u)
-      out_mat[ind,:] = h(sol.u[ind])
-  end
-  # map(h, sol.u)
-  return out_mat
+    out_mat = zeros(length(sol.u), length(f(sol.u[1])))
+    for ind in 1:length(sol.u)
+        out_mat[ind,:] = f(sol.u[ind])
+    end
+    # map(h, sol.u)
+    return out_mat
 end
 
 function apply_two_outputfun_mvar(h1, h2, sol)
@@ -7651,7 +7651,6 @@ function solve_in_parallel_multivar_flat(solve, is)
   y1 = solve(is[1])
   ny = length(y1[1])
   Y = zeros(ny*length(y1), M)
-  @info "y1 is $(typeof(y1)) of sizes $(size(y1)), $(size(y1[1])). But then ny is $ny"
   Y[:,1] += vcat(y1...) # Flattens the array
   next!(p)
   Threads.@threads for m = 2:M
@@ -7687,7 +7686,7 @@ function solve_in_parallel_sens(solve, is)
     M = length(is)
     p = Progress(M, 1, "Running $(M) simulations...", 50)
     y1, sens1 = solve(is[1])
-    Ysens = [Array{Float64,2}(undef, length(sens1), length(sens1[1])) for m=1:M]
+    Ysens = [Matrix{Float64}(undef, length(sens1), length(sens1[1])) for m=1:M]
     Y = zeros(length(y1), M)
     Y[:,1] = y1
     Ysens[1] = sens1
@@ -7705,7 +7704,7 @@ function solve_in_parallel_sens_debug(solve, is, yind, sensinds, sampling_ratio)
     M = length(is)
     p = Progress(M, 1, "Running $(M) simulations...", 50)
     out = solve(is[1])
-    matout = [Array{Float64,2}(undef, size(out)) for m=1:M]
+    matout = [Matrix{Float64}(undef, size(out)) for m=1:M]
     Y = zeros(size(out[1:sampling_ratio:end,:], 1), M)
     sens = [zeros(size(out[1:sampling_ratio:end,:],1), length(sensinds)) for m=1:M]
     # sens = zeros(size(out,1), M)
@@ -7727,7 +7726,7 @@ function solve_in_parallel_debug(solve, is, yind, sampling_ratio)
     M = length(is)
     p = Progress(M, 1, "Running $(M) simulations...", 50)
     out = solve(is[1])
-    matout = [Array{Float64,2}(undef, size(out)) for m=1:M]
+    matout = [Matrix{Float64}(undef, size(out)) for m=1:M]
     Y = zeros(size(out[1:sampling_ratio:end,:], 1), M)
     # sens = zeros(size(out,1), M)
     matout[1] = out
@@ -7783,7 +7782,7 @@ end
 
 function simulate_h_m(
   mk_model::Function, N::Int, Ts::Float64, h::Function, ms::Array{Int, 1}
-)::Array{Float64, 2}
+)::Matrix{Float64}
 
   M = length(ms)
   # Y = hcat([[Threads.Atomic{Float64}(0.0) for i=1:(N+1)] for j=1:M]...)

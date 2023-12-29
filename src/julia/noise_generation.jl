@@ -372,60 +372,6 @@ end
 
 # ================= Functions simulating disturbance =======================
 
-# These functions simulate the noise process when using a noise model
-# following the scalar convention. The scalar case is a special case of the
-# multivariate case, so there's no reason to use these functions
-# function simulate_noise_process(
-#     mdl::DT_SS_Model,
-#     data::Array{Array{Float64,2}, 1}
-# )
-#     # data[m][i, j] should be the j:th component of the noise at time i of
-#     # realization m
-#     M = size(data)[1]
-#     N = size(data[1])[1]-1
-#     nx = size(data[1])[2]
-#     sys = ss(mdl.Ad, mdl.Bd, mdl.Cd, 0.0, mdl.Ts)
-#     t = 0:mdl.Ts:N*mdl.Ts
-#     # Allocating space for noise process
-#     x_process = [ fill(NaN, (nx,)) for i=1:N+1, m=1:M]
-#     for m=1:M
-#         y, t, x = lsim(sys, data[m], t, x0=mdl.x0)
-#         for i=1:N+1
-#             x_process[i,m][:] = x[i,:]
-#         end
-#     end
-#
-#     # x_process[i,m][j] is the j:th element of the noise model state at sample
-#     # i of realization m. Sample 1 corresponds to time 0
-#     return x_process
-# end
-#
-# function simulate_noise_process_mangled(
-#     mdl::DT_SS_Model,
-#     data::Array{Array{Float64,2}, 1}
-# )
-#     # data[m][i, j] should be the j:th component of the noise at time i of
-#     # realization m
-#     M = size(data)[1]
-#     N = size(data[1])[1]-1
-#     nx = size(data[1])[2]
-#     sys = ss(mdl.Ad, mdl.Bd, mdl.Cd, 0.0, mdl.Ts)
-#     t = 0:mdl.Ts:N*mdl.Ts
-#     # Allocating space for noise process
-#     # x_process = [ fill(NaN, (nx,)) for i=1:N+1, m=1:M]
-#     x_process = fill(NaN, ((N+1)*nx, M))
-#     for m=1:M
-#         y, t, x = lsim(sys, data[m], t, x0=mdl.x0)
-#         for i=1:N+1
-#             x_process[(i-1)*nx+1:i*nx, m] = x[i,:]
-#         end
-#     end
-#
-#     # x_process[(i-1)*nx + j, m] is the j:th element of the noise model at
-#     # sample i of realization m. Sample 1 corresponds to time 0
-#     return x_process
-# end
-
 # NOTE: I don't think this function is used anywhere, and it seems to have
 # something funky going on with dimensions and shapes
 function simulate_noise_process(
@@ -565,20 +511,28 @@ function disturbance_model_3(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
     return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
 end
-# function disturbance_model_3(Ts::Float64)::Tuple{DT_SS_Model, DataFrame}
-#
-#     ω = 4           # natural freq. in rad/s (tunes freq. contents/fluctuations)
-#     ζ = 0.1          # damping coefficient (tunes damping)
-#     d1 = 1.0
-#     d2 = 2 * ω * ζ
-#     d3 = ω^2
-#     a = [1.0]
-#     b = [d1, d2, d3]
-#     s = ss(tf(a, b))
-#     ct_mdl = CT_SS_Model(s.A, s.B, s.C, zeros(size(s.A,2)))
-#     mdl = discretize_ct_noise_model(ct_mdl, Ts)
-#     return mdl, DataFrame(nx = size(s.A,2), n_in = 1, n_out = 1, n_a = length(a), η = vcat(a, b))
-# end
+
+# Used for multivariate input for delta-robot
+function disturbance_model_4(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)::Tuple{DT_SS_Model, DataFrame}
+    ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
+    ζ = 0.1       # damping coefficient (tunes damping)
+    p3 = -2       # The additional pole that is added
+    nx = 3        # model order
+    n_out = 3     # number of outputs
+    n_in = 1      # number of inputs
+    w_scale = scale*ones(n_out)             # noise scale
+    # Denominator of every transfer function is given by p(s), where
+    # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
+    # Old a_vec, i.e. for the 2d-model: a_vec = [2*ω*ζ, ω^2]
+    a_vec = [2*ω*ζ-p3, ω^2-p3*2*ω*ζ, -p3*ω^2]
+    c_vec = [scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale]
+    η0 = vcat(a_vec, c_vec)
+    dη = length(η0)
+    mdl =
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
+    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+end
+
 
 function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     bias::Float64=0.0, scale::Float64=1.0)::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
@@ -586,7 +540,7 @@ function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     mdl, metadata = gen(Ts, bias=bias, scale=scale)
     n_tot = size(mdl.Cd,2)
 
-    ZS = [randn(Nw, n_tot) for m = 1:M]
+    ZS = [randn(Nw, n_tot) for m = 1:M]   # TODO: Maybe have Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}? Figure it out
     XW = simulate_noise_process_mangled(mdl, ZS)
     XW, get_system_output_mangled(mdl, XW).+ metadata.bias[1], metadata
 end
@@ -609,16 +563,6 @@ function get_reactor_debug_input(Ts::Float64, Nw::Int)
     return U
 end
 
-# function get_filtered_noise_scalar(gen::Function, Ts::Float64, M::Int, Nw::Int
-#     )::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
-#
-#     mdl, metadata = gen(M, Ts, Nw)
-#     nx = size(mdl.Ad,2)
-#
-#     ZS = [randn(Nw, nx) for m = 1:M]
-#     XW = simulate_noise_process_mangled(mdl, ZS)
-#     XW, get_system_output_mangled(mdl, XW), metadata
-# end
 
 # Converts mangled states to an output vector using the provided model
 function get_system_output_mangled(mdl::DT_SS_Model, states::Array{Float64, 2}
