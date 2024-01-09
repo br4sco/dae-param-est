@@ -386,13 +386,13 @@ elseif model_id == MOH_MDL
     model_adj_to_use = mohamed_adjoint_new
     model_stepbystep = mohamed_stepbystep
 elseif model_id == DELTA
-    const free_dyn_pars_true = [J1]
+    const free_dyn_pars_true = [L1] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 24
-    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, pars[1], J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    dyn_par_bounds = [0.01 1e4]
+    get_all_θs(pars::Vector{Float64}) = [L0, pars[1], L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3) 2*(L2+L3-L0)/sqrt(3)]#[0.01 1e4]    # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [0.1]
-    model_sens_to_use = delta_robot_gc_J1sens
+    model_sens_to_use = delta_robot_gc_L1sens
     model_to_use = delta_robot_gravitycomp
     # model_adj_to_use = mohamed_adjoint_new
     # model_stepbystep = mohamed_stepbystep
@@ -423,16 +423,32 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64}) = [x[3]]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    # If output is all three servo angles
-    f(x::Vector{Float64}) = [x[1],x[4],x[7]]    # All three servo angles
-    f_sens(x::Vector{Float64}) = [x[25],x[28],x[31]]
-    # If output is position of end effector
+    # # If output is all three servo angles
+    # f(x::Vector{Float64}) = [x[1],x[4],x[7]]    # All three servo angles
+    # f_sens(x::Vector{Float64}) = [x[25],x[28],x[31]]
+    # # If output is position of end effector
     f(x::Vector{Float64}) = [L2*sin(x[2])*sin(x[3])
         L1*cos(x[1]) + L2*cos(x[2]) + L0 - L3
         L1*sin(x[1]) + L2*sin(x[2])*cos(x[3])]
-    f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27] # Currently sensitivity wrt to J1
+    
+    # Sensitivity wrt to L1
+    f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
         -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
-        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]]
+        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]] + 
+        [   # Partial derivative wrt to L1
+            0
+            cos(x[1])
+            sin(x[1])
+        ]
+
+    # # Sensitivity wrt to J1
+    # f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
+    #     -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
+    #     L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]]
+
+    # # Just getting all states
+    # f(x::Vector{Float64}) = x[1:24]
+    # f_sens(x::Vector{Float64}) = x[1:48]
 end
 
 y_len = length(f(ones(num_dyn_vars)))
@@ -443,7 +459,8 @@ f_debug(x::Vector{Float64}) = x
 # NOTE: Has to be changed when number of free  parameters is changed.
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
 h(sol) = apply_outputfun_mvar(f, sol)                            # for our model                                             # USED
-h_comp(sol) = apply_two_outputfun_mvar(f, f_sens, sol)           # for complete model with dynamics sensitivity         # USED
+# GENERALIZED: Had to change to flat version to work for multivariate output
+h_comp(sol) = apply_two_outputfun_mvar_flat(f, f_sens, sol)           # for complete model with dynamics sensitivity         # USED
 h_sens(sol) = apply_outputfun_mvar(f_sens, sol)              # for only returning sensitivity                           # USED
 # h_debug(sol) = apply_outputfun(f_debug, sol)
 h_debug(sol) = apply_outputfun_mvar(f_debug, sol)
@@ -471,23 +488,34 @@ const maxiters = Int64(1e8)
 # ---------- Temporary functions for checking out and debugging Delta model --------------
 function solve_delta(N::Int)
     θ = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
+    # θ[10] = 1.0210850451039977
     L0 = θ[1]
     L1 = θ[2]
     L2 = θ[3]
     L3 = θ[4]
     
 
-    du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
-    delta_mdl = delta_robot(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
+    # du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
+    # # delta_mdl = delta_robot_gravitycomp(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
+    # delta_mdl = delta_robot_gc_J1sens(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ)
+    
+    # du0 = [2.0; 2*cos(2*π/3); 2*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
+    # delta_mdl = delta_robot_gc_L1sens(0.0, t->[sin(2*t); sin(2*(t+0.2*π/3)); sin(2*(t-0.2*π/3))], t->zeros(3), du0, θ) #t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))]
     # ------------- Two different input alternatives -------------
-    # input  = readdlm("data/experiments/100_delta/U.csv", ',')
-    # u(t::Float64) = interpw(input, 1, 1)(t) # NOTE: This doesn't re-compute interpw every time, does it?
-    # du0 = 5*((u(0.001)[1]-u(0.0)[1])/0.001)*[1.;1.;1.]
-    # delta_mdl = delta_robot(0.0, t->5*u(t)[1]*[1.;1.;1.], t->zeros(3), du0, θ)
+    input  = readdlm("data/experiments/100_delta/U.csv", ',')
+    u(t::Float64) = interpw(input, 1, 1)(t) # NOTE: This doesn't re-compute interpw every time, does it?
+    du0 = 5*((u(0.001)[1]-u(0.0)[1])/0.001)*[1.;1.;1.]
+    delta_mdl = delta_robot_gc_L1sens(0.0, t->5*u(t)[1]*[1.;1.;1.], t->zeros(3), du0, θ)
 
     delta_prob = problem(delta_mdl, N, Ts)
     sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
     outmat = get_delta_output(sol, θ)
+
+    # DEBUG, to return entire state trajectory
+    debug_outmat = zeros(48, size(outmat, 2))
+    for (i,x) = enumerate(sol.u)
+        debug_outmat[:,i] = x
+    end
 
     # p1 = plot(-outmat[2,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
     # p2 = plot(outmat[1,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
@@ -499,33 +527,54 @@ function solve_delta(N::Int)
     # plot(p1, p2, p3, layout=l)
     
     animate_delta_gif(outmat, θ, "data/results/delta_gif.gif")
-    return outmat
+    return outmat, debug_outmat
 end
 
 function debug_delta_sensitivity(N::Int)
-    J1_1 = 0.4
-    J1_2 = 0.41
-    θ1 = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, J1_1, 0.4, 9.81, 1.0]
-    θ2 = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, J1_2, 0.4, 9.81, 1.0]
-    # L0 = θ1[1]
-    # L1 = θ1[2]
-    # L2 = θ1[3]
-    # L3 = θ1[4]
+    # # J1 sensitivity
+    # J1_1 = 0.4
+    # J1_2 = 0.41
+    # θ1 = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, J1_1, 0.4, 9.81, 1.0]
+    # θ2 = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, J1_2, 0.4, 9.81, 1.0]
+    # mld_to_use_here = delta_robot_gc_J1sens
+    # outfun_to_use = get_delta_output_with_J1sens
+    # L1 sensitivity
+    L1_1 = 1.5
+    L1_2 = 1.51
+    θ1 = [1.0, L1_1, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
+    θ2 = [1.0, L1_2, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
+    mld_to_use_here = delta_robot_gc_L1sens
+    outfun_to_use = get_delta_output_with_L1sens
+
+
     du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
     
-    delta_mdl1 = delta_robot_gc_J1sens(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ1)
+    delta_mdl1 = mld_to_use_here(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ1)
     delta_prob1 = problem(delta_mdl1, N, Ts)
     sol1 = solve(delta_prob1, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
-    outmat1, sensmat1 = get_delta_output_with_J1sens(sol1, θ1)
+    outmat1, sensmat1 = outfun_to_use(sol1, θ1)
+    doutmat1 = zeros(24, size(outmat1, 2))
+    dsensmat1 = zeros(24, size(outmat1, 2))
+    for (i,x) = enumerate(sol1.u)
+        doutmat1[:,i] = x[1:24]
+        dsensmat1[:,i] = x[25:48]
+    end
 
-    delta_mdl2 = delta_robot_gc_J1sens(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ2)
+    delta_mdl2 = mld_to_use_here(0.0, t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))], t->zeros(3), du0, θ2)
     delta_prob2 = problem(delta_mdl2, N, Ts)
     sol2 = solve(delta_prob2, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
-    outmat2, sensmat2 = get_delta_output_with_J1sens(sol2, θ2)
+    outmat2, sensmat2 = outfun_to_use(sol2, θ2)
+    doutmat2 = zeros(24, size(outmat2, 2))
+    dsensmat2 = zeros(24, size(outmat2, 2))
+    for (i,x) = enumerate(sol2.u)
+        doutmat2[:,i] = x[1:24]
+        dsensmat2[:,i] = x[25:48]
+    end
 
     out_sens_num = (outmat2-outmat1)./0.01
+    dout_sens_num = (doutmat2-doutmat1)./0.01
 
-    return out_sens_num, sensmat1
+    return out_sens_num, sensmat1, dout_sens_num, dsensmat1
 end
 
 function get_delta_output(sol, θ)
@@ -564,6 +613,35 @@ function get_delta_output_with_J1sens(sol, θ)
         sensmat[:,i] = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
                         -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
                         L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]]   # Partial derivative wrt p is zero for J1
+                        
+    end
+    return outmat, sensmat
+end
+
+function get_delta_output_with_L1sens(sol, θ)
+    T = length(sol)
+    outmat  = zeros(3,T)
+    sensmat = zeros(3,T) 
+    # TODO: sol.u is not the recommended way to access the solution
+    for (i,x) = enumerate(sol.u)
+        # out = 
+        # [L2*sin(ϕ2)*sin(ϕ3)
+        #  L1*cos(ϕ1) + L2*cos(ϕ2) + L0 - L3
+        #  L1*sin(ϕ1) + L2*sin(ϕ2)*cos(ϕ3)]
+        # where
+        # L0 = θ[1], L1 = θ[2], L2 = θ[3], L4 = θ[4]
+        outmat[:,i]  = [θ[3]*sin(x[2])*sin(x[3])
+                        θ[2]*cos(x[1]) + θ[3]*cos(x[2]) + θ[1] - θ[4]
+                        θ[2]*sin(x[1]) + θ[3]*sin(x[2])*cos(x[3])]
+        sensmat[:,i] = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
+                        -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
+                        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]] + 
+                        [   # Partial derivative wrt to L1
+                            0
+                            cos(x[1])
+                            sin(x[1])
+                        ]
+                        
     end
     return outmat, sensmat
 end
@@ -574,14 +652,17 @@ function animate_delta_gif(outmat::Matrix{Float64}, θ::Vector{Float64}, file_na
     L1 = θ[2]
     L2 = θ[3]
     L3 = θ[4]
-    p1 = scatter(-outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
-    p2 = scatter(outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
+
+    # other xlim actually, oddly enough, L1+L2+L0-L3 in magnitude, which seems weird...
+    # but ylim should be L1 + L2
+    p1 = scatter(-outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2-L3,-0.5*L1-0.5*L3), legend=false)
+    p2 = scatter(outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2-L3,-0.5*L1-0.5*L3), legend=false)
     p3 = scatter(outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2,L2), legend=false)
     plot(p1, p2, p3, layout=l)
 
     anim = @animate for i = eachindex(outmat[1,:])
-        p1 = scatter(-outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
-        p2 = scatter(outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), legend=false)
+        p1 = scatter(-outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2-L3,-0.5*L1-0.5*L3), legend=false)
+        p2 = scatter(outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2-L3,-0.5*L1-0.5*L3), legend=false)
         p3 = scatter(outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2,L2), legend=false)
         plot!(p1, -outmat[2,1:i], -outmat[3,1:i])
         plot!(p2, outmat[1,1:i], -outmat[3,1:i])
@@ -594,7 +675,7 @@ end
 # ----------------------------------------------------------------------------------------
 
 solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
-  realize_model_sens(u, w, free_dyn_pars, N, (u(0.001)-u(0.0))/0.001),
+  realize_model_sens(u, w, free_dyn_pars, N, (u(0.0001)-u(0.0))/0.0001),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
@@ -602,7 +683,7 @@ solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kw
   kwargs...,
 )
 solve_sens_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, myTs::Float64; kwargs...) = solve(
-  realize_model_sens(u, w, free_dyn_pars, N, (u(0.001)-u(0.0))/0.001),
+  realize_model_sens(u, w, free_dyn_pars, N, (u(0.0001)-u(0.0))/0.0001),
   saveat = 0:myTs:(N*Ts-0.00001),
   abstol = abstol,
   reltol = reltol,
@@ -610,7 +691,7 @@ solve_sens_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, 
   kwargs...,
 )
 solvew(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
-  realize_model(u, w, free_dyn_pars, N, (u(0.001)-u(0.0))/0.001),
+  realize_model(u, w, free_dyn_pars, N, (u(0.0001)-u(0.0))/0.0001),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
@@ -677,7 +758,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
 
     # E = size(Y, 2)
     # DEBUG
-    E = 100
+    E = 1
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -989,11 +1070,14 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     n_in = Int(W_meta_raw[1,2])
     n_out = Int(W_meta_raw[1,3])
     n_tot = nx*n_in
-    # Parameters of true system
+    # Parameters of true system. η = [a_pars c_pars], where the first nx elements are paramters of the A-matrix, and the remaining are parameters of the C-matrix
     η_true = W_meta_raw[:,4]
     dη = length(η_true)
     a_vec = η_true[1:nx]
     C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
+
+    # @warn " Setting c-parameters in η_true to zero for debugging, since it gives us zero disturbance"
+    # η_true[nx+1:end] = zeros(n_tot*n_out)
 
     # NOTE: Has to be changed when number of free disturbance parameters is changed.
     # Specifically: Both vector free_pars and the corresponding vector
@@ -1043,8 +1127,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # mk_we(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1}) =
     #     (m::Int) -> mk_noise_interp(C_true, mangle_XWs(XWs), m, δ)
 
-    @warn "Scaling input down by a factor of 0.5 because of convergence issues"
-    u(t::Float64) = 0.5*interpw(input, 1, n_u_out)(t)
+    u(t::Float64) = interpw(input, 1, n_u_out)(t)
+    # u(t::Float64) = [sin(2*t); sin(2*(t+0.2*π/3)); sin(2*(t-0.2*π/3))]
 
     # === We first generate the output of the true system ===
     function calc_Y(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1})
@@ -1239,7 +1323,8 @@ function simulate_system(
     calc_mean_y_N(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h
     calc_mean_y(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, free_pars, m)
-    return solve_in_parallel(m -> calc_mean_y(free_pars, m), collect(1:M))   # Returns Ym
+    # GENERALIZED: Had to change to flat version to work for multivariate output
+    return solve_in_parallel_flat(m -> calc_mean_y(free_pars, m), collect(1:M))   # Returns Ym
 end
 
 # Simulates system with newly generated white noise
@@ -1362,7 +1447,8 @@ function simulate_system_sens(
     calc_mean_y_N(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew_sens(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h_comp
     calc_mean_y(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, free_pars, m)
-    return solve_in_parallel_sens(m -> calc_mean_y(free_pars, m), collect(1:M))  # Returns Ym and JacsYm
+    # GENERALIZED: Had to change to flat version to work for multivariate output
+    return solve_in_parallel_sens_flat(m -> calc_mean_y(free_pars, m), collect(1:M))  # Returns Ym and JacsYm
 end
 
 # Simulates system with newly generated white noise
@@ -5898,6 +5984,67 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
                 ind += 1
             end
         end
+    end
+    duration = now()-time_start
+
+    return all_pars, cost_vals, min_ind, duration
+end
+
+function gridsearch_delta_J1(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1
+    # @warn "Using E = 1 right now, instead of something larger"
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    Jref = free_dyn_pars_true[1]
+    δJ = 0.01
+
+    Jvals = Jref-4*δJ:δJ:Jref+5δJ
+    # Jvals = [0.35]#Jref-5δJ:δJ:Jref+5δJ
+
+    cost_vals = [zeros(length(Jvals)) for e=1:E]
+    all_pars = zeros(length(free_dyn_pars_true), length(Jvals))
+    min_ind = fill(-1, (E,))
+    min_cost = fill(Inf, (E,))
+    ind = 1
+    time_start = now()
+    # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
+    for (iJ, my_J) in enumerate(Jvals)
+        for e = 1:E
+            @info "Computing cost for J1=$my_J"
+            pars = [my_J]
+
+            solvew_sens(exp_data.u, t -> zeros(3), pars, N)
+            @info "Made it!"
+            please = break_now
+
+            all_pars[:,ind] = pars
+            Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
+            cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+            if cost_vals[e][ind] < min_cost[e]
+                min_ind[e] = ind
+                min_cost[e] = cost_vals[e][ind]
+            end
+            @info "Completed computing cost for e = $e, iJ =  $iJ"
+        end
+        ind += 1
     end
     duration = now()-time_start
 
