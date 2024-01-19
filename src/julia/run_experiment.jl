@@ -1300,7 +1300,7 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
         es = collect(1:E)
         we = mk_we(XWs, isws)
         # solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
-        Y, _ = solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
+        Y = solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
         return Y
     end
 
