@@ -393,8 +393,8 @@ elseif model_id == DELTA
     dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [0.1]
-    model_sens_to_use = delta_robot_gc_stab_L1sens
-    model_to_use = delta_robot_gc_stab
+    model_sens_to_use = delta_robot_gc_L1sens
+    model_to_use = delta_robot_gc
     # model_adj_to_use = mohamed_adjoint_new
     # model_stepbystep = mohamed_stepbystep
 end
@@ -464,17 +464,18 @@ f_debug(x::Vector{Float64}) = x
 # Specifically, f_sens() must return sensitivity wrt to all free parameters
 h(sol) = apply_outputfun(f, sol)                            # for our model
 h_comp(sol) = apply_two_outputfun(f, f_sens, sol)           # for complete model with dynamics sensitivity
+h_sens(sol) = apply_outputfun(f_sens, sol)             # for only returning sensitivity 
 h_debug(sol) = apply_outputfun(f_debug, sol)
 h_sens_deb(sol) = apply_two_outputfun(f_debug, f_sens_deb, sol)
 
 const num_dyn_pars = length(free_dyn_pars_true)#size(dyn_par_bounds, 1)
-realize_model_sens(u::Function, w::Function, pars::Vector{Float64}, N::Int, du0::Vector{Float64}=Vector{Float64}(undef, 0)) = problem(
-    model_sens_to_use(φ0, u, w, du0, get_all_θs(pars)),
+realize_model_sens(u::Function, w::Function, pars::Vector{Float64}, N::Int) = problem(
+    model_sens_to_use(φ0, u, w, get_all_θs(pars)),
     N,
     Ts,
 )
-realize_model(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, du0::Vector{Float64}=Vector{Float64}(undef, 0)) = problem(
-    model_to_use(φ0, u, w, du0, get_all_θs(free_dyn_pars)),
+realize_model(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int) = problem(
+    model_to_use(φ0, u, w, get_all_θs(free_dyn_pars)),
     N,
     Ts,
 )
@@ -495,23 +496,22 @@ function solve_delta(N::Int)
     L2 = θ[3]
     L3 = θ[4]
     
-    mdl_to_use = delta_robot_gc_stab#_L1sens#delta_robot_gc_stab #delta_robot_gc_L1sens
+    mdl_to_use = delta_robot_gc_J1sens#delta_robot_gc_stab #delta_robot_gc_L1sens
 
-    # du0 = [2.0; 2*cos(2*π/3); 2*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
+    # # du0 = [2.0; 2*cos(2*π/3); 2*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
     # delta_mdl = mdl_to_use(0.0, t->[sin(2*t); sin(2*(t+0.2*π/3)); sin(2*(t-0.2*π/3))], t->zeros(3), du0, θ) #t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))]
     # ------------- Two different input alternatives -------------
     input  = readdlm("data/experiments/100_delta/U.csv", ',')
     u_tmp(t::Float64) = interpw(input, 1, 1)(t)
     u(t::Float64) = 5*u_tmp(t)[1]*[1.;1.;1.]
-    du0 = ((u(0.001)-u(0.0))/0.001)
-    delta_mdl = mdl_to_use(0.0, u, t->zeros(3), du0, θ)  #delta_mdl1 = mdl_to_use_here(0.0, u, t->zeros(3), du0, θ1)
+    delta_mdl = mdl_to_use(0.0, u, t->zeros(3), θ)
 
     delta_prob = problem(delta_mdl, N, Ts)
     sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
     outmat = get_delta_output(sol, θ)
 
     # DEBUG, to return entire state trajectory
-    debug_outmat = zeros(30, size(outmat, 2))
+    debug_outmat = zeros(60, size(outmat, 2))
     for (i,x) = enumerate(sol.u)
         debug_outmat[:,i] = x
     end
@@ -537,10 +537,10 @@ function just_debug_delta(expid::String)
     θ = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
     L1 = θ[2]
 
-    delta_mdl = model_sens_to_use(0.0, exp_data.u, t->zeros(3), (exp_data.u(0.001)-exp_data.u(0.0))/0.001, θ)
+    delta_mdl = model_sens_to_use(0.0, exp_data.u, t->zeros(3), θ)
     delta_prob = problem(delta_mdl, N, Ts)
     sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
-    outmat, sensmat = get_delta_stab_output_with_L1sens(sol, θ)
+    outmat, sensmat = get_delta_output_with_L1sens(sol, θ)
 
     # DEBUG, to return entire state trajectory
     statemat = zeros(60, size(outmat, 2))
@@ -574,19 +574,18 @@ function debug_delta_sensitivity(N::Int)
     θ1 = [1.0, L1_1, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
     θ2 = [1.0, L1_2, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
     numeqs = 30
-    mdl_to_use_here = delta_robot_gc_stab_L1sens#delta_robot_gc_L1sens
-    outfun_to_use = get_delta_stab_output_with_L1sens
+    mdl_to_use_here = delta_robot_gc_L1sens#delta_robot_gc_L1sens
+    outfun_to_use = get_delta_output_with_L1sens
 
 
-    # du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
+    # # du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
     # u(t::Float64) = 5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))]
     # ------------- Two different input alternatives -------------
     input  = readdlm("data/experiments/100_delta/U.csv", ',')
     u_tmp(t::Float64) = interpw(input, 1, 1)(t)
     u(t::Float64) = 5*u_tmp(t)[1]*[1.;1.;1.]
-    du0 = ((u(0.001)-u(0.0))/0.001)
     
-    delta_mdl1 = mdl_to_use_here(0.0, u, t->zeros(3), du0, θ1)
+    delta_mdl1 = mdl_to_use_here(0.0, u, t->zeros(3), θ1)
     delta_prob1 = problem(delta_mdl1, N, Ts)
     sol1 = solve(delta_prob1, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
     outmat1, sensmat1 = outfun_to_use(sol1, θ1)
@@ -597,7 +596,7 @@ function debug_delta_sensitivity(N::Int)
         dsensmat1[:,i] = x[numeqs+1:2numeqs]
     end
 
-    delta_mdl2 = mdl_to_use_here(0.0, u, t->zeros(3), du0, θ2)
+    delta_mdl2 = mdl_to_use_here(0.0, u, t->zeros(3), θ2)
     delta_prob2 = problem(delta_mdl2, N, Ts)
     sol2 = solve(delta_prob2, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
     outmat2, sensmat2 = outfun_to_use(sol2, θ2)
@@ -635,7 +634,7 @@ function debug_delta_sensitivity_with_crash(N::Int)
     # L1_1 = L1_2 - 0.01
     θ1 = [1.0, L1_1, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
     θ2 = [1.0, L1_2, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
-    nonsens_mdl = delta_robot_gravitycomp
+    nonsens_mdl = delta_robot_gc
     mdl_to_use_here = delta_robot_gc_L1sens
     outfun_to_use = get_delta_output_with_L1sens
 
@@ -648,9 +647,8 @@ function debug_delta_sensitivity_with_crash(N::Int)
     n_u_out = Int(U_meta_raw[1,3])
     # u_tmp(t::Float64) = interpw(input, 1, 1)(t)
     u(t::Float64) = interpw(input, 1, n_u_out)(t)#5*u_tmp(t)[1]*[1.;1.;1.]
-    du0 = ((u(0.001)-u(0.0))/0.001)
     
-    delta_mdl1 = nonsens_mdl(0.0, u, t->zeros(3), du0, θ1)
+    delta_mdl1 = nonsens_mdl(0.0, u, t->zeros(3), θ1)
     delta_prob1 = problem(delta_mdl1, N, Ts)
     sol1 = solve(delta_prob1, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
     outmat1 = get_delta_output(sol1, θ1)
@@ -664,7 +662,7 @@ function debug_delta_sensitivity_with_crash(N::Int)
     sz1 = size(outmat1,2)
 
 
-    delta_mdl2 = nonsens_mdl(0.0, u, t->zeros(3), du0, θ2)
+    delta_mdl2 = nonsens_mdl(0.0, u, t->zeros(3), θ2)
     delta_prob2 = problem(delta_mdl2, N, Ts)
     sol2 = solve(delta_prob2, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
     outmat2 = get_delta_output(sol2, θ2)
@@ -678,7 +676,7 @@ function debug_delta_sensitivity_with_crash(N::Int)
     sz = min(sz1, sz2)
 
     # This one uses forward sensitivity and might therefore crash
-    delta_mdl_sens = mdl_to_use_here(0.0, u, t->zeros(3), du0, θ1)
+    delta_mdl_sens = mdl_to_use_here(0.0, u, t->zeros(3), θ1)
     delta_prob_sens = problem(delta_mdl_sens, N, Ts)
     sol_sens = solve(delta_prob_sens, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
     outmat_sens, sensmat = outfun_to_use(sol_sens, θ1)
@@ -733,43 +731,16 @@ function get_delta_output_with_J1sens(sol, θ)
         outmat[:,i]  = [θ[3]*sin(x[2])*sin(x[3])
                         θ[2]*cos(x[1]) + θ[3]*cos(x[2]) + θ[1] - θ[4]
                         θ[2]*sin(x[1]) + θ[3]*sin(x[2])*cos(x[3])]
-        sensmat[:,i] = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
-                        -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
-                        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]]   # Partial derivative wrt p is zero for J1
+        sensmat[:,i] = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
+                        -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
+                        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33]]
+                        # Partial derivative wrt to J1 is zero
                         
     end
     return outmat, sensmat
 end
 
 function get_delta_output_with_L1sens(sol, θ)
-    T = length(sol)
-    outmat  = zeros(3,T)
-    sensmat = zeros(3,T) 
-    # TODO: sol.u is not the recommended way to access the solution
-    for (i,x) = enumerate(sol.u)
-        # out = 
-        # [L2*sin(ϕ2)*sin(ϕ3)
-        #  L1*cos(ϕ1) + L2*cos(ϕ2) + L0 - L3
-        #  L1*sin(ϕ1) + L2*sin(ϕ2)*cos(ϕ3)]
-        # where
-        # L0 = θ[1], L1 = θ[2], L2 = θ[3], L4 = θ[4]
-        outmat[:,i]  = [θ[3]*sin(x[2])*sin(x[3])
-                        θ[2]*cos(x[1]) + θ[3]*cos(x[2]) + θ[1] - θ[4]
-                        θ[2]*sin(x[1]) + θ[3]*sin(x[2])*cos(x[3])]
-        sensmat[:,i] = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
-                        -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
-                        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]] + 
-                        [   # Partial derivative wrt to L1
-                            0
-                            cos(x[1])
-                            sin(x[1])
-                        ]
-                        
-    end
-    return outmat, sensmat
-end
-
-function get_delta_stab_output_with_L1sens(sol, θ)
     T = length(sol)
     outmat  = zeros(3,T)
     sensmat = zeros(3,T) 
@@ -792,6 +763,30 @@ function get_delta_stab_output_with_L1sens(sol, θ)
                             cos(x[1])
                             sin(x[1])
                         ]
+                        
+    end
+    return outmat, sensmat
+end
+
+function get_delta_output_with_γsens(sol, θ)
+    T = length(sol)
+    outmat  = zeros(3,T)
+    sensmat = zeros(3,T) 
+    # TODO: sol.u is not the recommended way to access the solution
+    for (i,x) = enumerate(sol.u)
+        # out = 
+        # [L2*sin(ϕ2)*sin(ϕ3)
+        #  L1*cos(ϕ1) + L2*cos(ϕ2) + L0 - L3
+        #  L1*sin(ϕ1) + L2*sin(ϕ2)*cos(ϕ3)]
+        # where
+        # L0 = θ[1], L1 = θ[2], L2 = θ[3], L4 = θ[4]
+        outmat[:,i]  = [θ[3]*sin(x[2])*sin(x[3])
+                        θ[2]*cos(x[1]) + θ[3]*cos(x[2]) + θ[1] - θ[4]
+                        θ[2]*sin(x[1]) + θ[3]*sin(x[2])*cos(x[3])]
+        sensmat[:,i] = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
+                        -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
+                        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33]]
+                        # Partial derivative wrt to γ is zero
                         
     end
     return outmat, sensmat
@@ -897,13 +892,13 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
         # anything, it's not used anyway
         Y_base = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N ) |> h
 
-        # NOTE: SCALAR_OUTPUT is assumed
-        return reshape(Y_base[N_trans+1:end,:], :)   # Returns 1D-array
+        # NOTE: SCALAR_OUTPUT is assumed. Edit: I think I generalized to multivariate output in a way that makes this still work
+        return reshape(vcat(Y_base[N_trans+1:end,:]...), :)   # Returns 1D-array
     end
 
     function jacobian_model_b(dummy_input, free_pars)
         jac = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> h_sens
-        return jac[N_trans+1:end, :]
+        return vcat(jac[N_trans+1:end, :]...)
     end
 
     # jacobian_model_b(dummy_input, pars) =
@@ -919,8 +914,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     trace_base = [[pars0] for e=1:E]
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
-    @warn "Not running baseline identification now"
-    for e=[]#1:E
+    # @warn "Not running baseline identification now"
+    for e=1:E
         time_start = now()
         # HACK: Uses trace returned due to hacked LsqFit package
         baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
@@ -1117,9 +1112,9 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
-        @warn "Only using maxiters=5 right now"
+        @warn "Only using maxiters=200 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-            perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=5)
+            perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
         # # DEBUG
         # opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e], trace_step[e], trace_lrate[e] =
         #     perform_SGD_adam_debug((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)#0)
@@ -1234,8 +1229,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     a_vec = η_true[1:nx]
     C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
-    @warn " Setting c-parameters in η_true to zero for debugging, since it gives us zero disturbance"
-    η_true[nx+1:end] = zeros(n_tot*n_out)
+    # @warn " Setting c-parameters in η_true to zero for debugging, since it gives us zero disturbance"
+    # η_true[nx+1:end] = zeros(n_tot*n_out)
 
     # NOTE: Has to be changed when number of free disturbance parameters is changed.
     # Specifically: Both vector free_pars and the corresponding vector
