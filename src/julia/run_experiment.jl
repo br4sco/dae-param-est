@@ -62,7 +62,7 @@ const Tsλ = 0.01
 const Tso = 0.01
 # const δ = 0.001                  # noise sampling time
 # const Ts = 0.001                  # step-size
-const M = 1#00       # Number of monte-carlo simulations used for estimating mean
+const M = 4#00       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
@@ -560,6 +560,49 @@ function just_debug_delta(expid::String)
 
 end
 
+function delta_dist_effect(expid::String)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    dist_sens_inds = W_meta.free_par_inds
+    N = size(exp_data.Y,1)÷y_len-1
+    θ = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
+    L1 = θ[2]
+
+    W_meta = exp_data.W_meta
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    N = size(exp_data.Y, 1)÷y_len-1
+    Zm = [randn(exp_data.Nw, n_tot) for m = 1:M]
+
+    p = vcat(θ, exp_data.get_all_ηs(zeros(1)))  # Passing zeros(1) instead of free dist pars, since we have none
+    η = p[dθ+1: dθ+dη]
+    # C = reshape(η[nx+1:end], (n_out, n_tot))  # Not correct when disturbance model is parametrized, use dmdl.Cd instead
+
+    # dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+
+    # -------------------------
+    det_mdl = model_sens_to_use(0.0, exp_data.u, t->zeros(3), θ)
+    det_prob = problem(det_mdl, N, Ts)
+    sol = solve(det_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
+    detout, detsens = get_delta_output_with_L1sens(sol, θ)
+
+    dist_mdl = model_sens_to_use(0.0, exp_data.u, wmm(1), θ)
+    dist_prob = problem(dist_mdl, N, Ts)
+    sol = solve(dist_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
+    distout, distsens = get_delta_output_with_L1sens(sol, θ)
+
+    Ym = simulate_system(exp_data, [L1], 1, dist_sens_inds, isws)
+
+    detout, distout, exp_data.u, wmm(1), Ym
+end
+
 function debug_delta_sensitivity(N::Int)
     # # J1 sensitivity
     # J1_1 = 0.4
@@ -821,9 +864,8 @@ end
 
 # ----------------------------------------------------------------------------------------
 
-mydelta = 0.001# 0.0001
 solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
-  realize_model_sens(u, w, free_dyn_pars, N, (u(mydelta)-u(0.0))/mydelta),
+  realize_model_sens(u, w, free_dyn_pars, N),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
@@ -831,7 +873,7 @@ solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kw
   kwargs...,
 )
 solve_sens_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, myTs::Float64; kwargs...) = solve(
-  realize_model_sens(u, w, free_dyn_pars, N, (u(mydelta)-u(0.0))/mydelta),
+  realize_model_sens(u, w, free_dyn_pars, N),
   saveat = 0:myTs:(N*Ts-0.00001),
   abstol = abstol,
   reltol = reltol,
@@ -839,7 +881,7 @@ solve_sens_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, 
   kwargs...,
 )
 solvew(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
-  realize_model(u, w, free_dyn_pars, N, (u(mydelta)-u(0.0))/mydelta),
+  realize_model(u, w, free_dyn_pars, N),
   saveat = 0:Ts:(N*Ts),
   abstol = abstol,
   reltol = reltol,
@@ -944,11 +986,6 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     # M_mean specifies over how many realizations the gradient estimate is computed
     function get_gradient_estimate(y, free_pars, isws, M_mean::Int=1)
         Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean, dist_par_inds, isws)
-
-        # DEBUG ONLY, DELETE LATER
-        current_cost = get_cost_value(y, Ym)
-        current_grad = get_cost_gradient(y, Ym[:,1:1], jacsYm[1:1], 0)
-        @info "Current cost is $current_cost, current -grad: $(-current_grad)"
 
         # Uses different noise realizations for estimate of output and estiamte of jacobian
         return get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
@@ -1459,7 +1496,6 @@ function simulate_system(
     dη = length(W_meta.η)
     N = size(exp_data.Y, 1)÷y_len-1
 
-    # TODO: HERE! what requirements are there on free_pars matching get_all_θs?? herererere
     p = vcat(get_all_θs(free_pars), exp_data.get_all_ηs(free_pars))
     θ = p[1:dθ]
     η = p[dθ+1: dθ+dη]
