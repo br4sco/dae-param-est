@@ -1,6 +1,6 @@
 # dae-param-est
 This repository contains the code to the numerical experiment discussed in
-(TO BE ADDED, SUBMITTED TO CDC 2022), which proposes a method for consistent parameter
+[our CDC22 contribution](https://urn.kb.se/resolve?urn=urn:nbn:se:kth:diva-326394), which proposes a method for consistent parameter
 estimation using stochastic approximation for Differential Algebraic Equations (DAEs) subject to process
 disturbances.
 
