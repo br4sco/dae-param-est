@@ -429,7 +429,7 @@ elseif model_id == DELTA
     # # If output is all three servo angles
     # f(x::Vector{Float64}) = [x[1],x[4],x[7]]    # All three servo angles
     # f_sens(x::Vector{Float64}) = [x[25],x[28],x[31]]
-    # # If output is position of end effector
+    # # If output is position of end effector, expressed in angles of first arm
     f(x::Vector{Float64}) = [L2*sin(x[2])*sin(x[3])
         L1*cos(x[1]) + L2*cos(x[2]) + L0 - L3
         L1*sin(x[1]) + L2*sin(x[2])*cos(x[3])]
@@ -534,10 +534,23 @@ function just_debug_delta(expid::String)
     W_meta = exp_data.W_meta
     dist_sens_inds = W_meta.free_par_inds
     N = size(exp_data.Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
     θ = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
     L1 = θ[2]
 
-    delta_mdl = model_sens_to_use(0.0, exp_data.u, t->zeros(3), θ)
+    # For generating disturbance
+    Zm = [randn(Nw, n_tot) for m = 1:1]
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(W_meta.η, nx, n_out), δ, dist_sens_inds)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+
+    # delta_mdl = model_sens_to_use(0.0, exp_data.u, t->zeros(3), θ)
+    delta_mdl = model_sens_to_use(0.0, exp_data.u, wmm(1), θ)
     delta_prob = problem(delta_mdl, N, Ts)
     sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
     outmat, sensmat = get_delta_output_with_L1sens(sol, θ)
@@ -548,14 +561,12 @@ function just_debug_delta(expid::String)
         statemat[:,i] = x
     end
 
-    Ym = simulate_system(exp_data, [L1], 1, dist_sens_inds, isws)   # M = 1
+    # Ym = simulate_system(exp_data, [L1], 1, dist_sens_inds, isws)   # M = 1
 
-    Ymsens, jacsYm = simulate_system_sens(exp_data, [L1], 1, dist_sens_inds, isws)  # M = 1
-
-    # Ymsens and Ym don't have the same structure!!!! Figure out why
+    # Ymsens, jacsYm = simulate_system_sens(exp_data, [L1], 1, dist_sens_inds, isws)  # M = 1
 
     #    solve_delta-way            | simulate_system and simulate_system_sens way
-    return outmat, statemat, sensmat, Ym, Ymsens, jacsYm
+    return outmat, statemat, sensmat#, Ym, Ymsens, jacsYm
     # plot(outmat[1,:]); plot!(Ym[1:100]), plot(outmat[2,:]); plot!(Ym[101:200]), and plot(outmat[3,:]); plot!(Ym[201:300]) should (and do) show the same plot twice
 
 end
@@ -1310,12 +1321,12 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds)
 
     # Exact interpolation
-    mk_we(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1}) =
-        (m::Int) -> mk_newer_noise_interp(
-        a_vec::AbstractVector{Float64}, C_true, XWs, m, n_in, δ, isws)
-    # Linear interpolation. Not recommended DEBUG.
     # mk_we(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1}) =
-    #     (m::Int) -> mk_noise_interp(C_true, mangle_XWs(XWs), m, δ)
+    #     (m::Int) -> mk_newer_noise_interp(
+    #     a_vec::AbstractVector{Float64}, C_true, XWs, m, n_in, δ, isws)
+    # Linear interpolation.
+    mk_we(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1}) =
+        (m::Int) -> mk_noise_interp(C_true, mangle_XWs(XWs), m, δ)
 
     u(t::Float64) = interpw(input, 1, n_u_out)(t)
     # u(t::Float64) = [sin(2*t); sin(2*(t+0.2*π/3)); sin(2*(t-0.2*π/3))]
@@ -6260,13 +6271,17 @@ function gridsearch_delta_L1(expid::String, N_trans::Int = 0)
     # E = size(Y, 2)
     # DEBUG
     E = 1
+    myM = 100
     # @warn "Using E = 1 right now, instead of something larger"
-    Zm = [randn(Nw, n_tot) for m = 1:M]
+    Zm = [randn(Nw, n_tot) for m = 1:myM]
+    # @warn "Using zeros intstead of white noise to obtain baseline cost function"
+    # Zm = [zeros(Nw, n_tot) for m = 1:myM]
 
     Lref = free_dyn_pars_true[1]
     δL = 0.01
 
-    Lvals = Lref-10*δL:δL:Lref+10δL
+    # Lvals = Lref-11*δL:δL:Lref+11δL
+    Lvals = 1.45:δL:1.65
     # Lvals = Lref:δL:Lref+δL
 
     cost_vals = [zeros(length(Lvals)) for e=1:E]
@@ -6283,48 +6298,39 @@ function gridsearch_delta_L1(expid::String, N_trans::Int = 0)
     # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
     for (iL, my_L) in enumerate(Lvals)
         for e = 1:E
-            @info "Computing cost for L1=$my_L"
-            pars = [my_L]
-
-            solvew_sens(exp_data.u, t -> zeros(3), pars, N)
+            @info "Computing cost for L1=$my_L, or after clamping, L1=$(clamp(my_L, dyn_par_bounds[1], dyn_par_bounds[2]))"
+            pars = [clamp(my_L, dyn_par_bounds[1], dyn_par_bounds[2])]
 
             all_pars[:,ind] = pars
-            # try
-                Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
-                cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-                if cost_vals[e][ind] < min_cost[e]
-                    min_ind[e] = ind
-                    min_cost[e] = cost_vals[e][ind]
-                end
-                # BONUS: Computing cost function gradient
-                deb_all_Yms[:,ind] = Ym
-                Ymsens, jacsYm = simulate_system_sens(exp_data, pars, 1, dist_sens_inds, isws)
-                grad_vals[e][ind] = first(get_cost_gradient(Y[N_trans+1:end, e], Ymsens[:,1:1], jacsYm[1:1], N_trans))
-                deb_all_sens[:,ind] = jacsYm[1]
-                deb_all_Yms2[:,ind] = Ymsens
-            # catch
-            #     @warn "Failed to converge, continuing anyway"
-            #     Ym = fill(NaN, size(Y[N_trans+1:end, e]))
-            #     cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-            # end
+            Ym = mean(simulate_system(exp_data, pars, myM, dist_sens_inds, isws, Zm), dims=2)
+            cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
+            if cost_vals[e][ind] < min_cost[e]
+                min_ind[e] = ind
+                min_cost[e] = cost_vals[e][ind]
+            end
+            # # BONUS: Computing cost function gradient
+            # deb_all_Yms[:,ind] = Ym
+            # Ymsens, jacsYm = simulate_system_sens(exp_data, pars, 1, dist_sens_inds, isws)
+            # grad_vals[e][ind] = first(get_cost_gradient(Y[N_trans+1:end, e], Ymsens[:,1:1], jacsYm[1:1], N_trans))
+            # deb_all_sens[:,ind] = jacsYm[1]
+            # deb_all_Yms2[:,ind] = Ymsens
             @info "Completed computing cost for e = $e, iL =  $iL"
         end
         ind += 1
     end
     duration = now()-time_start
 
-    # DEBUG: Figuring out if at least output sensitivity is right despite cost sensitivity being wrong
-    num_sens = zeros(y_len*(N+1) , length(Lvals)-1)
-    for_sens = deb_all_sens[:,1:end-1]
-    for i=1:length(Lvals)-1
-        num_sens[:,i] = (deb_all_Yms[:,i+1]-deb_all_Yms[:,i])./δL
-    end
+    # # DEBUG: Figuring out if at least output sensitivity is right despite cost sensitivity being wrong
+    # num_sens = zeros(y_len*(N+1) , length(Lvals)-1)
+    # for_sens = deb_all_sens[:,1:end-1]
+    # for i=1:length(Lvals)-1
+    #     num_sens[:,i] = (deb_all_Yms[:,i+1]-deb_all_Yms[:,i])./δL
+    # end
     
     # Good way to plot, for some ind
     # plot(num_sens[1:3:300,ind], color="blue"); plot!(num_sens[2:3:300,ind], color="blue"); plot!(num_sens[3:3:300,ind], color="blue"); plot!(for_sens[1:3:300,ind], color="red"); plot!(for_sens[2:3:300,ind], color="red"); plot!(for_sens[3:3:300,ind], color="red")
 
-
-    return all_pars, cost_vals, min_ind, duration, grad_vals, num_sens, for_sens, deb_all_Yms, deb_all_Yms2
+    return all_pars, cost_vals, min_ind, duration#, grad_vals, num_sens, for_sens, deb_all_Yms, deb_all_Yms2
 end
 
 function gridsearch_3distsens(expid::String, N_trans::Int = 0)
