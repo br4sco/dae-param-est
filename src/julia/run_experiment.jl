@@ -386,14 +386,15 @@ elseif model_id == MOH_MDL
     model_adj_to_use = mohamed_adjoint_new
     model_stepbystep = mohamed_stepbystep
 elseif model_id == DELTA
-    const free_dyn_pars_true = [L1] # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [γ] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
-    get_all_θs(pars::Vector{Float64}) = [L0, pars[1], L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
-    dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    # # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
+    # dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
+    dyn_par_bounds = [0.01 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [0.1]
-    model_sens_to_use = delta_robot_gc_L1sens
+    model_sens_to_use = delta_robot_gc_γsens
     model_to_use = delta_robot_gc
     # model_adj_to_use = mohamed_adjoint_new
     # model_stepbystep = mohamed_stepbystep
@@ -434,21 +435,24 @@ elseif model_id == DELTA
         L1*cos(x[1]) + L2*cos(x[2]) + L0 - L3
         L1*sin(x[1]) + L2*sin(x[2])*cos(x[3])]
     
+    ##################################################################################################################################################
     # f_sens should return a matrix with each row corresponding to a different output component and each column corresponding to a different parameter
-    # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
-    f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
-        -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
-        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;] +   
-        [   # Partial derivative wrt to L1
-            0
-            cos(x[1])
-            sin(x[1])
-        ;;]
+    ##################################################################################################################################################
 
-    # # Sensitivity wrt to J1
-    # f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
-    #     -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
-    #     L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27]]
+    # # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
+    #     -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
+    #     L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;] +   
+    #     [   # Partial derivative wrt to L1
+    #         0
+    #         cos(x[1])
+    #         sin(x[1])
+    #     ;;]
+
+    # Sensitivity wrt to J1 or wrt to γ, they are the same
+    f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
+        -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
+        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27];;]
 
     # # Just getting all states
     # f(x::Vector{Float64}) = x[1:24]
@@ -927,6 +931,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
 
+    please = breaknow
+
     @assert (length(pars0) == num_dyn_pars+length(dist_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
     @assert (size(dyn_par_bounds, 1) == num_dyn_pars) "Please provide bounds for exactly all free dynamic parameters. Now $(size(dyn_par_bounds, 1)) are provided for $num_dyn_pars parameters"
     @assert (length(const_learning_rate) == length(pars0)) "The learning rate must have the same number of components as the number of parameters to be identified, currently is has $(length(const_learning_rate)) instead of $(length(pars0))"
@@ -1337,9 +1343,9 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     function calc_Y(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1})
         # NOTE: XWs should be non-mangled, which is why we don't divide by n_tot
         @assert (Nw <= size(XWs, 1)) "Disturbance data size mismatch ($(Nw) > $(size(XWs, 1)))"
-        @warn "Using E=1 instead of size of XWs when generating Y!"
-        # E = size(XW, 2)
-        E = 1
+        # @warn "Using E=1 instead of size of XWs when generating Y!"
+        E = size(XW, 2)
+        # E = 1
         es = collect(1:E)
         we = mk_we(XWs, isws)
         # solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
@@ -6190,68 +6196,55 @@ function gridsearch_sans_g(expid::String, N_trans::Int = 0)
     return all_pars, cost_vals, min_ind, duration
 end
 
-function gridsearch_delta_J1(expid::String, N_trans::Int = 0)
-    exp_data, isws = get_experiment_data(expid)
-    W_meta = exp_data.W_meta
-    Y = exp_data.Y
-    N = size(Y,1)÷y_len-1
-    Nw = exp_data.Nw
-    nx = W_meta.nx
-    n_in = W_meta.n_in
-    n_out = W_meta.n_out
-    n_tot = nx*n_in
-    dη = length(W_meta.η)
-    u = exp_data.u
-    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
-    dist_sens_inds = W_meta.free_par_inds
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
+################################################################
 
-    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
-
-    # E = size(Y, 2)
-    # DEBUG
-    E = 1
-    # @warn "Using E = 1 right now, instead of something larger"
-    Zm = [randn(Nw, n_tot) for m = 1:M]
-
-    Jref = free_dyn_pars_true[1]
-    δJ = 0.01
-
-    Jvals = Jref-4*δJ:δJ:Jref+5δJ
-    # Jvals = [0.35]#Jref-5δJ:δJ:Jref+5δJ
-
-    cost_vals = [zeros(length(Jvals)) for e=1:E]
-    all_pars = zeros(length(free_dyn_pars_true), length(Jvals))
-    min_ind = fill(-1, (E,))
-    min_cost = fill(Inf, (E,))
-    ind = 1
-    time_start = now()
-    # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
-    for (iJ, my_J) in enumerate(Jvals)
-        for e = 1:E
-            @info "Computing cost for J1=$my_J"
-            pars = [my_J]
-
-            solvew_sens(exp_data.u, t -> zeros(3), pars, N)
-            @info "Made it!"
-            please = break_now
-
-            all_pars[:,ind] = pars
-            Ym = mean(simulate_system(exp_data, pars, M, dist_sens_inds, isws, Zm), dims=2)
-            cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-            if cost_vals[e][ind] < min_cost[e]
-                min_ind[e] = ind
-                min_cost[e] = cost_vals[e][ind]
-            end
-            @info "Completed computing cost for e = $e, iJ =  $iJ"
-        end
-        ind += 1
+function gridsearch_delta_wrapper(expid::String)
+    krange = [1, 2, 4, 10, 40]
+    pars, prop_vals, base_vals = gridsearch_delta(expid, krange[1], 0)
+    # all_pars = [zeros(size(pars)) for k = krange]
+    # all_pars[1] = pars
+    all_vals = [[zeros(size(prop_vals[1])) for ind = eachindex(prop_vals)] for k=eachindex(krange)]
+    all_base = [[zeros(size(base_vals[1])) for ind = eachindex(base_vals)] for k=eachindex(krange)]
+    for ind = 1:length(prop_vals)
+        all_vals[1][ind] = prop_vals[ind]
+        all_base[1][ind] = base_vals[ind]
     end
-    duration = now()-time_start
-
-    return all_pars, cost_vals, min_ind, duration
+    try
+        for it = 2:length(krange)
+            @info "EXPERIMENT FOR k=$(krange[it])"
+            pars, prop_vals, base_vals = gridsearch_delta(expid, krange[it], 0)
+            # all_pars[it] = pars
+            for ind = 1:length(prop_vals)
+                all_vals[it][ind] = prop_vals[ind]
+                all_base[it][ind] = base_vals[ind]
+            end
+        end
+    catch ex
+        writedlm("data/experiments/tmp/delta_all_pars.csv", pars, ',')
+        writedlm("data/experiments/tmp/delta_all_vals.csv", all_vals, ',')
+        writedlm("data/experiments/tmp/delta_all_base.csv", base, ',')
+        throw(ex)
+    end
+    # return all_pars, all_vals, all_base
+    return pars, all_vals, all_base
 end
 
-function gridsearch_delta_L1(expid::String, N_trans::Int = 0)
+function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     Y = exp_data.Y
@@ -6268,69 +6261,57 @@ function gridsearch_delta_L1(expid::String, N_trans::Int = 0)
 
     get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
+    # Total data-set will be of length K*N, so K number of smaller data-sets will be used to compute cost
     # E = size(Y, 2)
     # DEBUG
-    E = 1
-    myM = 100
-    # @warn "Using E = 1 right now, instead of something larger"
-    Zm = [randn(Nw, n_tot) for m = 1:myM]
-    # @warn "Using zeros intstead of white noise to obtain baseline cost function"
-    # Zm = [zeros(Nw, n_tot) for m = 1:myM]
+    E = 10
+    myM = 8
+    Zm = [randn(Nw, n_tot) for m = 1:myM*K]
+    myZeros = [zeros(Nw, n_tot) for k=1:K]
 
-    Lref = free_dyn_pars_true[1]
-    δL = 0.01
+    ref = free_dyn_pars_true[1]
+    myδ = 0.01
+    # vals = ref:ref
+    vals = ref-11*myδ:myδ:ref+11myδ
+    # vals = 1.45:myδ:1.65
+    # vals = ref:myδ:ref+myδ
 
-    # Lvals = Lref-11*δL:δL:Lref+11δL
-    Lvals = 1.45:δL:1.65
-    # Lvals = Lref:δL:Lref+δL
-
-    cost_vals = [zeros(length(Lvals)) for e=1:E]
-    grad_vals = [zeros(length(Lvals)) for e=1:E]
-    all_pars = zeros(length(free_dyn_pars_true), length(Lvals))
-    min_ind = fill(-1, (E,))
-    min_cost = fill(Inf, (E,))
-    deb_all_Yms = zeros(y_len*(N+1) , length(Lvals))
-    deb_all_sens = zeros(y_len*(N+1) , length(Lvals))
-    deb_all_Yms2 = zeros(y_len*(N+1) , length(Lvals))
+    cost_vals = [zeros(length(vals)) for e=1:E]
+    cost_base = [zeros(length(vals)) for e=1:E]
+    grad_vals = [zeros(length(vals)) for e=1:E]
+    all_pars = zeros(length(free_dyn_pars_true), length(vals))
+    Ym = zeros(size(Y[N_trans+1:end,1], 1), K)
     ind = 1
     time_start = now()
-    most_recent_Ym = zeros(300,1)   # DEBUG
     # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
-    for (iL, my_L) in enumerate(Lvals)
+    for (ind, my_par) in enumerate(vals)
         for e = 1:E
-            @info "Computing cost for L1=$my_L, or after clamping, L1=$(clamp(my_L, dyn_par_bounds[1], dyn_par_bounds[2]))"
-            pars = [clamp(my_L, dyn_par_bounds[1], dyn_par_bounds[2])]
+            @info "Computing cost for p=$my_par, or after clamping, p=$(clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2]))"
+            pars = [clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2])]
 
             all_pars[:,ind] = pars
-            Ym = mean(simulate_system(exp_data, pars, myM, dist_sens_inds, isws, Zm), dims=2)
-            cost_vals[e][ind] = mean((Y[N_trans+1:end, e].-Ym[N_trans+1:end]).^2)
-            if cost_vals[e][ind] < min_cost[e]
-                min_ind[e] = ind
-                min_cost[e] = cost_vals[e][ind]
+            Ysim = simulate_system(exp_data, pars, myM*K, dist_sens_inds, isws, Zm)
+            # TODO: Since each realization of the baseline should be the same, since it's deterministic, it really should be enough to simulate only 1
+            Ybase = simulate_system(exp_data, pars, K, dist_sens_inds, isws, myZeros)
+            for k = 1:K
+                Ym[:,k] = mean(Ysim[:,(k-1)*myM+1:k*myM], dims=2)
+                cost_vals[e][ind] += mean((Y[N_trans+1:end, (e-1)*K+k].-Ym[N_trans+1:end,k]).^2)
+                cost_base[e][ind] += mean((Y[N_trans+1:end, (e-1)*K+k].-Ybase[N_trans+1:end,k]).^2)
             end
+            cost_vals[e][ind] = cost_vals[e][ind]/K
+            cost_base[e][ind] = cost_base[e][ind]/K
+            # Ym = mean(simulate_system(exp_data, pars, myM, dist_sens_inds, isws, Zm), dims=2)
+
             # # BONUS: Computing cost function gradient
-            # deb_all_Yms[:,ind] = Ym
             # Ymsens, jacsYm = simulate_system_sens(exp_data, pars, 1, dist_sens_inds, isws)
             # grad_vals[e][ind] = first(get_cost_gradient(Y[N_trans+1:end, e], Ymsens[:,1:1], jacsYm[1:1], N_trans))
-            # deb_all_sens[:,ind] = jacsYm[1]
-            # deb_all_Yms2[:,ind] = Ymsens
-            @info "Completed computing cost for e = $e, iL =  $iL"
+            @info "Completed computing cost for e = $e out of $E, ind =  $ind out of $(length(vals))"
         end
         ind += 1
     end
     duration = now()-time_start
 
-    # # DEBUG: Figuring out if at least output sensitivity is right despite cost sensitivity being wrong
-    # num_sens = zeros(y_len*(N+1) , length(Lvals)-1)
-    # for_sens = deb_all_sens[:,1:end-1]
-    # for i=1:length(Lvals)-1
-    #     num_sens[:,i] = (deb_all_Yms[:,i+1]-deb_all_Yms[:,i])./δL
-    # end
-    
-    # Good way to plot, for some ind
-    # plot(num_sens[1:3:300,ind], color="blue"); plot!(num_sens[2:3:300,ind], color="blue"); plot!(num_sens[3:3:300,ind], color="blue"); plot!(for_sens[1:3:300,ind], color="red"); plot!(for_sens[2:3:300,ind], color="red"); plot!(for_sens[3:3:300,ind], color="red")
-
-    return all_pars, cost_vals, min_ind, duration#, grad_vals, num_sens, for_sens, deb_all_Yms, deb_all_Yms2
+    return all_pars, cost_vals, cost_base, duration#, grad_vals
 end
 
 function gridsearch_3distsens(expid::String, N_trans::Int = 0)
