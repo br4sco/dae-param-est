@@ -389,7 +389,7 @@ elseif model_id == DELTA
     const free_dyn_pars_true = [γ] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    # # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
+    # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
     # dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
     dyn_par_bounds = [0.01 1e4]
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
@@ -449,7 +449,7 @@ elseif model_id == DELTA
     #         sin(x[1])
     #     ;;]
 
-    # Sensitivity wrt to J1 or wrt to γ, they are the same
+    # Sensitivity wrt to J1 or wrt to γ or to M1, they are all the same
     f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
         -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
         L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27];;]
@@ -546,18 +546,26 @@ function just_debug_delta(expid::String)
     θ = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
     L1 = θ[2]
 
+    # DEBUG
+    println("Starting this simulation")
+    simulate_system_sens(exp_data, [0.37466751264710474], 2, exp_data.W_meta.free_par_inds, isws)
+    println("Finishing this simulation")
+    # END DEBUG
+
     # For generating disturbance
-    Zm = [randn(Nw, n_tot) for m = 1:1]
+    Zm = [randn(Nw, n_tot) for m = 1:3]
     dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(W_meta.η, nx, n_out), δ, dist_sens_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
     wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
 
+    # θ[12] = γ
+    θ[12] = 0.37466751264710474
     # delta_mdl = model_sens_to_use(0.0, exp_data.u, t->zeros(3), θ)
-    delta_mdl = model_sens_to_use(0.0, exp_data.u, wmm(1), θ)
+    delta_mdl = model_sens_to_use(0.0, exp_data.u, wmm(3), θ)
     delta_prob = problem(delta_mdl, N, Ts)
     sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
-    outmat, sensmat = get_delta_output_with_L1sens(sol, θ)
+    outmat, sensmat = get_delta_output_with_γsens(sol, θ)
 
     # DEBUG, to return entire state trajectory
     statemat = zeros(60, size(outmat, 2))
@@ -915,7 +923,7 @@ solve_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::In
 # data-set output function
 h_data(sol) = apply_outputfun(x -> f(x) + σ * randn(size(f(x))), sol)
 
-function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
+function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, num_stacks::Int=1)
     start_datetime = now()
     exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
@@ -930,8 +938,6 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     n_tot = nx*n_in
     dη = length(W_meta.η)
     dist_par_inds = W_meta.free_par_inds
-
-    please = breaknow
 
     @assert (length(pars0) == num_dyn_pars+length(dist_par_inds)) "Please pass exactly $(num_dyn_pars+length(W_meta.free_par_inds)) parameter values"
     @assert (size(dyn_par_bounds, 1) == num_dyn_pars) "Please provide bounds for exactly all free dynamic parameters. Now $(size(dyn_par_bounds, 1)) are provided for $num_dyn_pars parameters"
@@ -952,7 +958,9 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
         Y_base = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N ) |> h
 
         # NOTE: SCALAR_OUTPUT is assumed. Edit: I think I generalized to multivariate output in a way that makes this still work
-        return reshape(vcat(Y_base[N_trans+1:end,:]...), :)   # Returns 1D-array
+        # Y_base is either a vector of vectors (inner vector is a multi-dimensional output) or a vector of scalars.
+        return vcat(Y_base[N_trans+1:end]...)   # New, should be equivalent with old but with a far more straightforward expression
+        # return reshape(vcat(Y_base[N_trans+1:end,:]...), :)   # Returns 1D-array # Old, I do not know why it had this expression, seems just overkill
     end
 
     function jacobian_model_b(dummy_input, free_pars)
@@ -960,12 +968,35 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
         return vcat(jac[N_trans+1:end, :]...)
     end
 
-    # jacobian_model_b(dummy_input, pars) =
-    #     solvew_sens(u, t -> zeros(n_out), pars, N) |> h_sens
+    function baseline_model_parametrized_stacked(dummy_input, pars)
+        # NOTE: The true input is encoded in the solvew_sens()-function, but this function
+        # still needs to to take two input arguments, so dummy_input could just be
+        # anything, it's not used anyway
+        Y_base_deep = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N ) |> h
+        # Y_base_deep is either a vector of vectors (inner vector is a multi-dimensional output) or a vector of scalars.
+        Y_base_flat = vcat(Y_base_deep[N_trans+1:end]...)
+        Y_base_stacked = zeros(num_stacks*length(Y_base_flat))
+        len = length(Y_base_flat)
+        for ind = 1:num_stacks
+            Y_base_stacked[(ind-1)*len+1:ind*len] = Y_base_flat
+        end
+        return Y_base_stacked
+    end
+
+    function jacobian_model_b_stacked(dummy_input, free_pars)
+        jac_deep = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> h_sens
+        jac_flat = vcat(jac_deep[N_trans+1:end, :]...)
+        len = size(jac_flat, 1)
+        jac_stacked = zeros(num_stacks*size(jac_flat,1), size(jac_flat,2))
+        for ind = 1:num_stacks
+            jac_stacked[(ind-1)*len+1:ind*len,:] = jac_flat
+        end
+        return jac_stacked
+    end
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1
+    E = 1#00
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -973,13 +1004,20 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     trace_base = [[pars0] for e=1:E]
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
-    # @warn "Not running baseline identification now"
-    for e=1:E
+    @warn "Not running baseline identification now"
+    for e=[]#1:E
         time_start = now()
         # HACK: Uses trace returned due to hacked LsqFit package
-        baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
-            baseline_model_parametrized, jacobian_model_b,
-            par_bounds[:,1], par_bounds[:,2])
+        if num_stacks > 1
+            Y_true_stacked = vcat([Y[N_trans+1:end,(ind-1)*E+e] for ind=1:num_stacks]...)
+            baseline_result, baseline_trace = get_fit_sens(Y_true_stacked, pars0,
+                baseline_model_parametrized_stacked, jacobian_model_b_stacked,
+                par_bounds[:,1], par_bounds[:,2])
+        else
+            baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
+                baseline_model_parametrized, jacobian_model_b,
+                par_bounds[:,1], par_bounds[:,2])
+        end
         opt_pars_baseline[:, e] = coef(baseline_result)
 
         println("Completed for dataset $e for parameters $(opt_pars_baseline[:,e])")
@@ -1002,10 +1040,28 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     # Returns estimate of gradient of cost function
     # M_mean specifies over how many realizations the gradient estimate is computed
     function get_gradient_estimate(y, free_pars, isws, M_mean::Int=1)
-        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean, dist_par_inds, isws)
-
+        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean*k, dist_par_inds, isws)
         # Uses different noise realizations for estimate of output and estiamte of jacobian
         return get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
+    end
+
+    function get_gradient_estimate_stacked(ystacked, free_pars, isws, M_mean::Int=1, k::Int=1)
+        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean*k, dist_par_inds, isws)
+        if k > 1
+            len = size(Ym,1)
+            Ymstacked = zeros(k*len, 2M_mean)
+            jacsstacked = [zeros(k*len, length(free_pars)) for i=1:2M_mean]
+            for ind1=1:2M_mean
+                for ind2=1:k
+                    Ymstacked[(ind2-1)*len+1:ind2*len,ind1] = Ym[:,(ind2-1)*2M_mean+ind1]
+                    jacsstacked[ind1][(ind2-1)*len+1:ind2*len,:] = jacsYm[(ind2-1)*2M_mean+ind1]
+                end
+            end
+            # NOTE: Non-zero N_trans not supported!!
+            return get_cost_gradient(ystacked, Ymstacked[:,1:M_mean], jacsstacked[M_mean+1:end])
+        end
+        # Uses different noise realizations for estimate of output and estiamte of jacobian
+        return get_cost_gradient(ystacked, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
     end
 
     # ------------------------------- For using adjoint sensitivity ---------------------------------
@@ -1152,8 +1208,12 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
+
     get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)#get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
     # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
+    if num_stacks > 1
+        get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate_stacked(vcat([Y[:,(ind-1)*E+e] for ind=1:num_stacks]...), free_pars, isws, M_mean, num_stacks)
+    end
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
@@ -1163,17 +1223,13 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
     trace_lrate     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
     proposed_durations = Array{Millisecond, 1}(undef, E)
     # @warn "Not running proposed identification now"
-    for e=1:E
+    @warn "Starting at e=3, and ending there too"
+    for e=3:3
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=200 right now"
         opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
             perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
-        # # DEBUG
-        # opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e], trace_step[e], trace_lrate[e] =
-        #     perform_SGD_adam_debug((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=300)#0)
-
-        # avg_pars_proposed[:,e] = mean(trace_proposed[e][end-80:end])
 
         writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
         writedlm(joinpath(data_dir, "tmp/backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
@@ -1448,7 +1504,26 @@ function perform_SGD_adam_new(
     trace = [pars]
     grad_trace = []
     while t <= maxiters
-        grad_est = get_grad_estimate(pars, M_rate(t))
+        # New way, of repeating simulation on convergence failure
+        grad_est = zeros(size(pars0))
+        succeeded = false
+        maxtries = 10
+        ind = 1
+        while !succeeded && ind <= maxtries
+            try
+                grad_est = get_grad_estimate(pars, M_rate(t))
+                succeeded = true
+            catch ex
+                println("Attempt $ind failed with error:")
+                println(ex)
+                ind += 1
+            end
+        end
+        if ind == 11
+            throw(ErrorException("Failed all $maxtries attempts to obtain gradient estimate for parameter values $(pars)"))
+        end
+        # # Original way of doing it
+        # grad_est = get_grad_estimate(pars, M_rate(t))
 
         beta1t = betas[1]*(λ^(t-1))
         s = beta1t*s + (1-beta1t)*grad_est
@@ -6213,7 +6288,7 @@ end
 ################################################################
 ################################################################
 
-function gridsearch_delta_wrapper(expid::String)
+function gridsearch_delta_wrapper(expid::String, savedir::String)
     krange = [1, 2, 4, 10, 40]
     pars, prop_vals, base_vals = gridsearch_delta(expid, krange[1], 0)
     # all_pars = [zeros(size(pars)) for k = krange]
@@ -6237,11 +6312,27 @@ function gridsearch_delta_wrapper(expid::String)
     catch ex
         writedlm("data/experiments/tmp/delta_all_pars.csv", pars, ',')
         writedlm("data/experiments/tmp/delta_all_vals.csv", all_vals, ',')
-        writedlm("data/experiments/tmp/delta_all_base.csv", base, ',')
+        writedlm("data/experiments/tmp/delta_all_base.csv", all_base, ',')
         throw(ex)
     end
+
+    save_wrapped_gridsearch(savedir, krange, pars, all_vals, all_base)
+
     # return all_pars, all_vals, all_base
     return pars, all_vals, all_base
+end
+
+function save_wrapped_gridsearch(dirname::String, krange, pars, all_vals, all_base)
+    nk = length(all_vals)
+    E  = length(all_vals[1])
+
+    writedlm("data/results/$(dirname)/all_pars.csv", pars, ',')
+    for (ik, k) = enumerate(krange)
+        for (ie, e) = enumerate(1:E)
+            writedlm("data/results/$(dirname)/all_vals_N$(500k)_e$(e).csv",  all_vals[ik][e],  ',')
+            writedlm("data/results/$(dirname)/all_base_N$(500k)_e$(e).csv", all_base[ik][e], ',')
+        end
+    end
 end
 
 function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
@@ -6271,10 +6362,8 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
 
     ref = free_dyn_pars_true[1]
     myδ = 0.01
-    # vals = ref:ref
-    vals = ref-11*myδ:myδ:ref+11myδ
-    # vals = 1.45:myδ:1.65
-    # vals = ref:myδ:ref+myδ
+    vals = ref-11myδ:myδ:ref+11myδ
+    # vals = ref-myδ:myδ:ref+myδ
 
     cost_vals = [zeros(length(vals)) for e=1:E]
     cost_base = [zeros(length(vals)) for e=1:E]
@@ -6312,6 +6401,23 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     duration = now()-time_start
 
     return all_pars, cost_vals, cost_base, duration#, grad_vals
+end
+
+# Assumes scalar parameter
+function find_delta_minima(E::Int, krange::Vector{Int}, dir::String)
+    myN = 500
+    base_mins = zeros(E, length(krange))
+    prop_mins = zeros(E, length(krange))
+    par_vals = readdlm("$(dir)/all_pars.csv", ',')
+    for e = 1:E
+        for (ik, k) = enumerate(krange)
+            base_vals = readdlm("$(dir)/all_base_N$(k*myN)_E$(e).csv", ',')[:]
+            prop_vals = readdlm("$(dir)/all_vals_N$(k*myN)_E$(e).csv", ',')[:]
+            base_mins[e,ik] = par_vals[findall(base_vals.==minimum(base_vals))[1]]
+            prop_mins[e,ik] = par_vals[findall(prop_vals.==minimum(prop_vals))[1]]
+        end
+    end
+    return par_vals, base_mins, prop_mins
 end
 
 function gridsearch_3distsens(expid::String, N_trans::Int = 0)
