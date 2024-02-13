@@ -559,8 +559,8 @@ function just_debug_delta(expid::String)
     XWm = simulate_noise_process_mangled(dmdl, Zm)
     wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
 
-    # θ[12] = γ
-    θ[12] = 0.37466751264710474
+    # θ[13] = γ
+    θ[13] = 0.37466751264710474
     # delta_mdl = model_sens_to_use(0.0, exp_data.u, t->zeros(3), θ)
     delta_mdl = model_sens_to_use(0.0, exp_data.u, wmm(3), θ)
     delta_prob = problem(delta_mdl, N, Ts)
@@ -996,7 +996,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1#00
+    E = 100
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -1223,8 +1223,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     trace_lrate     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
     proposed_durations = Array{Millisecond, 1}(undef, E)
     # @warn "Not running proposed identification now"
-    @warn "Starting at e=3, and ending there too"
-    for e=3:3
+    for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=200 right now"
