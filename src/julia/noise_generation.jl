@@ -29,6 +29,7 @@ struct DisturbanceMetaData
     n_out::Int
     η::Array{Float64,1}
     free_par_inds::Array{Int64,1}
+    num_rels::Int
 end
 
 # =================== Helper Functions ==========================
@@ -453,7 +454,8 @@ end
 # to create a custom struct???
 
 # Used for disturbance
-function disturbance_model_1(Ts::Float64; bias::Float64=0.0, scale::Float64=0.6)::Tuple{DT_SS_Model, DataFrame}
+# function disturbance_model_1(Ts::Float64; bias::Float64=0.0, scale::Float64=0.6)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_1(Ts::Float64; scale::Float64=0.6)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     nx = 2        # model order
     n_out = 2     # number of outputs
     n_in = 2      # number of inputs
@@ -470,11 +472,13 @@ function disturbance_model_1(Ts::Float64; bias::Float64=0.0, scale::Float64=0.6)
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
-    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    return mdl, [nx, n_in, n_out], η0
 end
 
 # Used for input
-function disturbance_model_2(Ts::Float64; bias::Float64=0.0, scale::Float64=0.2)::Tuple{DT_SS_Model, DataFrame}
+# function disturbance_model_2(Ts::Float64; bias::Float64=0.0, scale::Float64=0.2)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_2(Ts::Float64; scale::Float64=0.2)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     nx = 2        # model order
     n_out = 1     # number of outputs
     n_in = 2      # number of inputs
@@ -490,11 +494,13 @@ function disturbance_model_2(Ts::Float64; bias::Float64=0.0, scale::Float64=0.2)
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
-    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    return mdl, [nx, n_in, n_out], η0
 end
 
 # Used for scalar disturbance and input
-function disturbance_model_3(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)::Tuple{DT_SS_Model, DataFrame}
+# function disturbance_model_3(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
     nx = 2        # model order
@@ -509,11 +515,13 @@ function disturbance_model_3(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
-    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    return mdl, [nx, n_in, n_out], η0
 end
 
 # Used for multivariate input for delta-robot
-function disturbance_model_4(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)::Tuple{DT_SS_Model, DataFrame}
+# function disturbance_model_4(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)::Tuple{DT_SS_Model, DataFrame}
+function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
     p3 = -2       # The additional pole that is added
@@ -530,19 +538,21 @@ function disturbance_model_4(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
-    return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    return mdl, [nx, n_in, n_out], η0
 end
 
 
 function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     bias::Float64=0.0, scale::Float64=1.0)::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
 
-    mdl, metadata = gen(Ts, bias=bias, scale=scale)
+    mdl, meta_raw, η0 = gen(Ts, scale=scale)
+    metadata = DataFrame(nx = meta_raw[1], n_in = meta_raw[2], n_out = meta_raw[3], η = η0, bias=bias, num_rel = M, num_samp=Nw+1)
     n_tot = size(mdl.Cd,2)
 
-    ZS = [randn(Nw, n_tot) for m = 1:M]   # TODO: Maybe have Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}? Figure it out
+    ZS = [randn(Nw+1, n_tot) for m = 1:M]   # Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}, i.e. a total of N_w+1 samples
     XW = simulate_noise_process_mangled(mdl, ZS)
-    XW, get_system_output_mangled(mdl, XW).+ metadata.bias[1], metadata
+    XW, get_system_output_mangled(mdl, XW).+ bias, metadata
 end
 
 # TODO: Is this even used? Remove?
