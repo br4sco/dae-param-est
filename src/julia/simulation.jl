@@ -8700,17 +8700,12 @@ function solve_in_parallel_block(solve, is, k)
     Y = zeros(ny*size(y1,1), M*k)
     Y[:, 1:k] += y1
     next!(p)
-    @warn "Did we not even get here??? Surely we did!"
     Threads.@threads for m = 2:M
-        # y = solve(is[m])
-        # Y[:, (m-1)*k+1:m*k] += y
         Y[:, (m-1)*k+1:m*k] += solve(is[m])
-        @info "Completed for m=$m"
         next!(p)
     end
-    @info "We even got out...?"
-    Y
-  end
+    return Y
+end
 
 function solve_adj_in_parallel(solve, is)
   M = length(is)

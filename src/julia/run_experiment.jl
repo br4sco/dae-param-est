@@ -456,20 +456,20 @@ elseif model_id == DELTA
     # f_sens should return a matrix with each row corresponding to a different output component and each column corresponding to a different parameter
     ##################################################################################################################################################
 
-    # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
-    f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
-        -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
-        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;] +   
-        [   # Partial derivative wrt to L1
-            0
-            cos(x[1])
-            sin(x[1])
-        ;;]
+    # # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
+    #     -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
+    #     L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;] +   
+    #     [   # Partial derivative wrt to L1
+    #         0
+    #         cos(x[1])
+    #         sin(x[1])
+    #     ;;]
 
-    # # Sensitivity wrt to J1 or wrt to γ or to M1, they are all the same
-    # f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
-    #     -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
-    #     L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27];;]
+    # Sensitivity wrt to J1 or wrt to γ or to M1, they are all the same
+    f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
+        -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
+        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27];;]
 
     # # Just getting all states
     # f(x::Vector{Float64}) = x[1:24]
@@ -1062,19 +1062,19 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     # Returns estimate of gradient of cost function
     # M_mean specifies over how many realizations the gradient estimate is computed
     function get_gradient_estimate(y, free_pars, isws, M_mean::Int=1)
-        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean*k, dist_par_inds, isws)
+        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean, dist_par_inds, isws)
         # Uses different noise realizations for estimate of output and estiamte of jacobian
         return get_cost_gradient(y, Ym[:,1:M_mean], jacsYm[M_mean+1:end], N_trans)
     end
 
-    function get_gradient_estimate_stacked(ystacked, free_pars, isws, M_mean::Int=1, k::Int=1)
-        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean*k, dist_par_inds, isws)
-        if k > 1
+    function get_gradient_estimate_stacked(ystacked, free_pars, isws, M_mean::Int=1, num_stacks::Int=1)
+        Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean*num_stacks, dist_par_inds, isws)
+        if num_stacks > 1
             len = size(Ym,1)
-            Ymstacked = zeros(k*len, 2M_mean)
-            jacsstacked = [zeros(k*len, length(free_pars)) for i=1:2M_mean]
+            Ymstacked = zeros(num_stacks*len, 2M_mean)
+            jacsstacked = [zeros(num_stacks*len, length(free_pars)) for i=1:2M_mean]
             for ind1=1:2M_mean
-                for ind2=1:k
+                for ind2=1:num_stacks
                     Ymstacked[(ind2-1)*len+1:ind2*len,ind1] = Ym[:,(ind2-1)*2M_mean+ind1]
                     jacsstacked[ind1][(ind2-1)*len+1:ind2*len,:] = jacsYm[(ind2-1)*2M_mean+ind1]
                 end
@@ -1426,15 +1426,17 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     function solve_block(e::Int, isws::Vector{InterSampleWindow})::Matrix{Float64}
         y = zeros(y_len*(N+1), num_stacks)
         # Only reads those realisations of XW corresponding to the currently treated block of num_stacks realisations
-        XW = transpose(CSV.read("data/experiments/$(expid)/XW_T.csv", CSV.Tables.matrix; header=false, skipto=(e-1)*num_stacks+1, limit=num_stacks))
+        # ntasks=1 since using several parallel processes only seemed to cause odd bugs
+        XW = transpose(CSV.read("data/experiments/$(expid)/XW_T.csv", CSV.Tables.matrix, ntasks=1; header=false, skipto=(e-1)*num_stacks+1, limit=num_stacks))
         # # Exact interpolation
         # we = (m::Int) -> mk_newer_noise_interp(a_vec, C_true, mangle_XWs(XW), m, n_in, δ, isws)
         # Linear interpolation
         we = (m::Int) -> mk_noise_interp(C_true, XW, m, δ)
+
+        @warn "TODO: Also test exact interpolation!!!!!!!!!!!" # TODO: Shouldn't it be possible to use exact here without manually changing code in several places? Create a flag for it!!
         for ind = 1:num_stacks
             nested_y = solvew(u, we(ind), free_dyn_pars_true, N) |> h_data
             y[:,ind] = vcat(nested_y...)
-            # y[:,ind] = solvew(u, we((e-1)*num_stacks+ind), free_dyn_pars_true, N) |> h_data
         end
         return y
     end
@@ -1474,7 +1476,9 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     else
         @info "Generating output of true system"
         # XW = readdlm(joinpath(data_dir, expid*"/XW.csv"), ',')
-        isws = [initialize_isw(Q, W, n_tot, true) for e=1:max(num_rel, M)]
+        # isws = [initialize_isw(Q, W, n_tot, true) for e=1:max(num_rel, M)]
+        @warn "Not generating most isws since we currently use linear interpolation anyway"
+        isws = [initialize_isw(Q, W, n_tot, true) for e=1:1]
         Y = calc_Y(isws)
         writedlm(data_Y_path(expid), Y, ',')
     end
