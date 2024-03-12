@@ -410,7 +410,7 @@ elseif model_id == DELTA
     # dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
     dyn_par_bounds = [0.01 1e4]
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1]
+    const_learning_rate = [0.05]
     model_sens_to_use = delta_robot_gc_γsens
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_adjoint_γonly
@@ -418,7 +418,7 @@ elseif model_id == DELTA
 end
 
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
-learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)
+learning_rate_vec_red(t::Int, grad_norm::Float64) = t>25 ? const_learning_rate./sqrt(100*t) : const_learning_rate./sqrt(t)
 # @warn "AAAAAAAAAAAAAAAAAAAAAAAAAH USING 1/T ON LEARNING RATE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 
 # === OUTPUT FUNCTIONS ===
@@ -451,6 +451,7 @@ elseif model_id == DELTA
     f(x::Vector{Float64}) = [L2*sin(x[2])*sin(x[3])
         L1*cos(x[1]) + L2*cos(x[2]) + L0 - L3
         L1*sin(x[1]) + L2*sin(x[2])*cos(x[3])]
+    # f(x::Vector{Float64}) = x[1:30]   # DEBUG
     
     ##################################################################################################################################################
     # f_sens should return a matrix with each row corresponding to a different output component and each column corresponding to a different parameter
@@ -467,9 +468,12 @@ elseif model_id == DELTA
     #     ;;]
 
     # Sensitivity wrt to J1 or wrt to γ or to M1, they are all the same
-    f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[26]+L2*cos(x[3])*sin(x[2])*x[27]
-        -L1*sin(x[1])*x[25]-L2*sin(x[2])*x[26]
-        L1*cos(x[1])*x[25]+L2*cos(x[2])*cos(x[3])*x[26]-L2*sin(x[2])*sin(x[3])*x[27];;]
+    f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
+        -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
+        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;]
+
+    # # DEBUG
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = reshape(x[31:60], 30, 1)    # DEBUG
 
     # # Just getting all states
     # f(x::Vector{Float64}) = x[1:24]
@@ -661,15 +665,15 @@ function debug_delta_sensitivity(N::Int)
     L1_2 = 1.51
     θ1 = [1.0, L1_1, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
     θ2 = [1.0, L1_2, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
-    numeqs = 30
     mdl_to_use_here = delta_robot_gc_L1sens#delta_robot_gc_L1sens
     outfun_to_use = get_delta_output_with_L1sens
 
+    numeqs = 30
 
     # # du0 = 5*[10.0; 10*cos(2*π/3); 10*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
     # u(t::Float64) = 5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))]
     # ------------- Two different input alternatives -------------
-    input  = readdlm("data/experiments/100_delta/U.csv", ',')
+    input  = readdlm("data/experiments/delta_100_50k/U.csv", ',')
     u_tmp(t::Float64) = interpw(input, 1, 1)(t)
     u(t::Float64) = 5*u_tmp(t)[1]*[1.;1.;1.]
     
@@ -1018,7 +1022,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1#00
+    E = 100
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(pars0), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -6361,19 +6365,21 @@ end
 
 function gridsearch_delta_wrapper(expid::String, savedir::String)
     krange = [1]#, 2, 4, 10, 40]
-    pars, prop_vals, base_vals = gridsearch_delta(expid, krange[1], 0)
+    pars, prop_vals, base_vals = gridsearch_delta2(expid, krange[1], 0)
+    # pars, prop_vals, base_vals = gridsearch_delta(expid, krange[1], 0)
     # all_pars = [zeros(size(pars)) for k = krange]
     # all_pars[1] = pars
     all_vals = [[zeros(size(prop_vals[1])) for ind = eachindex(prop_vals)] for k=eachindex(krange)]
     all_base = [[zeros(size(base_vals[1])) for ind = eachindex(base_vals)] for k=eachindex(krange)]
-    for ind = 1:length(prop_vals)
+    for ind = eachindex(prop_vals)
         all_vals[1][ind] = prop_vals[ind]
         all_base[1][ind] = base_vals[ind]
     end
     try
         for it = 2:length(krange)
             @info "EXPERIMENT FOR k=$(krange[it])"
-            pars, prop_vals, base_vals = gridsearch_delta(expid, krange[it], 0)
+            # pars, prop_vals, base_vals = gridsearch_delta(expid, krange[it], 0)   # Same parameters investigated for every e
+            pars, prop_vals, base_vals = gridsearch_delta2(expid, krange[it], 0)    # Different parameters investigated for every e
             # all_pars[it] = pars
             for ind = 1:length(prop_vals)
                 all_vals[it][ind] = prop_vals[ind]
@@ -6400,8 +6406,8 @@ function save_wrapped_gridsearch(dirname::String, krange, pars, all_vals, all_ba
     writedlm("data/results/$(dirname)/all_pars.csv", pars, ',')
     for (ik, k) = enumerate(krange)
         for (ie, e) = enumerate(1:E)
-            writedlm("data/results/$(dirname)/all_vals_N$(500k)_e$(e).csv",  all_vals[ik][e],  ',')
-            writedlm("data/results/$(dirname)/all_base_N$(500k)_e$(e).csv", all_base[ik][e], ',')
+            writedlm("data/results/$(dirname)/all_vals_N$(100k)_e$(e).csv",  all_vals[ik][e],  ',')
+            writedlm("data/results/$(dirname)/all_base_N$(100k)_e$(e).csv", all_base[ik][e], ',')
         end
     end
 end
@@ -6460,6 +6466,7 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
                 # cost_base[e][ind] += mean((Y[N_trans+1:end, (e-1)*K+k].-Ybase[N_trans+1:end,k]).^2)
             end
             cost_vals[e][ind] = cost_vals[e][ind]/K
+            
             # cost_base[e][ind] = cost_base[e][ind]/K
             # Ym = mean(simulate_system(exp_data, pars, myM, dist_sens_inds, isws, Zm), dims=2)
 
@@ -6469,7 +6476,94 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
             @info "Completed computing cost for e = $e out of $E, ind =  $ind out of $(length(vals))"
         end
         writedlm("data/experiments/tmp/backup_cost_vals_par$ind.csv", [cost_vals[e][ind] for e=1:E], ',')
-        ind += 1
+    end
+    duration = now()-time_start
+
+    return all_pars, cost_vals, cost_base, duration#, grad_vals
+end
+
+# Different parameter values used for each e
+function gridsearch_delta2(expid::String, K::Int = 1, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # Total data-set will be of length K*N, so K number of smaller data-sets will be used to compute cost
+    # E = size(Y, 2)
+    # DEBUG
+    E = 1#0#0
+    myM = 1#000#8
+    Zm = [randn(Nw, n_tot) for m = 1:myM*K]
+    myZeros = [zeros(Nw, n_tot) for k=1:K]
+
+    # NEW
+    # step = 0.01
+    # num_steps = 5
+    # middles = [1.5294175755234023,1.5697144775005665,1.3005878253282788,1.5739717409753844,1.5533817724346919,1.455981221009796,1.502854138838781,1.5368594086139387,1.5226786385094824,1.4884874418509237]
+    # vals = [mid-num_steps*step:step:mid+num_steps*step for mid=middles]
+    vals = [1.1:0.1:2.0]
+
+    cost_vals = [zeros(length(vals[1])) for e=1:E]
+    cost_base = [zeros(length(vals[1])) for e=1:E]
+    grad_vals = [zeros(length(vals[1])) for e=1:E]
+    all_pars = zeros(length(vals[1]), E)
+    Ym = zeros(size(Y[N_trans+1:end,1], 1), K)
+    # -------------------------- DEBUG ALSO COMPUTING GRADIENTS
+    jacs = zeros(size(Y[N_trans+1:end,1], 1), K)
+    # -------------------------- END OF DEBUG
+    ind = 1
+    time_start = now()
+    # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
+    for e = 1:E
+        writedlm("data/experiments/tmp/backup_pars_e$e.csv", collect(vals[e]), ',')
+        for (ind, my_par) in enumerate(vals[e])
+            @info "Computing cost for p=$my_par, or after clamping, p=$(clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2]))"
+            pars = [clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2])]
+
+            all_pars[ind,e] = pars[1]
+            # -------------------------- DEBUG ALSO COMPUTING GRADIENTS
+            Ysim, jacsim = simulate_system_sens(exp_data, pars, myM*K, dist_sens_inds, isws, Zm)
+            # -------------------------- END OF DEBUG
+            # Ysim = simulate_system(exp_data, pars, myM*K, dist_sens_inds, isws, Zm)
+            # TODO: Since each realization of the baseline should be the same, since it's deterministic, it really should be enough to simulate only 1
+            # Ybase = simulate_system(exp_data, pars, K, dist_sens_inds, isws, myZeros)
+            for k = 1:K
+                Ym[:,k] = mean(Ysim[:,(k-1)*myM+1:k*myM], dims=2)
+                cost_vals[e][ind] += mean((Y[N_trans+1:end, (e-1)*K+k].-Ym[N_trans+1:end,k]).^2)
+                # cost_base[e][ind] += mean((Y[N_trans+1:end, (e-1)*K+k].-Ybase[N_trans+1:end,k]).^2)
+                # -------------------------- DEBUG ALSO COMPUTING GRADIENTS
+                # jacs[:,k] = mean(jacsim[1][:,(k-1)*myM+1:k*myM], dims=2)    # DELETE: Old and wrong
+                jacs[:,k] = mean(jacsim[(k-1)*myM+1:k*myM][:])
+                # -------------------------- END OF DEBUG
+            end
+            cost_vals[e][ind] = cost_vals[e][ind]/K
+            # cost_base[e][ind] = cost_base[e][ind]/K
+            # Ym = mean(simulate_system(exp_data, pars, myM, dist_sens_inds, isws, Zm), dims=2)
+            # -------------------------- DEBUG ALSO COMPUTING GRADIENTS
+            grad_vals[e][ind] = get_cost_gradient(Y[N_trans+1:end, (e-1)*K+1:e*K][:], reshape(Ym[:], length(Ym), 1), [reshape(jacs[:], length(jacs), 1)])[1]
+            # -------------------------- END OF DEBUG
+
+            # # BONUS: Computing cost function gradient
+            # Ymsens, jacsYm = simulate_system_sens(exp_data, pars, 1, dist_sens_inds, isws)
+            # grad_vals[e][ind] = first(get_cost_gradient(Y[N_trans+1:end, e], Ymsens[:,1:1], jacsYm[1:1], N_trans))
+            @info "Completed computing cost for e = $e out of $E, ind =  $ind out of $(length(vals[1]))"
+        end
+        writedlm("data/experiments/tmp/backup_cost_vals_e$e.csv", cost_vals[e], ',')
+        # -------------------------- DEBUG ALSO COMPUTING GRADIENTS
+        writedlm("data/experiments/tmp/backup_grad_vals_e$e.csv", grad_vals[e], ',')
+        # -------------------------- END OF DEBUG
     end
     duration = now()-time_start
 
@@ -8096,4 +8190,61 @@ function adjoint_dyn_debug(expid::String)
     Gp = first(get_Gp(adj_sol))
 
     return num_est, for_est, Gp
+end
+
+function for_sens_debug(expid::String, par_val::Float64, K::Int)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_tot = nx*n_in
+    dist_sens_inds = W_meta.free_par_inds
+
+    Zm = [randn(Nw, n_tot) for m = 1:K]
+
+    # all_y_len = length(f_sens(ones(num_dyn_vars)))  
+
+    myδ = 0.01
+    Ysim, jacs = simulate_system_sens(exp_data, [par_val], K, dist_sens_inds, isws, Zm)
+    Ysim2 = simulate_system(exp_data, [par_val.+myδ], K, dist_sens_inds, isws, Zm)
+    ystacked = vcat(Y[:,1:K]...)
+    # We can change f to get all states instead of only output. However, then we should ensure that
+    # y_len is unchanged, since the true output Y assumes the unchanged y_len. Therefore, we use a 
+    # separate my_y_len here so that we can ensure that y_len is unchanged
+    my_y_len = length(f(ones(num_dyn_vars)))
+    ysim_stacked = reshape(Ysim[:,1:K][:], my_y_len*(N+1)*K, 1)    # Reshapes to obtain a column Matrix
+    ysim_stacked2 = reshape(Ysim2[:,1:K][:], my_y_len*(N+1)*K, 1)    # Reshapes to obtain a column Matrix
+    jac_stacked = reshape(hcat(jacs[1:K]...)[:], my_y_len*(N+1)*K, 1)    # Reshapes to obtain a column Matrix
+
+    num_y = (ysim_stacked2-ysim_stacked)/myδ
+    # Computing costs only works when f returns the same output as Y, and not e.g. the entire state vector
+    if my_y_len == y_len
+        cost = get_cost_value(ystacked, ysim_stacked)
+        cost2 = get_cost_value(ystacked, ysim_stacked2)
+        cost_grad = first(get_cost_gradient(ystacked, ysim_stacked, [jac_stacked]))
+        num_cost = (cost2-cost)/myδ
+    else
+        cost = NaN
+        cost2 = NaN
+        cost_grad = NaN
+        num_cost = NaN
+    end
+
+    # for delta, something seems funky with computing the output, works fine if we just check sensitivity of every variable...
+    return ysim_stacked, ysim_stacked2, jac_stacked, num_y, cost_grad, num_cost
+end
+
+# NOTE: Only debugs gradient of cost function
+function for_sens_debug_multipar(expid::String, par_vals::Vector{Float64}, K::Int)
+    num_costs = zeros(length(par_vals))
+    cost_grads = zeros(length(par_vals))
+
+    for ind = eachindex(par_vals)
+        _, _, _, _, cost_grads[ind], num_costs[ind] = for_sens_debug(expid, par_vals[ind], K)
+    end
+
+    return cost_grads, num_costs
 end
