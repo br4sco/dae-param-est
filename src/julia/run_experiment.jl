@@ -385,9 +385,13 @@ if model_id == PENDULUM
     const_learning_rate = [1.0]#[0.1, 1.0, 1.0, 0.1]#, 1.0, 0.1]
     model_sens_to_use = pendulum_sensitivity_k#_sans_g_with_dist_sens_1#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
-    model_adj_to_use = my_pendulum_adjoint_sans_g
+    model_adj_to_use = my_pendulum_adjoint_konly#sans_g
     model_adj_to_use_dist_sens = my_pendulum_adjoint_sans_g#_with_dist_sens_3
-    model_stepbystep = pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
+    model_stepbystep = pendulum_adj_stepbystep_NEW#pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
+    Fpk = (x, dx) -> [0.; 0.; abs(x[4])*x[4]; abs(x[5])*x[5]; 0.; 0.; 0.;;]
+    Fpm = (x, dx) -> [.0; .0; dx[4]; dx[5]+g; .0; .0; .0;;]
+    FpL = (x, dx) -> [ .0; .0; .0; .0; -2L; .0; .0;;]
+    deb_Fp = Fpk
 elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
@@ -402,19 +406,22 @@ elseif model_id == MOH_MDL
     model_adj_to_use = mohamed_adjoint_new
     model_stepbystep = mohamed_stepbystep
 elseif model_id == DELTA
-    const free_dyn_pars_true = [γ] # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [L1] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
-    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    get_all_θs(pars::Vector{Float64}) = [L0, pars[1], L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
-    # dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
-    dyn_par_bounds = [0.01 1e4]
+    dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
+    # dyn_par_bounds = [0.01 1e4]
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [0.05]
-    model_sens_to_use = delta_robot_gc_γsens
+    model_sens_to_use = delta_robot_gc_L1sens
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_adjoint_γonly
-    # model_stepbystep = mohamed_stepbystep
+    model_adj_to_use = delta_robot_gc_adjoint_L1only
+    model_stepbystep = delta_adj_stepbystep_NEW
+    # Only used for adjoint debugging purposes
+    FpL1 = (x, dx) -> [cos(x[1])*dx[27]+cos(x[1])*dx[30]-sin(x[1])*dx[26]-sin(x[1])*dx[29]; 0.0; 0.0; -cos(x[4])*dx[27]-(sin(x[4])*dx[26])*0.5-(sqrt(3)*sin(x[4])*dx[25])*0.5; 0.0; 0.0; (sqrt(3)*sin(x[7])*dx[28])*0.5-(sin(x[7])*dx[29])*0.5-cos(x[7])*dx[30] ; 0.0 ; 0.0 ; sin(x[1])*dx[20]-cos(x[1])*dx[24]-cos(x[1])*dx[21]+sin(x[1])*dx[23]-g*cos(x[1])*(M2+M3)+dx[11]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+2*L1*dx[10]*(M2+M3)+x[11]^2*(L2*M3+LC2*M2)*(cos(x[2])*sin(x[1])-cos(x[1])*cos(x[3])*sin(x[2]))-cos(x[1])*sin(x[2])*sin(x[3])*dx[12]*(L2*M3+LC2*M2)-cos(x[1])*cos(x[3])*sin(x[2])*x[12]^2*(L2*M3+LC2*M2)-2*cos(x[1])*cos(x[2])*sin(x[3])*x[11]*x[12]*(L2*M3+LC2*M2) ; dx[10]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+x[10]^2*(L2*M3+LC2*M2)*(cos(x[1])*sin(x[2])-cos(x[2])*cos(x[3])*sin(x[1])) ; sin(x[1])*sin(x[2])*sin(x[3])*x[10]^2*(L2*M3+LC2*M2)-cos(x[1])*sin(x[2])*sin(x[3])*dx[10]*(L2*M3+LC2*M2) ; cos(x[4])*dx[21]+(sin(x[4])*dx[20])*0.5-g*cos(x[4])*(M2+M3)+dx[14]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+2*L1*dx[13]*(M2+M3)+x[14]^2*(L2*M3+LC2*M2)*(cos(x[5])*sin(x[4])-cos(x[4])*cos(x[6])*sin(x[5]))+(sqrt(3)*sin(x[4])*dx[19])*0.5-cos(x[4])*sin(x[5])*sin(x[6])*dx[15]*(L2*M3+LC2*M2)-cos(x[4])*cos(x[6])*sin(x[5])*x[15]^2*(L2*M3+LC2*M2)-2*cos(x[4])*cos(x[5])*sin(x[6])*x[14]*x[15]*(L2*M3+LC2*M2) ; dx[13]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+x[13]^2*(L2*M3+LC2*M2)*(cos(x[4])*sin(x[5])-cos(x[5])*cos(x[6])*sin(x[4])) ; sin(x[4])*sin(x[5])*sin(x[6])*x[13]^2*(L2*M3+LC2*M2)-cos(x[4])*sin(x[5])*sin(x[6])*dx[13]*(L2*M3+LC2*M2) ; cos(x[7])*dx[24]+(sin(x[7])*dx[23])*0.5-g*cos(x[7])*(M2+M3)+dx[17]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+2*L1*dx[16]*(M2+M3)+x[17]^2*(L2*M3+LC2*M2)*(cos(x[8])*sin(x[7])-cos(x[7])*cos(x[9])*sin(x[8]))-(sqrt(3)*sin(x[7])*dx[22])*0.5-cos(x[7])*sin(x[8])*sin(x[9])*dx[18]*(L2*M3+LC2*M2)-cos(x[7])*cos(x[9])*sin(x[8])*x[18]^2*(L2*M3+LC2*M2)-2*cos(x[7])*cos(x[8])*sin(x[9])*x[17]*x[18]*(L2*M3+LC2*M2) ; dx[16]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+x[16]^2*(L2*M3+LC2*M2)*(cos(x[7])*sin(x[8])-cos(x[8])*cos(x[9])*sin(x[7])) ; sin(x[7])*sin(x[8])*sin(x[9])*x[16]^2*(L2*M3+LC2*M2)-cos(x[7])*sin(x[8])*sin(x[9])*dx[16]*(L2*M3+LC2*M2) ; (sqrt(3)*cos(x[4]))*0.5 ; cos(x[1])+cos(x[4])*0.5 ; sin(x[1])-sin(x[4]) ; -(sqrt(3)*cos(x[7]))*0.5 ; cos(x[1])+cos(x[7])*0.5 ; sin(x[1])-sin(x[7]) ; -(sqrt(3)*sin(x[4])*x[13])*0.5 ; -sin(x[1])*x[10]-(sin(x[4])*x[13])*0.5 ; cos(x[1])*x[10]-cos(x[4])*x[13] ; (sqrt(3)*sin(x[7])*x[16])*0.5 ; -sin(x[1])*x[10]-(sin(x[7])*x[16])*0.5 ; cos(x[1])*x[10]-cos(x[7])*x[16] ; 0.0 ; -cos(x[1]) ; -sin(x[1]);;]
+    deb_Fp = FpL1
 end
 
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
@@ -438,6 +445,7 @@ if model_id == PENDULUM
     f_sens(x::Vector{Float64})::Matrix{Float64} = [x[14];;]# x[21] x[28] x[35]]# x[42] x[49]]# x[28]]##[x[14] x[21] x[28] x[35] x[42]]   # NOTE: Hard-coded right now
     # f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]                                                                                           #tuesday debug starting here
     f_sens_deb(x::Vector{Float64}) = x[8:end]
+    f_debug(x::Vector{Float64}) = x
 elseif model_id == MOH_MDL
     f(x::Vector{Float64}) = x[1]#x[2]
     # f_sens should return a matrix/column vector with each row corresponding to a different output component and each column corresponding to a different parameter
@@ -457,20 +465,20 @@ elseif model_id == DELTA
     # f_sens should return a matrix with each row corresponding to a different output component and each column corresponding to a different parameter
     ##################################################################################################################################################
 
-    # # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
-    #     -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
-    #     L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;] +   
-    #     [   # Partial derivative wrt to L1
-    #         0
-    #         cos(x[1])
-    #         sin(x[1])
-    #     ;;]
-
-    # Sensitivity wrt to J1 or wrt to γ or to M1, they are all the same
-    f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
+    # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
+    f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
         -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
-        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;]
+        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;] +   
+        [   # Partial derivative wrt to L1
+            0
+            cos(x[1])
+            sin(x[1])
+        ;;]
+
+    # # Sensitivity wrt to J1 or wrt to γ or to M1, they are all the same
+    # f_sens(x::Vector{Float64}) = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
+    #     -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
+    #     L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;]
 
     # # DEBUG
     # f_sens(x::Vector{Float64})::Matrix{Float64} = reshape(x[31:60], 30, 1)    # DEBUG
@@ -480,11 +488,10 @@ elseif model_id == DELTA
     # f_sens(x::Vector{Float64}) = x[1:48]
     # Since none of the state variables are the outputs, we add output sensitivites at the end. Those three extra states are e.g. needed for adjoint method.
     f_sens_deb(x::Vector{Float64}) = vcat(x[31:end], f_sens(x))
+    f_debug(x::Vector{Float64}) = vcat(x[1:30], f(x), x[31:end], f_sens(x))
 end
 
 y_len = length(f(ones(num_dyn_vars)))
-
-f_debug(x::Vector{Float64}) = x
 # f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]
 # f_sens(x::Vector{Float64}) = [x[14], x[21]]
 # NOTE: Has to be changed when number of free  parameters is changed.
@@ -4221,6 +4228,7 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     Y1, sens1 = h_comp(sol_for)
     sampling_ratio = Int(Ts/Tsλ)
     # FORWARD SENSITIVTY ANALYSIS ESTIMATE
+    sens1 = vcat(sens1...)
     for_dif_est = get_cost_gradient(Y[1:N+1, 1], reshape(Y1[1:sampling_ratio:end], length(Y1[1:sampling_ratio:end]), 1), [sens1[1:sampling_ratio:end,:]], N_trans)[1]
 
     # --------------------- Defining some helper functions -------------------------
@@ -4270,7 +4278,8 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
 
     # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
     mdl_sens = model_sens_to_use(φ0, u, wmm(1), p)
-    xp0 = f_sens_deb(mdl_sens.x0)
+    # xp0 = f_sens_deb(mdl_sens.x0)
+    xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars_adj, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars_adj)
 
     # -------------------------------DEBUG------------------------------------------
     # Computing numerical estimate of gradient for debug case, i.e. for paramters pᵢ
@@ -4354,7 +4363,7 @@ function clean_adjoint_debug(expid::String, N_trans::Int=0, my_ind::Int=1)
     λFθ_DAE(t) = β_DAE(t) - β_DAE(0.0)
 
     # -------------------------------- Testing hopefully stabilized alternative of adjoint system ----------------------------------------
-    mdl_stab, get_Gp_stab = crazystab4_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
+    mdl_stab, get_Gp_stab = crazystab4_pendulum_adjoint_konly(u, wmm(1), p, N*Ts, x_func, x_func, y_func, dy_func, xp0[:], dx, dx)
     stab_prob = problem_reverse(mdl_stab, N, Ts)
     stab_sol = solve(stab_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
         maxiters = maxiters)
@@ -5049,7 +5058,7 @@ function solve_accurate_adjoint(N::Int, Ts::Float64, x::Function, dx::Function, 
     #                  (-z[1] + 2*k*abs(x(t)[4])*z[2])/m]
 
     # THEORETICALLY CORRECT VERSION
-    ode_eq(z,p,t) = [-dx(t)[3]*z[2] + 2*x(t)[1]*l5(x,dx,z,t) + x(t)[4]*l6(x,dx,z,t)     + (2*x(t)[2]/(T*L^2))*(x2(t)[7]-y_func(t));
+    ode_eq(z,p,t) = [-dx(t)[3]*z[2] + 2*x(t)[1]*l5(x,dx,z,t) + x(t)[4]*l6(x,dx,z,t)     + (2*x(t)[2]/(T*L^2))*(x2(t)[7]-first(y_func(t)));
                      (-z[1] + 2*k*abs(x(t)[4])*z[2] + x(t)[1]*l6(x,dx,z,t))/m]
 
     T = N*Ts
@@ -5067,7 +5076,7 @@ function solve_accurate_adjoint(N::Int, Ts::Float64, x::Function, dx::Function, 
                     l4(x,dx,[λ1_func(t);λ3_func(t)],t);
                     l5(x,dx,[λ1_func(t);λ3_func(t)],t);
                     l6(x,dx,[λ1_func(t);λ3_func(t)],t);
-                    (2/T)*(x2(t)[7]-y_func(t))]
+                    (2/T)*(x2(t)[7]-first(y_func(t)))]
 
     # TODO: Is this really the best place to do this integration?
     # Wouldn't it be better to do it in ultimate_adjoint_debug???
@@ -8123,6 +8132,8 @@ function adjoint_dyn_debug(expid::String)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl_true, Zm)
     wmm(m::Int) = mk_noise_interp(dmdl_true.Cd, XWm, m, δ)
+    # @warn "Not using any disturbance right now!!!"
+    # wmm(m::Int) = t -> zeros(size(dmdl_true.Cd,1))
     # ---------------------------------------------------------------------------------------------------
     # ------------------ Forward solution of nominal system with forward sensitivity --------------------
     # ---------------------------------------------------------------------------------------------------
@@ -8133,12 +8144,11 @@ function adjoint_dyn_debug(expid::String)
     # @time sol_for1 = solvew_sens(u, wmm(1), free_dyn_pars_true, N)
     # Replacing solvew_sens with parts to carefully compute time impact of every one of them
     @time my_mdl = model_sens_to_use(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true))
-    println("So the warning comes after this, while creating the problem...")
     @time my_prob = problem(my_mdl, N, Ts)
-    println("And now we should have received the warning")
     @time sol_for1 = solve(my_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
 
     sol_for2 = solvew(u, wmm(1), free_dyn_pars_true.+my_δ, N)
+
 
     Y1, sens1 = h_comp(sol_for1)
     Y2 = h(sol_for2)
@@ -8174,22 +8184,132 @@ function adjoint_dyn_debug(expid::String)
     dx = get_mvar_cubic(0.0:Ts:N*Ts-Ts/2, der_est)  # -Ts/2 instead of -Ts to ensure that we get exactly one sample less that going to N*Ts
     # dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
 
-
     # Computing xp0, initial conditions of derivative of x wrt to p
     mdl = model_to_use(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true))
     mdl_sens = model_sens_to_use(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true))
     n_mdl = length(mdl.x0)
     xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars_adj, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars_adj)
+    (nx,np) = size(xp0)
 
-
-    mdl_adj, get_Gp = model_adj_to_use(u, wmm(1), get_all_θs(free_dyn_pars_true), N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
+    mdl_adj, get_Gp, debugs = model_adj_to_use(u, wmm(1), get_all_θs(free_dyn_pars_true), N*Ts, x_func, x_func, y_func, dy_func, xp0, dx, dx)
     adj_prob = problem_reverse(mdl_adj, N, Ts) # Adjoint problem must be solved backwards, problem_reverse ensures it is
     # NOTE: The solution is oriented backwards in time, i.e. first element
     # is t=T and last is t=0
     adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol, maxiters = maxiters)
     Gp = first(get_Gp(adj_sol))
+    println("Num: $num_est, for: $for_est, adj: $Gp")
 
-    return num_est, for_est, Gp
+    # # --------- Obtaining lambda functions  - VER 1 ---------
+    λs = [adj_sol.u[end-ind+1][1:nx] for ind=eachindex(adj_sol.u)]
+    λ_func = linear_interpolation_multivar(vcat(λs...), Ts, length(λs[1]))
+    # --------- More accurate lambda functions - VER 2 - ONLY FOR PENDULUM ---------
+    # if model_id == PENDULUM
+    #     λ_func, _ = solve_accurate_adjoint(N, Ts, x_func, dx, x_func, y_func, 0)
+    # end
+
+    # --------------------------------------------------------------------------------------------------------------
+    # ------------------ BONUS: COMPARING ADJOINT SOLUTION TRAJECTORY TO FORWARD SENSITIVITY -----------------------
+    # --------------------------------------------------------------------------------------------------------------
+
+    # (get_Gp_debug, get_term_debug) = debugs # Only get_term_debug seems used
+    # _, integral, term = get_Gp_debug(adj_sol)   # CURRENTLY NONE OF THIS USED
+
+    # # Extracts beta and term trajectories from adjoint solution
+    # _, sens_deb = h_sens_deb(sol_for1)
+    # xps = hcat(sens_deb...)
+    # term_vec = get_term_debug(adj_sol, xps, 0:Ts:(N*Ts))    # ONLY USED AT VERY END. BUT VERY NICE TO HAVE :D
+    # beta = [adj_sol.u[end-ind+1][nx+1] for ind=1:length(adj_sol.u)]     # ALSO VERY NICE TO HAVE FOR DEBUGGING AND COMPARING TO INTEGRAL COST
+
+    # if model_id == PENDULUM
+    #     function get_pend_betas(λs_func, x, dx, xps, N, Ts)
+    #         times = 0.0:Ts:N*Ts
+
+    #         mint(z,p,t) = [-λs_func(t)[3]*dx(t)[4] - λs_func(t)[4]*(dx(t)[5]+g)]
+    #         Lint(z,p,t) = [2*λs_func(t)[2]*L]
+    #         kint(z,p,t) = [-λs_func(t)[3]*abs(x(t)[4])*x(t)[4] - λs_func(t)[4]*abs(x(t)[5])*x(t)[5]]
+    #         mprob = ODEProblem(mint, [0.0], (0.0, N*Ts), [])
+    #         Lprob = ODEProblem(Lint, [0.0], (0.0, N*Ts), [])
+    #         kprob = ODEProblem(kint, [0.0], (0.0, N*Ts), [])
+    #         msol = DifferentialEquations.solve(mprob, Tsit5(), reltol=reltol, abstol=abstol, saveat=times)
+    #         Lsol = DifferentialEquations.solve(Lprob, Tsit5(), reltol=reltol, abstol=abstol, saveat=times)
+    #         ksol = DifferentialEquations.solve(kprob, Tsit5(), reltol=reltol, abstol=abstol, saveat=times)
+    #         mvec = [msol.u[end][1]-msol.u[i][1] for i=eachindex(msol)]
+    #         Lvec = [Lsol.u[end][1]-Lsol.u[i][1] for i=eachindex(Lsol)]
+    #         kvec = [ksol.u[end][1]-ksol.u[i][1] for i=eachindex(ksol)]
+
+    #         # ---------------- Getting term ----------------
+    #         Fdx = t -> vcat([1   0   0          0   0   2x(t)[1]    0
+    #                         0   1   0          0   0   2x(t)[2]    0
+    #                         0   0   -x(t)[1]   m   0   0           0
+    #                         0   0   -x(t)[2]   0   m   0           0], zeros(3,7))
+
+    #         term = zeros(length(times))
+    #         for ind=eachindex(adj_sol.u)
+    #             term[ind] = ((λs_func(times[ind])')*Fdx(times[ind]))*xps[:,ind]
+    #         end
+
+    #         return mvec, Lvec, kvec, term
+    #     end
+
+    #     # NOTE: term only valid for parameter corresponding to xps
+    #     βm, βL, βk, term_acc = get_pend_betas(λ_func, x_func, dx, xps, N, Ts)
+    # end
+    
+    # cost_grad_plot = [first(get_cost_gradient(Y[1:y_len*ind,1], Y1[1:y_len*ind,1:1], [sens1[1:y_len*ind,1:1]])) for ind=1:size(Y,1)÷y_len]  
+    # println("First DAE, then accurate, finally cost")   # TODO: Add legend instead
+    # plot(beta[1].-beta .- term_vec.+term_vec[1], label="adj_est")
+    # if model_id == PENDULUM
+    #     # Interestingly enough this plot always seems to be the most off, less so with accurate version, but still
+    #     plot!(βk[1].-βk .- term_acc.+term_acc[1], label="other_est(acc/other)")
+    # end
+    # plot!(cost_grad_plot, label="for_est")
+
+    # -----------------------------------------------------------------------------------------------------------------------
+    # ------------------ BONUS: STEP-BY-STEP ANALYSIS OF ADJOINT SOLUTION, TO SEE WHERE ERRORS APPEAR -----------------------
+    # -----------------------------------------------------------------------------------------------------------------------
+
+    mydelta = 0.01
+    dxvec = (xvec1[2:end,:]-xvec1[1:end-1,:])/Ts
+    dλ_func(t) = (λ_func(t+mydelta)-λ_func(t))/mydelta
+    dx_func = linear_interpolation_multivar(vcat(transpose(dxvec)...), Ts, size(dxvec,2))
+    stepbystep_mdl = model_stepbystep(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true), y_func, x_func, dx_func, λ_func, dλ_func, deb_Fp, N*Ts)
+
+    stepstep_prob = problem(stepbystep_mdl, N, Ts)
+    stepstep_sol = solve(stepstep_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol, maxiters = maxiters)
+    integral_sens_1 = [stepstep_sol.u[ind][1] for ind=eachindex(stepstep_sol.u)]
+    int_with_lambda_2 = [stepstep_sol.u[ind][2] for ind=eachindex(stepstep_sol.u)]
+    post_partial_3 = [stepstep_sol.u[ind][3] for ind=eachindex(stepstep_sol.u)]
+    final_expression_4 = [stepstep_sol.u[ind][4] for ind=eachindex(stepstep_sol.u)]
+    println("End values of trajectories: ", integral_sens_1[end], " ", int_with_lambda_2[end], " ", post_partial_3[end], " ", final_expression_4[end])
+
+    # PREMISES: integral_sens_1 should match gradient on original sum-cost well. 
+    # int_with_lambda_2 should be similar, with a little bit of drift, otherwise something is wrong with our forward solution
+    # DEBUGGING: post_partial_3 can look a little different, since partial integration seems to have an unintuittive effect on numerical errors.
+    # However, the final value should match integral_sens_1 as well as possible, otherwise we will have issues.
+    # If adjoint solution is correct, post_partial_3 and final_expression_4 should match well, since that's where we replace lambda-expressions.
+    # NOTE: If you seem to get large numerical mismatch, try to disable disturbances and use a smoother input signal, e.g. a sinusoid. If this reduces the numerical
+    # mismatch, then perhaps the earlier mismatch is just inherent to the very quickly changing input signals
+    # I think it also should be expected that sum-cost and integral-cost will differ somewhat when inputs are so irregular
+
+    plot(integral_sens_1, label="int_cost_sens")
+    plot!(int_with_lambda_2, label="int_sens_with_lam")
+    # plot!(post_partial_3, label="post_partial")
+    # plot!(final_expression_4, label="adj_final")
+
+    # # ------------------ EXTRA: COMPARING SUM AND INTEGRAL COST -----------------------
+
+    # # Comparing sum and integral costs:
+    # intcosttraj = [stepstep_sol.u[ind][5] for ind=eachindex(stepstep_sol.u)]
+    # sumcosttraj = [(1/(N+1))*sum( ( Y[1:y_len*ind] - Y1[1:y_len*ind,1] ).^2 ) for ind=1:N+1]
+    # plot(intcosttraj)
+    # plot!(sumcosttraj)
+
+    # # Comparing numerical cost gradient with integral cost gradient
+    # sumcosttraj1 = [(1/(N+1))*sum( ( Y[1:y_len*ind] - Y1[1:y_len*ind,1] ).^2 ) for ind=1:N+1]
+    # sumcosttraj2 = [(1/(N+1))*sum( ( Y[1:y_len*ind] - Y2[1:y_len*ind,1] ).^2 ) for ind=1:N+1]
+    # sumcostgrad = (sumcosttraj2-sumcosttraj1)/my_δ
+    # plot(integral_sens_1, label="int_cost")
+    # plot!(sumcostgrad, label="sum_cost")
 end
 
 function for_sens_debug(expid::String, par_val::Float64, K::Int)
