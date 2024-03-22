@@ -6263,8 +6263,6 @@ function my_pendulum_adjoint_dist_sens_3(u::Function, w::Function, xw::Function,
 end
 
 function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
-    # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function. 
-    # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
         nη = 1
@@ -6292,13 +6290,13 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
                             0   0  -dx(t)[1]    0   0   0            0
                             0   0  -dx(t)[2]    0   0   0            0], zeros(3,7))
         # Fp = t -> [.0; .0; abs(x(t)[4])*x(t)[4]; abs(x(t)[5])*x(t)[5]; .0; .0; .0]
-        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-y(t))/T]
-        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-dy(t))/T]
+        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-first(y(t)))/T]
+        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-first(dy(t)))/T]
 
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
 
-        # Creating some of the needed disturbance from η. ASSUMING ONLY DISTURBANCE PARAMETERS ARE a1 AND a2!!!!!!
+        # Creating some of the needed disturbance from η. ASSUMING ONLY FREE DISTURBANCE PARAMETERS ARE a1 AND/OR a2!!!!!!
         A = [-η[1]  -η[2]; 1.0   0.0]
         C = [η[3]   η[4]]
         Aθ = [-1.0  0.0; 0.0    0.0;]# 0.0    -1.0; 0.0   0.0]
@@ -6336,7 +6334,7 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
             res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t)[4])*z[3] - x(t)[1]*z[6]
             res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t)[5])*z[4] - x(t)[2]*z[6]
             res[6]  = 2*x(t)[1]*dz[1] + 2*x(t)[2]*dz[2] + 2*dx(t)[1]*z[1] + 2*dx(t)[2]*z[2]
-            res[7]  = (2*(x2(t)[7] - y(t)))/T - z[7]
+            res[7]  = (2*(x2(t)[7] - first(y(t))))/T - z[7]
 
             # NOTE: η here then has to contain free_parameters and true values for the non-free ones
             res[8]  = dz[8] + z[9] - η[1]*z[8] + η[3]*z[10]
@@ -6383,6 +6381,21 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
             Gp = adj_sol.u[end-N_trans][nx+ndist+1:nx+ndist+np] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[:]     # This is the same as in original adjoint system just because disturbance model has zero initial conditions, independent of parameters
         end
 
+        function get_Gp_debug(adj_sol::DAESolution)
+            integral = adj_sol.u[end][nx+ndist+1:nx+ndist+np]
+            term = (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)
+            Gp = integral .+ term
+            return Gp, integral, term
+        end
+
+        function get_term_debug(adj_sol::DAESolution, xps::Matrix{Float64}, times::AbstractVector{Float64})
+            term = zeros(length(adj_sol.u))
+            for ind=eachindex(adj_sol.u)
+                term[ind] = ((adj_sol.u[end+1-ind][1:nx]')*Fdx(times[ind]))*xps[:,ind]
+            end
+            return term
+        end
+
         dvars = vcat(fill(true, 4), fill(false, 3), fill(true, 2), [false], fill(true, np))
         # dvars = vcat(fill(true, 4), fill(false, 3))
 
@@ -6390,8 +6403,10 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
         f!(r0, dz0, z0, [], 0.0)
         # @info "r0 is: $r0 here, λ0: $λ0, dλ0: $dλ0"
 
+        debugs = (get_Gp_debug, get_term_debug)
+
         # t -> 0.0 is just a dummy function, not to be used
-        return Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
+        return Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp, debugs
     end
 end
 
@@ -6425,8 +6440,8 @@ function my_pendulum_adjoint_distsensa2(u::Function, w::Function, xw::Function, 
                             0   0  -dx(t)[1]    0   0   0            0
                             0   0  -dx(t)[2]    0   0   0            0], zeros(3,7))
         # Fp = t -> [.0; .0; abs(x(t)[4])*x(t)[4]; abs(x(t)[5])*x(t)[5]; .0; .0; .0]
-        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-y(t))/T]
-        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-dy(t))/T]
+        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-first(y(t)))/T]
+        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-first(dy(t)))/T]
 
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
@@ -6469,7 +6484,7 @@ function my_pendulum_adjoint_distsensa2(u::Function, w::Function, xw::Function, 
             res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t)[4])*z[3] - x(t)[1]*z[6]
             res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t)[5])*z[4] - x(t)[2]*z[6]
             res[6]  = 2*x(t)[1]*dz[1] + 2*x(t)[2]*dz[2] + 2*dx(t)[1]*z[1] + 2*dx(t)[2]*z[2]
-            res[7]  = (2*(x2(t)[7] - y(t)))/T - z[7]
+            res[7]  = (2*(x2(t)[7] - first(y(t))))/T - z[7]
 
             # NOTE: η here then has to contain free_parameters and true values for the non-free ones
             res[8]  = dz[8] + z[9] - η[1]*z[8] + η[3]*z[10]
@@ -6558,8 +6573,8 @@ function my_pendulum_adjoint_distsensc(u::Function, w::Function, xw::Function, v
                             0   0  -dx(t)[1]    0   0   0            0
                             0   0  -dx(t)[2]    0   0   0            0], zeros(3,7))
         # Fp = t -> [.0; .0; abs(x(t)[4])*x(t)[4]; abs(x(t)[5])*x(t)[5]; .0; .0; .0]
-        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-y(t))/T]
-        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-dy(t))/T]
+        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-first(y(t)))/T]
+        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-first(dy(t)))/T]
 
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
@@ -6602,7 +6617,7 @@ function my_pendulum_adjoint_distsensc(u::Function, w::Function, xw::Function, v
             res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t)[4])*z[3] - x(t)[1]*z[6]
             res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t)[5])*z[4] - x(t)[2]*z[6]
             res[6]  = 2*x(t)[1]*dz[1] + 2*x(t)[2]*dz[2] + 2*dx(t)[1]*z[1] + 2*dx(t)[2]*z[2]
-            res[7]  = (2*(x2(t)[7] - y(t)))/T - z[7]
+            res[7]  = (2*(x2(t)[7] - first(y(t))))/T - z[7]
 
             # NOTE: η here then has to contain free_parameters and true values for the non-free ones
             res[8]  = dz[8] + z[9] - η[1]*z[8] + η[3]*z[10]
