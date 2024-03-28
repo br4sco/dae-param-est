@@ -77,18 +77,13 @@ M_rate_max = min(4, M)#100#8#4#16
 # M_rate(t::Int) = (t÷50+1)*M_rate_max
 M_rate(t::Int) = M_rate_max
 
-mangle_XWs(XWs::Array{Vector{Float64}, 2}) =
-  hcat([vcat(XWs[:, m]...) for m = 1:size(XWs,2)]...)
-
-demangle_XW(XW::Matrix{Float64}, n_tot::Int) =
-    [XW[(i-1)*n_tot+1:i*n_tot, m] for i=1:(size(XW,1)÷n_tot), m=1:size(XW,2)]
-
+mangle_XWs(XWs::Matrix{Vector{Float64}}) = hcat([vcat(XWs[:, m]...) for m = 1:size(XWs,2)]...)
+demangle_XW(XW::AbstractMatrix{Float64}, n_tot::Int) = [XW[(i-1)*n_tot+1:i*n_tot, m] for i=1:(size(XW,1)÷n_tot), m=1:size(XW,2)]
 
 function deb_info(obj)
     @info "type: $(typeof(obj)), size: $(size(obj)), inner size: $(size(obj[1]))"
 end
 
-    # NOTE: SCALAR_OUTPUT is assumed
 # NOTE: The realizations Ym and jacYm must be independent for this to return
 # an unbiased estimate of the cost function gradient
 function get_cost_gradient(Y::Vector{Float64}, Ym::Matrix{Float64}, jacsYm::Vector{Matrix{Float64}}, N_trans::Int=0)
@@ -117,7 +112,6 @@ function get_cost_gradient(Y::Vector{Float64}, Ym::Matrix{Float64}, jacsYm::Vect
         )[:]
 end
 
-# NOTE: SCALAR_OUTPUT is assumed
 function get_cost_value(Y::Vector{Float64}, Ym::Matrix{Float64}, N_trans::Int=0)
     (1/(size(Y,1)÷y_len-N_trans-1))*sum( ( Y[N_trans+1:end] - mean(Ym[N_trans+1:end,:], dims=2) ).^2 )
 end
@@ -142,56 +136,27 @@ function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
     # Returns a function mapping time to the vector-value of the function at that time
 end
 
-# ??????????????????????????? ONLY USED IN ONE PLACE, IS IT RLY NECESSARY?????????????????????????????????????????????
-# We do linear interpolation between exact values because it's fast
-# n is the dimension of one sample of the state
-function interpw(W::Matrix{Float64}, m::Int, n::Int)
-    k_max = (size(W,1)-1)÷n
-    function w(t::Float64)
-        # tₖ = kδ <= t <= (k+1)δ = tₖ₊₁
-        # => The rows corresponding to tₖ start at index k*n+1
-        # since t₀ = 0 corrsponds to block starting with row 1
-        k = Int(t÷δ)
-        w0 = W[k*n+1:(k+1)*n, m]
-        if k >= k_max
-            return w0
-        else
-            w1 = W[(k+1)*n+1:(k+2)*n, m]
-        end
-        return w0 + (t-k*δ)*(w1-w0)/δ
-    end
-end
-
-# This function relies on XW being mangled
 function mk_noise_interp(C::Matrix{Float64},
                          XW::AbstractMatrix{Float64},
                          m::Int,
                          δ::Float64)
+    let
+        n_tot = size(C, 2)
+        function xw(t::Float64)
+            # n*δ <= t <= (n+1)*δ
+            n = Int(t÷δ)
+            # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
+            k = n * n_tot + 1
 
-  let
-    n_tot = size(C, 2)
-    n_max = (size(XW,1)-1)÷n_tot
-    function w(t::Float64)
-        # n*δ <= t <= (n+1)*δ
-        n = Int(t÷δ)
-        # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
-        k = n * n_tot + 1
-
-        # xl = view(XW, k:(k + nx - 1), m)
-        # xu = view(XW, (k + nx):(k + 2nx - 1), m)
-        xl = XW[k:(k + n_tot - 1), m]
-        if n >= n_max
-            xu = xl
-        else
+            xl = XW[k:(k + n_tot - 1), m]
             xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+            return C*(xl + (t-n*δ)*(xu-xl)/δ)
         end
-        return C*(xl + (t-n*δ)*(xu-xl)/δ)
     end
-  end
 end
 
 function mk_xw_interp(C::Matrix{Float64},
-    XW::Matrix{Float64},
+    XW::AbstractMatrix{Float64},
     m::Int,
     δ::Float64)
 
@@ -203,8 +168,6 @@ function mk_xw_interp(C::Matrix{Float64},
             # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
             k = n * n_tot + 1
 
-            # xl = view(XW, k:(k + nx - 1), m)
-            # xu = view(XW, (k + nx):(k + 2nx - 1), m)
             xl = XW[k:(k + n_tot - 1), m]
             xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
             return (xl + (t-n*δ)*(xu-xl)/δ)
@@ -225,7 +188,7 @@ end
 # Function for using conditional interpolation
 function mk_newer_noise_interp(a_vec::AbstractVector{Float64},
                                C::Matrix{Float64},
-                               XW::Array{Vector{Float64}, 2},
+                               XW::Matrix{Vector{Float64}},
                                m::Int,
                                n_in::Int,
                                δ::Float64,
@@ -233,12 +196,12 @@ function mk_newer_noise_interp(a_vec::AbstractVector{Float64},
    # Conditional sampling depends on noise model, which is why a value of
    # a_vec has to be passed. a_vec contains parameters corresponding to the
    # A-matric of the noise model
-   let
-       function w(t::Float64)
-           xw_temp = noise_inter(t, δ, a_vec, n_in, view(XW, :, m), isws[m])
-           return C*xw_temp
-       end
-   end
+    let
+        function w(t::Float64)
+            xw_temp = noise_inter(t, δ, a_vec, n_in, view(XW, :, m), isws[m])
+            return C*xw_temp
+        end
+    end
 end
 
 function get_fit(Ye, pars, model)
@@ -271,8 +234,7 @@ function get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
     # Use this line if you are using the modified LsqFit-package that also
     # returns trace
     # @warn "Using x_tol = 1e-12 instead of default 1e-8"
-    # fit_result, trace = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default inplace = false, x_tol = 1e-8
-    fit_result, trace = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default inplace = false, x_tol = 1e-8
+    fit_result, trace = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default: inplace = false, x_tol = 1e-8
     return fit_result, trace
 end
 
@@ -306,12 +268,8 @@ const data_dir = joinpath("data", "experiments")
 
 # create directory for this experiment
 exp_path(expid) = joinpath(data_dir, expid)
-
 data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
-# data_input_path(expid) = joinpath(exp_path(expid), "U.csv")
-# data_XW_path(expid) = joinpath(exp_path(expid), "XW.csv")
-# metadata_W_path(expid) = joinpath(exp_path(expid), "W_meta.csv")
-# metadata_input_path(expid) = joinpath(exp_path(expid), "U_meta.csv")
+
 
 # === MODEL REALIZATION AND SIMULATION ===
 # We use the following naming conventions for parameters:
@@ -440,13 +398,9 @@ elseif model_id == DELTA
 end
 
 y_len = length(f(ones(num_dyn_vars)))
-# f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]
-# f_sens(x::Vector{Float64}) = [x[14], x[21]]
-# NOTE: Has to be changed when number of free  parameters is changed.
-# Specifically, f_sens() must return sensitivity wrt to all free parameters
 h(sol) = apply_outputfun(f, sol)                            # for our model
 h_comp(sol) = apply_two_outputfun(f, f_sens, sol)           # for complete model with dynamics sensitivity
-h_sens(sol) = apply_outputfun(f_sens, sol)             # for only returning sensitivity 
+h_sens(sol) = apply_outputfun(f_sens, sol)                  # for only returning sensitivity 
 h_debug(sol) = apply_outputfun(f_debug, sol)
 h_debug_with_sens(sol) = apply_outputfun(x->vcat(f_debug(x), f_sens_deb(x)), sol)
 h_sens_deb(sol) = apply_two_outputfun(f_debug, f_sens_deb, sol)
@@ -508,7 +462,7 @@ solve_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::In
   )
 
 # data-set output function
-h_data(sol) = apply_outputfun(x -> f(x) + σ * randn(size(f(x))), sol)
+h_data(sol) = apply_outputfun(x -> f(x) .+ σ * randn(size(f(x))), sol)
 
 function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, num_stacks::Int=1)
     start_datetime = now()
@@ -909,7 +863,7 @@ end
 function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{ExperimentData, Array{InterSampleWindow, 1}}
     # A single realization of the disturbance serves as input
     # input is assumed to contain the input signal, and not the state
-    input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')   # TODO: I think future Us will be saved as transposed data, maybe update code for that??
+    input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')[:]
     W_meta_raw, W_meta_names =
         readdlm(joinpath(data_dir, expid*"/meta_W_new.csv"), ',', header=true)
 
@@ -924,6 +878,7 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     n_in = Int(W_meta_raw[1,2])
     n_out = Int(W_meta_raw[1,3])
     num_rel = Int(W_meta_raw[1,6])
+    E = num_rel÷num_stacks
     n_tot = nx*n_in
     # Parameters of true system. η = [a_pars c_pars], where the first nx elements are paramters of the A-matrix, and the remaining are parameters of the C-matrix
     η_true = W_meta_raw[:,4]
@@ -931,8 +886,6 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     a_vec = η_true[1:nx]
     C_true = reshape(η_true[nx+1:end], (n_out, n_tot))
 
-    # @warn " Setting c-parameters in η_true to zero for debugging, since it gives us zero disturbance"
-    # η_true[nx+1:end] = zeros(n_tot*n_out)
 
     # NOTE: Has to be changed when number of free disturbance parameters is changed.
     # Specifically: Both vector free_pars and the corresponding vector
@@ -969,26 +922,13 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     N_margin = 0#2    # Solver can request values of inputs after the time horizon
                     # ends, so we require a margin of a few samples of the noise
                     # to ensure that we can provide such values. EDIT: TODO: Do we really? Or was this just because of your poorly implemented interpolation? Let's try having margin 0
-    # TODO: Is this way of doing it even relevant anymore or should we just use num_x_samp variable from above????? Similar variable should exist for input.
     Nw = size(input, 1)÷n_in
     N = Int((Nw - N_margin)*δ÷Ts)÷y_len     # Number of steps we can take
     W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds, num_rel)
 
-    # TODO: Delete this block, if you have tested that your new implementation is working well
-    # # Exact interpolation
-    # # mk_we(XWs::Array{Vector{Float64},2}, isws::Array{InterSampleWindow, 1}) =
-    # #     (m::Int) -> mk_newer_noise_interp(
-    # #     a_vec::AbstractVector{Float64}, C_true, XWs, m, n_in, δ, isws)
-    # # Linear interpolation.
-    # mk_we(XWs::Matrix{Vector{Float64}}, isws::Array{InterSampleWindow, 1}) =
-    #     (m::Int) -> mk_noise_interp(C_true, mangle_XWs(XWs), m, δ)
-
-    # mk_we_new(XWs::Matrix{Float64}, isws::Array{InterSampleWindow, 1}) =
-    #     (m::Int) -> mk_noise_interp(C_true, XW, m, δ)
-
     # u(t::Float64) = sin(t)*ones(3)
     # @warn "USING SINUSOID AS INPUT INSTEAD"
-    u(t::Float64) = interpw(input, 1, n_u_out)(t)
+    u(t::Float64) = linear_interpolation_multivar(input, δ, n_u_out)(t)
 
     function solve_block(e::Int, isws::Vector{InterSampleWindow})::Matrix{Float64}
         y = zeros(y_len*(N+1), num_stacks)
@@ -996,11 +936,10 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
         # ntasks=1 since using several parallel processes only seemed to cause odd bugs
         XW = transpose(CSV.read("data/experiments/$(expid)/XW_T.csv", CSV.Tables.matrix, ntasks=1; header=false, skipto=(e-1)*num_stacks+1, limit=num_stacks))
         # # Exact interpolation
-        # we = (m::Int) -> mk_newer_noise_interp(a_vec, C_true, mangle_XWs(XW), m, n_in, δ, isws)
+        # we = (m::Int) -> mk_newer_noise_interp(a_vec, C_true, demangle_XW(XW, n_tot), m, n_in, δ, isws[(e-1)*num_stacks+1:e*num_stacks])
         # Linear interpolation
         we = (m::Int) -> mk_noise_interp(C_true, XW, m, δ)
 
-        @warn "TODO: Also test exact interpolation!!!!!!!!!!!" # TODO: Shouldn't it be possible to use exact here without manually changing code in several places? Create a flag for it!!
         for ind = 1:num_stacks
             nested_y = solvew(u, we(ind), free_dyn_pars_true, N) |> h_data
             y[:,ind] = vcat(nested_y...)
@@ -1011,9 +950,8 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     function solve_wrapper(e::Int, isws::Vector{InterSampleWindow})::Vector{Float64}
         XW = transpose(CSV.read("data/experiments/$(expid)/XW_T.csv", CSV.Tables.matrix; header=false, skipto=e, limit=1))
         # # Exact interpolation
-        # w = mk_newer_noise_interp(a_vec, C_true, mangle_XWs(XW), 1, n_in, δ, isws)
+        # w = mk_newer_noise_interp(a_vec, C_true, demangle_XW(XW, n_tot), 1, n_in, δ, isws[e:e])
         # Linear interpolation
-        @warn "TODO: Also test exact interpolation!!!!!!!!!!!" # TODO: Shouldn't it be possible to use exact here without manually changing code in several places? Create a flag for it!!
         w = mk_noise_interp(C_true, XW, 1, δ)
         nested_y = solvew(u, w, free_dyn_pars_true, N) |> h_data
         return vcat(nested_y...)
@@ -1023,8 +961,7 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     function calc_Y(isws::Vector{InterSampleWindow})
         # NOTE: XWs should be non-mangled, which is why we don't divide by n_tot
         # @assert (Nw <= size(XWs, 1)) "Disturbance data size mismatch ($(Nw) > $(size(XWs, 1)))"
-        E = num_rel÷num_stacks
-        es = 1:E#collect(1:E)   # TODO: Let's try and see if we can avoid collecting and just use range instead
+        es = 1:E
         # we = mk_we(XWs, isws)
         if num_stacks > 1
             Y = solve_in_parallel_block(e -> solve_block(e, isws), es, num_stacks)
@@ -1043,9 +980,7 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     else
         @info "Generating output of true system"
         # XW = readdlm(joinpath(data_dir, expid*"/XW.csv"), ',')
-        # isws = [initialize_isw(Q, W, n_tot, true) for e=1:max(num_rel, M)]
-        @warn "Not generating most isws since we currently use linear interpolation anyway"
-        isws = [initialize_isw(Q, W, n_tot, true) for e=1:1]
+        isws = [initialize_isw(Q, W, n_tot, true) for e=1:max(num_rel, M)]
         Y = calc_Y(isws)
         writedlm(data_Y_path(expid), Y, ',')
     end
@@ -1480,25 +1415,6 @@ function linear_interpolation_multivar(y::AbstractVector, Ts::Float64, ny::Int)
         n = min(Int(t÷Ts), max_n)
         return ( ((n+1)*Ts-t)*y[n*ny+1:(n+1)*ny] .+ (t-n*Ts)*y[(n+1)*ny+1:(n+2)*ny])./Ts
     end
-end
-
-function interpolated_signal(out, times)
-    @assert (length(out) == length(times)) "out and times signals must have the same length (currently $(length(out)) vs $(length(times)))"
-    function func_to_return(t::Float64)::Float64
-        if t <= minimum(times)
-            return out[1]
-        elseif t >= maximum(times)
-            return out[end]
-        else
-            ind = 1
-            while !(times[ind] < t && times[ind+1] >= t)
-                ind += 1
-            end
-            return out[ind] + (t-times[ind])*(out[ind+1]-out[ind])/(times[ind+1]-times[ind])
-        end
-    end
-
-    return func_to_return
 end
 
 # ???????????????? THINK A LITTLE EXTRA ABOUT FUNCTIONS ABOVE HERE???????????????????????????????

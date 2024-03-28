@@ -9336,12 +9336,12 @@ end
 # TODO: We might not even need the apply_outputfun-functions then?? Maybe
 
 function apply_outputfun(h, sol)
-  if sol.retcode != :Success
-    throw(ErrorException("Solution retcode: $(sol.retcode)"))
-  end
-  # NOTE: There are alternative, more recommended, ways of accessing solution
-  # than through sol.u: https://diffeq.sciml.ai/stable/basics/solution/
-  map(h, sol.u)
+    if sol.retcode != :Success
+        throw(ErrorException("Solution retcode: $(sol.retcode)"))
+    end
+    # NOTE: There are alternative, more recommended, ways of accessing solution
+    # than through sol.u: https://diffeq.sciml.ai/stable/basics/solution/
+    map(h, sol.u)
 end
 
 function apply_two_outputfun(h1, h2, sol)
