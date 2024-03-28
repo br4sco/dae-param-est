@@ -84,160 +84,6 @@ function deb_info(obj)
     @info "type: $(typeof(obj)), size: $(size(obj)), inner size: $(size(obj[1]))"
 end
 
-# NOTE: The realizations Ym and jacYm must be independent for this to return
-# an unbiased estimate of the cost function gradient
-function get_cost_gradient(Y::Vector{Float64}, Ym::Matrix{Float64}, jacsYm::Vector{Matrix{Float64}}, N_trans::Int=0)
-    # N = size(Y,1)÷y_len-1, since Y also contains the zeroth sample.
-    # While we sum over t0, t1, ..., tN, the error at t0 will always be zero
-    # due to known initial conditions which is why we divide by N instead of N+1
-
-    # Y[N_trans+1:end].-Ym[N_trans+1:end,:] is a matrix with as many columns as
-    # Ym, where column i contains Y[N_trans+1:end]-Ym[N_trans+1:end,i]
-    # Taking the mean of that gives us the average error as a function of time
-    # over all realizations contained in Ym
-
-    # mean(-jacsYm)[N_trans+1:end,:] is the average (over all m) jacobian of Ym[N_trans+1:end].
-    # Different rows correspond to different t, while different columns correspond to different parameters
-
-    # Previously used (theoretically equivalent)
-    # (2/(size(Y,1)-N_trans-1))*
-    #     sum(
-    #     mean(Y[N_trans+1:end].-Ym[N_trans+1:end,:], dims=2)
-    #     .*mean(-jacsYm)[N_trans+1:end,:]
-    #     , dims=1)
-
-    (2/(size(Y,1)÷y_len-N_trans-1))*(
-        transpose(mean(-jacsYm)[N_trans+1:end,:])*
-        mean(Y[N_trans+1:end].-Ym[N_trans+1:end,:], dims=2)
-        )[:]
-end
-
-function get_cost_value(Y::Vector{Float64}, Ym::Matrix{Float64}, N_trans::Int=0)
-    (1/(size(Y,1)÷y_len-N_trans-1))*sum( ( Y[N_trans+1:end] - mean(Ym[N_trans+1:end,:], dims=2) ).^2 )
-end
-
-function get_der_est(ts, func::Function)
-    dim = length(func(0.0))
-    der_est = zeros(length(ts)-1, dim)
-    for (i,t) = enumerate(ts)
-        if i > 1
-            der_est[i-1,:] = (func(t)-func(ts[i-1]))./(t-ts[i-1])
-        end
-    end
-    return der_est
-end
-
-function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
-    # Rows of der_est are assumed to be different values of t, columns of
-    # matrix are assumed to be different elements of the vector-valued process
-    temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
-    # temp = [t->t for i=1:size(der_est,2)]
-    return t -> [temp[i](t) for i=eachindex(temp)]
-    # Returns a function mapping time to the vector-value of the function at that time
-end
-
-function mk_noise_interp(C::Matrix{Float64},
-                         XW::AbstractMatrix{Float64},
-                         m::Int,
-                         δ::Float64)
-    let
-        n_tot = size(C, 2)
-        function xw(t::Float64)
-            # n*δ <= t <= (n+1)*δ
-            n = Int(t÷δ)
-            # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
-            k = n * n_tot + 1
-
-            xl = XW[k:(k + n_tot - 1), m]
-            xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
-            return C*(xl + (t-n*δ)*(xu-xl)/δ)
-        end
-    end
-end
-
-function mk_xw_interp(C::Matrix{Float64},
-    XW::AbstractMatrix{Float64},
-    m::Int,
-    δ::Float64)
-
-    let
-        n_tot = size(C, 2)
-        function xw(t::Float64)
-            # n*δ <= t <= (n+1)*δ
-            n = Int(t÷δ)
-            # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
-            k = n * n_tot + 1
-
-            xl = XW[k:(k + n_tot - 1), m]
-            xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
-            return (xl + (t-n*δ)*(xu-xl)/δ)
-        end
-    end
-end
-
-function mk_v_ZOH(Zmm::Matrix{Float64}, δ::Float64)
-    let
-        function z(t::Float64)
-            # n*δ <= t <= (n+1)*δ
-            n = Int(t÷δ)
-            return Zmm[n+1, :]  # +1 because t = 0 (and thus n=0) corresponds to index 1
-        end
-    end
-end
-
-# Function for using conditional interpolation
-function mk_newer_noise_interp(a_vec::AbstractVector{Float64},
-                               C::Matrix{Float64},
-                               XW::Matrix{Vector{Float64}},
-                               m::Int,
-                               n_in::Int,
-                               δ::Float64,
-                               isws::Array{InterSampleWindow, 1})
-   # Conditional sampling depends on noise model, which is why a value of
-   # a_vec has to be passed. a_vec contains parameters corresponding to the
-   # A-matric of the noise model
-    let
-        function w(t::Float64)
-            xw_temp = noise_inter(t, δ, a_vec, n_in, view(XW, :, m), isws[m])
-            return C*xw_temp
-        end
-    end
-end
-
-function get_fit(Ye, pars, model)
-    lb = fill(-Inf, length(pars))
-    ub = fill(Inf,  length(pars))
-    get_fit(Ye, pars, model, lb, ub)
-end
-
-# NOTE:use coef(fit_result) to get optimal parameter values
-function get_fit(Ye, pars, model, lb, ub)
-    # # Use this line if you are using the original LsqFit-package
-    # return curve_fit(model, 1:2, Y[:,1], p, show_trace=true, inplace = false, x_tol = 1e-8)    # Default inplace = false, x_tol = 1e-8
-
-    # HACK: Uses trace returned due to hacked LsqFit package
-    # Use this line if you are using the modified LsqFit-package that also
-    # returns trace
-    fit_result, trace = curve_fit(model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default inplace = false, x_tol = 1e-8
-    return fit_result, trace
-end
-
-function get_fit_sens(Ye, pars, model, jacobian_model)
-    lb = fill(-Inf, length(pars))
-    ub = fill(Inf,  length(pars))
-    get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
-end
-
-# Uses a jacobian model (for system output) instead of estimating jacobian from forward difference
-function get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
-    # HACK: Uses trace returned due to hacked LsqFit package
-    # Use this line if you are using the modified LsqFit-package that also
-    # returns trace
-    # @warn "Using x_tol = 1e-12 instead of default 1e-8"
-    fit_result, trace = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default: inplace = false, x_tol = 1e-8
-    return fit_result, trace
-end
-
 # === MODEL (AND DATA) PARAMETERS ===
 const σ = 0.002                 # measurement noise variance
 
@@ -996,6 +842,162 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     return ExperimentData(Y, u, get_all_ηs, dist_par_bounds[1:length(free_par_inds),:], W_meta, Nw), isws
 end
 
+# ======================= HELPER FUNCTIONS ========================
+
+# NOTE: The realizations Ym and jacYm must be independent for this to return
+# an unbiased estimate of the cost function gradient
+function get_cost_gradient(Y::Vector{Float64}, Ym::Matrix{Float64}, jacsYm::Vector{Matrix{Float64}}, N_trans::Int=0)
+    # N = size(Y,1)÷y_len-1, since Y also contains the zeroth sample.
+    # While we sum over t0, t1, ..., tN, the error at t0 will always be zero
+    # due to known initial conditions which is why we divide by N instead of N+1
+
+    # Y[N_trans+1:end].-Ym[N_trans+1:end,:] is a matrix with as many columns as
+    # Ym, where column i contains Y[N_trans+1:end]-Ym[N_trans+1:end,i]
+    # Taking the mean of that gives us the average error as a function of time
+    # over all realizations contained in Ym
+
+    # mean(-jacsYm)[N_trans+1:end,:] is the average (over all m) jacobian of Ym[N_trans+1:end].
+    # Different rows correspond to different t, while different columns correspond to different parameters
+
+    # Previously used (theoretically equivalent)
+    # (2/(size(Y,1)-N_trans-1))*
+    #     sum(
+    #     mean(Y[N_trans+1:end].-Ym[N_trans+1:end,:], dims=2)
+    #     .*mean(-jacsYm)[N_trans+1:end,:]
+    #     , dims=1)
+
+    (2/(size(Y,1)÷y_len-N_trans-1))*(
+        transpose(mean(-jacsYm)[N_trans+1:end,:])*
+        mean(Y[N_trans+1:end].-Ym[N_trans+1:end,:], dims=2)
+        )[:]
+end
+
+function get_cost_value(Y::Vector{Float64}, Ym::Matrix{Float64}, N_trans::Int=0)
+    (1/(size(Y,1)÷y_len-N_trans-1))*sum( ( Y[N_trans+1:end] - mean(Ym[N_trans+1:end,:], dims=2) ).^2 )
+end
+
+function get_der_est(ts, func::Function)
+    dim = length(func(0.0))
+    der_est = zeros(length(ts)-1, dim)
+    for (i,t) = enumerate(ts)
+        if i > 1
+            der_est[i-1,:] = (func(t)-func(ts[i-1]))./(t-ts[i-1])
+        end
+    end
+    return der_est
+end
+
+function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
+    # Rows of der_est are assumed to be different values of t, columns of
+    # matrix are assumed to be different elements of the vector-valued process
+    temp = [cubic_spline_interpolation(ts, der_est[:,i], extrapolation_bc=Line()) for i=1:size(der_est,2)]
+    # temp = [t->t for i=1:size(der_est,2)]
+    return t -> [temp[i](t) for i=eachindex(temp)]
+    # Returns a function mapping time to the vector-value of the function at that time
+end
+
+function mk_noise_interp(C::Matrix{Float64},
+                         XW::AbstractMatrix{Float64},
+                         m::Int,
+                         δ::Float64)
+    let
+        n_tot = size(C, 2)
+        function xw(t::Float64)
+            # n*δ <= t <= (n+1)*δ
+            n = Int(t÷δ)
+            # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
+            k = n * n_tot + 1
+
+            xl = XW[k:(k + n_tot - 1), m]
+            xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+            return C*(xl + (t-n*δ)*(xu-xl)/δ)
+        end
+    end
+end
+
+function mk_xw_interp(C::Matrix{Float64},
+    XW::AbstractMatrix{Float64},
+    m::Int,
+    δ::Float64)
+
+    let
+        n_tot = size(C, 2)
+        function xw(t::Float64)
+            # n*δ <= t <= (n+1)*δ
+            n = Int(t÷δ)
+            # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
+            k = n * n_tot + 1
+
+            xl = XW[k:(k + n_tot - 1), m]
+            xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+            return (xl + (t-n*δ)*(xu-xl)/δ)
+        end
+    end
+end
+
+function mk_v_ZOH(Zmm::Matrix{Float64}, δ::Float64)
+    let
+        function z(t::Float64)
+            # n*δ <= t <= (n+1)*δ
+            n = Int(t÷δ)
+            return Zmm[n+1, :]  # +1 because t = 0 (and thus n=0) corresponds to index 1
+        end
+    end
+end
+
+# Function for using conditional interpolation
+function mk_newer_noise_interp(a_vec::AbstractVector{Float64},
+                               C::Matrix{Float64},
+                               XW::Matrix{Vector{Float64}},
+                               m::Int,
+                               n_in::Int,
+                               δ::Float64,
+                               isws::Array{InterSampleWindow, 1})
+   # Conditional sampling depends on noise model, which is why a value of
+   # a_vec has to be passed. a_vec contains parameters corresponding to the
+   # A-matric of the noise model
+    let
+        function w(t::Float64)
+            xw_temp = noise_inter(t, δ, a_vec, n_in, view(XW, :, m), isws[m])
+            return C*xw_temp
+        end
+    end
+end
+
+function get_fit(Ye, pars, model)
+    lb = fill(-Inf, length(pars))
+    ub = fill(Inf,  length(pars))
+    get_fit(Ye, pars, model, lb, ub)
+end
+
+# NOTE:use coef(fit_result) to get optimal parameter values
+function get_fit(Ye, pars, model, lb, ub)
+    # # Use this line if you are using the original LsqFit-package
+    # return curve_fit(model, 1:2, Y[:,1], p, show_trace=true, inplace = false, x_tol = 1e-8)    # Default inplace = false, x_tol = 1e-8
+
+    # HACK: Uses trace returned due to hacked LsqFit package
+    # Use this line if you are using the modified LsqFit-package that also
+    # returns trace
+    fit_result, trace = curve_fit(model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default inplace = false, x_tol = 1e-8
+    return fit_result, trace
+end
+
+function get_fit_sens(Ye, pars, model, jacobian_model)
+    lb = fill(-Inf, length(pars))
+    ub = fill(Inf,  length(pars))
+    get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
+end
+
+# Uses a jacobian model (for system output) instead of estimating jacobian from forward difference
+function get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
+    # HACK: Uses trace returned due to hacked LsqFit package
+    # Use this line if you are using the modified LsqFit-package that also
+    # returns trace
+    # @warn "Using x_tol = 1e-12 instead of default 1e-8"
+    fit_result, trace = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default: inplace = false, x_tol = 1e-8
+    return fit_result, trace
+end
+
 function perform_SGD_adam(
     get_grad_estimate::Function,
     pars0::Vector{Float64},                        # Initial guess for parameters
@@ -1397,10 +1399,6 @@ function integrate_lambdas_distsens(λs_func, N, T)
     return λsint_func
 end
 
-# ???????????????? THINK A LITTLE EXTRA ABOUT FUNCTIONS BELOW HERE???????????????????????????????
-
-# SHOULD BE MUCH MORE EFFICIENT THAN interpolated_signal
-# AND MORE GENERIC THAN mk_interp-FUNCTIONS
 function linear_interpolation(y::AbstractVector, Ts::Float64)
     max_n = length(y)-2
     function y_func(t::Float64)
@@ -1416,8 +1414,6 @@ function linear_interpolation_multivar(y::AbstractVector, Ts::Float64, ny::Int)
         return ( ((n+1)*Ts-t)*y[n*ny+1:(n+1)*ny] .+ (t-n*Ts)*y[(n+1)*ny+1:(n+2)*ny])./Ts
     end
 end
-
-# ???????????????? THINK A LITTLE EXTRA ABOUT FUNCTIONS ABOVE HERE???????????????????????????????
 
 function simulate_experiment(expid::String, pars::Vector{Float64}, Zm::Array{Matrix{Float64},1})
     exp_data, isws = get_experiment_data(expid)
