@@ -388,6 +388,7 @@ if model_id == PENDULUM
     model_adj_to_use = my_pendulum_adjoint_konly#sans_g
     model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa1#_with_dist_sens_3
     model_stepbystep = pendulum_adj_stepbystep_NEW#pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
+    model_stepbystep_dist = pendulum_adj_stepbystep_dist
     Fpk = (x, dx) -> [0.; 0.; abs(x[4])*x[4]; abs(x[5])*x[5]; 0.; 0.; 0.;;]
     Fpm = (x, dx) -> [.0; .0; dx[4]; dx[5]+g; .0; .0; .0;;]
     FpL = (x, dx) -> [ .0; .0; .0; .0; -2L; .0; .0;;]
@@ -5424,17 +5425,20 @@ end
 
 function read_from_backup(dir::String, E::Int)
     # sample = readdlm(joinpath(dir, "backup_baseline_e1.csv"), ',')
-    sample = readdlm(joinpath(dir, "backup_proposed_e1.csv"), ',')
-    k = length(sample)
+    # sample = readdlm(joinpath(dir, "backup_proposed_e1.csv"), ',')
+    sample = readdlm(joinpath(dir, "backup_trace_e1.csv"), ',')
+    (its,k) = size(sample)
     opt_pars_baseline = zeros(k, E)
     opt_pars_proposed = zeros(k, E)
     avg_pars_proposed = zeros(k, E)
+    trace_proposed = [zeros(its, k) for e=1:E]
     for e=1:E
         # opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
         opt_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_proposed_e$e.csv"), ',')
         avg_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_average_e$e.csv"), ',')
+        trace_proposed[e] = readdlm(joinpath(dir, "backup_trace_e$e.csv"), ',')
     end
-    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed
+    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_proposed
 end
 
 function debug_minimization(expid::String, pars0::Vector{Float64}, N_trans::Int = 0)
@@ -8107,7 +8111,7 @@ function plot_boxplots(θs, θ0, labels)
     end
 
     hline!(p, [θ0], label = L"\theta_0", linestyle = :dot, linecolor = :gray)
-    savefig("C:\\Programming\\dae-param-est\\src\\julia\\data\\results\\October_for_5k_allpars_E100\\new_bias_start\\boxplot.png")
+    savefig("C:\\Programming\\dae-param-est\\src\\julia\\data\\results\\delta_L1_k100_100\\boxplot.png")
 end
 
 
@@ -8396,6 +8400,7 @@ function adjoint_dist_debug(expid::String)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
     @time XWm_sens = simulate_noise_process_mangled(dmdl_sens, Zm)
     wmm_sens(m::Int) = mk_noise_interp(dmdl_sens.Cd, XWm_sens, m, δ)
+    xwm_sens(m::Int) = mk_xw_interp(dmdl_sens.Cd, XWm_sens, m, δ)
 
     # Simulates a second solution without sensitivity to use for numerical estimate of gradient
     my_δ = 0.01
@@ -8411,7 +8416,6 @@ function adjoint_dist_debug(expid::String)
     ts_exact = 0:Ts_exact:N*Ts+Ts_exact/2
     sol_for_exact = solve(my_prob, saveat = ts_exact, abstol = abstol, reltol = reltol, maxiters = maxiters)
 
-    # TODO: CHANGE THIS ONE, DYNAMICAL PARAMETERS ARE FIXED
     η_2 = exp_data.get_all_ηs(free_pars_true.+my_δ)
     dmdl_2 = discretize_ct_noise_model(get_ct_disturbance_model(η_2, nxw, n_out), δ)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
@@ -8436,7 +8440,7 @@ function adjoint_dist_debug(expid::String)
     # ------------------------------ Adjoint setup and gradient estimate --------------------------------
     # ---------------------------------------------------------------------------------------------------
 
-    # Extracts entire state trajecotry from first forward solution
+    # Extracts entire state trajecotry from first forward solution. Adjoint version of state
     xvec1 = vcat(transpose(h_debug_with_sens(sol_for_exact))...)   # transpose so that result is a matrix, with each row being one of the inner vectors (h_sens_deb returns a vector of vectors)
 
     # Creates functions for output, states, and their derivatives using interpolation.
@@ -8454,16 +8458,18 @@ function adjoint_dist_debug(expid::String)
     xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars_adj, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars_adj)
     (nx,np) = size(xp0)
 
-    # MAYBE FROM HERE???????????????????????????????????????????????????????????????????
     dmdl, B̃, B̃ηa = discretize_ct_noise_model_with_sensitivities_for_adj(get_ct_disturbance_model(η_true, nxw, n_out), δ, dist_par_inds)
     vm(m::Int) = mk_v_ZOH(Zm[m], δ)
     XWm_adj = simulate_noise_process_mangled(dmdl, Zm)
     xwm_adj(m::Int) = mk_xw_interp(dmdl.Cd, XWm_adj, m, δ)
-    # Can compare this to wmm to verify that we get same disturbance realization in both cases
+    nw = size(dmdl.Cd, 1)
+    function z_func(t::Float64)
+        xt = x_func(t)
+        xwt = xwm_sens(1)(t)
+        wt =  wmm_sens(1)(t)
+        return vcat(xt[1:num_dyn_vars_adj], xwt[1:nxw], wt[1:nw], xt[num_dyn_vars_adj+1:end], xwt[nxw+1:end], wt[nw+1:end])
+    end
     
-    # TODO: Why don't I just make a new wmm instead of using wmm_sens? LIke wmm_sens(m::Int) = mk_noise_interp(dmdl_sens.Cd, XWm_sens, m, δ)? I guess it shouldn't matter, but it would be more intuitive perhaps
-    # TODO: NOTE: At the time of writing, I need to pass na=1, while other adjoint dist models don't require it. WHY? FIX!
-    # I think this na is the number of free a-parameters, i.e. just one in this case. It's not 100% clear from code though, could be clarified for sure
     mdl_adj, get_Gp, debugs = model_adj_to_use_dist_sens(u, wmm_sens(1), xwm_adj(1), vm(1), get_all_θs(free_pars_true), N*Ts, x_func, x_func, y_func, dy_func, xp0, dx_func, dx_func, B̃, B̃ηa, η_true, 1)
     adj_prob = problem_reverse(mdl_adj, N, Ts)
     adj_sol = solve(adj_prob, saveat = 0:Ts:N*Ts, abstol =  abstol, reltol = reltol,
@@ -8476,7 +8482,7 @@ function adjoint_dist_debug(expid::String)
     println("Num: $num_est, for: $for_est, adj: $Gp")
 
     # # --------- Obtaining lambda functions  - VER 1 ---------
-    λs = [adj_sol_exact.u[end-ind+1][1:nx] for ind=eachindex(adj_sol_exact.u)]
+    λs = [adj_sol_exact.u[end-ind+1][1:nx+nxw+nw] for ind=eachindex(adj_sol_exact.u)]
     λ_func = linear_interpolation_multivar(vcat(λs...), Ts_exact, length(λs[1]))
     # --------- More accurate lambda functions - VER 2 - ONLY FOR PENDULUM ---------
     # if model_id == PENDULUM
@@ -8495,9 +8501,7 @@ function adjoint_dist_debug(expid::String)
     _, sens_deb = h_sens_deb(sol_for1)
     xps = hcat(sens_deb...)
     term_vec = get_term_debug(adj_sol, xps, 0:Ts:(N*Ts))    # ONLY USED AT VERY END. BUT VERY NICE TO HAVE :D
-    @warn "Using a hard-coded value ndist=3. Maybe recall exactly why it's needed and generalize to avoid hard-coding"
-    ndist = 3  # TODO: Don't hard-code, generalize!
-    beta = [adj_sol.u[end-ind+1][nx+ndist+1] for ind=1:length(adj_sol.u)]     # ALSO VERY NICE TO HAVE FOR DEBUGGING AND COMPARING TO INTEGRAL COST
+    beta = [adj_sol.u[end-ind+1][nx+nxw+nw+1] for ind=1:length(adj_sol.u)]     # ALSO VERY NICE TO HAVE FOR DEBUGGING AND COMPARING TO INTEGRAL COST
 
     # TODO: Consider generalizing the exact pendulum-part for disturbance parameters
     # it currently only works for m, L, and k!!!!!!! <-------------------------------
@@ -8549,84 +8553,87 @@ function adjoint_dist_debug(expid::String)
     # ------------------ BONUS: STEP-BY-STEP ANALYSIS OF ADJOINT SOLUTION, TO SEE WHERE ERRORS APPEAR -----------------------
     # -----------------------------------------------------------------------------------------------------------------------
 
-    # TODO: ALSO NEEDS TO GENERALIZE STEPBYSTEP TO DISTURBANCE SENSITIVITY!!!
-    # THIS WILL ALL REQUIRE A LITTLE MORE PROPER SIT-DOWN. Maybe when you don't have a cold.
-    # TODO: Maybe look at it on Monday, if you have time to spare after analyzing experiment data? Unless you come up with something better to do
+    mydelta = 0.01
+    dλ_func(t) = (λ_func(t+mydelta)-λ_func(t))/mydelta
+    stepbystep_mdl = pendulum_adj_stepbystep_dist(u, wmm_sens(1), xwm_sens(1), vm(1), get_all_θs(free_dyn_pars_true), y_func, dy_func, x_func, dx_func, λ_func, dλ_func, deb_Fp, B̃, B̃ηa, η_true, N*Ts)
 
-    # mydelta = 0.01
-    # dλ_func(t) = (λ_func(t+mydelta)-λ_func(t))/mydelta
-    # stepbystep_mdl = model_stepbystep(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true), y_func, x_func, dx_func, λ_func, dλ_func, deb_Fp, N*Ts)
+    stepstep_prob = problem(stepbystep_mdl, N, Ts)
+    stepstep_sol = solve(stepstep_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol, maxiters = maxiters)
+    integral_sens_1 = [stepstep_sol.u[ind][1] for ind=eachindex(stepstep_sol.u)]
+    int_with_lambda_2 = [stepstep_sol.u[ind][2] for ind=eachindex(stepstep_sol.u)]
+    post_partial_3 = [stepstep_sol.u[ind][3] for ind=eachindex(stepstep_sol.u)]
+    final_expression_4 = [stepstep_sol.u[ind][4] for ind=eachindex(stepstep_sol.u)]
 
-    # stepstep_prob = problem(stepbystep_mdl, N, Ts)
-    # stepstep_sol = solve(stepstep_prob, saveat = 0:Ts:N*Ts, abstol = abstol, reltol = reltol, maxiters = maxiters)
-    # integral_sens_1 = [stepstep_sol.u[ind][1] for ind=eachindex(stepstep_sol.u)]
-    # int_with_lambda_2 = [stepstep_sol.u[ind][2] for ind=eachindex(stepstep_sol.u)]
-    # post_partial_3 = [stepstep_sol.u[ind][3] for ind=eachindex(stepstep_sol.u)]
-    # final_expression_4 = [stepstep_sol.u[ind][4] for ind=eachindex(stepstep_sol.u)]
+    function Fdx(dx,x)
+        if model_id == PENDULUM
+            Fdx_tmp = vcat([1   0   0    0   0   2x[1]    0
+                            0   1   0    0   0   2x[2]    0
+                            0   0   -x[1]   m   0   0     0
+                            0   0   -x[2]   0   m   0     0], zeros(3,7))
+            return [Fdx_tmp         zeros(7,2)   zeros(7,1)
+                    zeros(2,7)  [1.0 0.0; 0.0 1.0] zeros(2,1)
+                    zeros(1,7)       zeros(1,2)    zeros(1,1)]
+        elseif model_id == DELTA
+            Fdx_tmp =  [   # x and dx have to be adjoint versions of states, i.e. include model output as a state
+                1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L1*sin(x[1])   L1*cos(x[1])   0.0   -L1*sin(x[1])   L1*cos(x[1])   0.0   0.0   0.0
+                0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L2*cos(x[2])*sin(x[3])   -L2*sin(x[2])   L2*cos(x[2])*cos(x[3])   L2*cos(x[2])*sin(x[3])   -L2*sin(x[2])   L2*cos(x[2])*cos(x[3])   0.0   0.0   0.0
+                0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L2*cos(x[3])*sin(x[2])   0.0   -L2*sin(x[2])*sin(x[3])   L2*cos(x[3])*sin(x[2])   0.0   -L2*sin(x[2])*sin(x[3])   0.0   0.0   0.0
+                0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -(sqrt(3)*L1*sin(x[4]))*0.5   -(L1*sin(x[4]))*0.5   -L1*cos(x[4])   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (L2*cos(x[5])*sin(x[6]))*0.5-(sqrt(3)*L2*sin(x[5]))*0.5   -(L2*sin(x[5]))*0.5-(sqrt(3)*L2*cos(x[5])*sin(x[6]))*0.5   -L2*cos(x[5])*cos(x[6])   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (L2*cos(x[6])*sin(x[5]))*0.5   -(sqrt(3)*L2*cos(x[6])*sin(x[5]))*0.5   L2*sin(x[5])*sin(x[6])   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (sqrt(3)*L1*sin(x[7]))*0.5   -(L1*sin(x[7]))*0.5   -L1*cos(x[7])   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (L2*cos(x[8])*sin(x[9]))*0.5+(sqrt(3)*L2*sin(x[8]))*0.5   (sqrt(3)*L2*cos(x[8])*sin(x[9]))*0.5-(L2*sin(x[8]))*0.5   -L2*cos(x[8])*cos(x[9])   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (L2*cos(x[9])*sin(x[8]))*0.5   (sqrt(3)*L2*cos(x[9])*sin(x[8]))*0.5   L2*sin(x[8])*sin(x[9])   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))   -L1*cos(x[1])*sin(x[2])*sin(x[3])*(L2*M3+LC2*M2)   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L1*sin(x[1])   -L1*cos(x[1])   0.0   L1*sin(x[1])   -L1*cos(x[1])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L1*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))   J2+L2^2*M3+LC2^2*M2   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L2*cos(x[2])*sin(x[3])   L2*sin(x[2])   -L2*cos(x[2])*cos(x[3])   -L2*cos(x[2])*sin(x[3])   L2*sin(x[2])   -L2*cos(x[2])*cos(x[3])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L1*cos(x[1])*sin(x[2])*sin(x[3])*(L2*M3+LC2*M2)   0.0   sin(x[2])^2*(J2+L2^2*M3+LC2^2*M2)   0.0   0.0   0.0   0.0   0.0   0.0   -L2*cos(x[3])*sin(x[2])   0.0   L2*sin(x[2])*sin(x[3])   -L2*cos(x[3])*sin(x[2])   0.0   L2*sin(x[2])*sin(x[3])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))   -L1*cos(x[4])*sin(x[5])*sin(x[6])*(L2*M3+LC2*M2)   0.0   0.0   0.0   (sqrt(3)*L1*sin(x[4]))*0.5   (L1*sin(x[4]))*0.5   L1*cos(x[4])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L1*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))   J2+L2^2*M3+LC2^2*M2   0.0   0.0   0.0   0.0   (sqrt(3)*L2*sin(x[5]))*0.5-(L2*cos(x[5])*sin(x[6]))*0.5   (L2*sin(x[5]))*0.5+(sqrt(3)*L2*cos(x[5])*sin(x[6]))*0.5   L2*cos(x[5])*cos(x[6])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L1*cos(x[4])*sin(x[5])*sin(x[6])*(L2*M3+LC2*M2)   0.0   sin(x[5])^2*(J2+L2^2*M3+LC2^2*M2)   0.0   0.0   0.0   -(L2*cos(x[6])*sin(x[5]))*0.5   (sqrt(3)*L2*cos(x[6])*sin(x[5]))*0.5   -L2*sin(x[5])*sin(x[6])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))   -L1*cos(x[7])*sin(x[8])*sin(x[9])*(L2*M3+LC2*M2)   0.0   0.0   0.0   -(sqrt(3)*L1*sin(x[7]))*0.5   (L1*sin(x[7]))*0.5   L1*cos(x[7])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L1*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))   J2+L2^2*M3+LC2^2*M2   0.0   0.0   0.0   0.0   -(L2*cos(x[8])*sin(x[9]))*0.5-(sqrt(3)*L2*sin(x[8]))*0.5   (L2*sin(x[8]))*0.5-(sqrt(3)*L2*cos(x[8])*sin(x[9]))*0.5   L2*cos(x[8])*cos(x[9])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L1*cos(x[7])*sin(x[8])*sin(x[9])*(L2*M3+LC2*M2)   0.0   sin(x[8])^2*(J2+L2^2*M3+LC2^2*M2)   0.0   0.0   0.0   -(L2*cos(x[9])*sin(x[8]))*0.5   -(sqrt(3)*L2*cos(x[9])*sin(x[8]))*0.5   -L2*sin(x[8])*sin(x[9])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+                0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
+            ]
+            # Extends Fdx to contain equations for disturbance model. Hard-coded for pendulum disturbance model
+            return [Fdx_tmp         zeros(33,2)   zeros(33,1)
+                  zeros(2,33)  [1.0 0.0; 0.0 1.0] zeros(2,1)
+                  zeros(1,33)       zeros(1,2)    zeros(1,1)]
+        end
+    end
+    term_func(t) = (λ_func(t)')*Fdx(dx_func(t),x_func(t))*z_func(t)[num_dyn_vars_adj+nxw+nw+1:end]
 
-    # function Fdx(dx,x)
-    #     if model_id == PENDULUM
-    #         return vcat([1   0   0    0   0   2x[1]    0
-    #             0   1   0    0   0   2x[2]    0
-    #             0   0   -x[1]   m   0   0     0
-    #             0   0   -x[2]   0   m   0     0], zeros(3,7))
-    #     elseif model_id == DELTA
-    #         return [   # x and dx have to be adjoint versions of states, i.e. include model output as a state
-    #             1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L1*sin(x[1])   L1*cos(x[1])   0.0   -L1*sin(x[1])   L1*cos(x[1])   0.0   0.0   0.0
-    #             0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L2*cos(x[2])*sin(x[3])   -L2*sin(x[2])   L2*cos(x[2])*cos(x[3])   L2*cos(x[2])*sin(x[3])   -L2*sin(x[2])   L2*cos(x[2])*cos(x[3])   0.0   0.0   0.0
-    #             0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L2*cos(x[3])*sin(x[2])   0.0   -L2*sin(x[2])*sin(x[3])   L2*cos(x[3])*sin(x[2])   0.0   -L2*sin(x[2])*sin(x[3])   0.0   0.0   0.0
-    #             0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -(sqrt(3)*L1*sin(x[4]))*0.5   -(L1*sin(x[4]))*0.5   -L1*cos(x[4])   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (L2*cos(x[5])*sin(x[6]))*0.5-(sqrt(3)*L2*sin(x[5]))*0.5   -(L2*sin(x[5]))*0.5-(sqrt(3)*L2*cos(x[5])*sin(x[6]))*0.5   -L2*cos(x[5])*cos(x[6])   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (L2*cos(x[6])*sin(x[5]))*0.5   -(sqrt(3)*L2*cos(x[6])*sin(x[5]))*0.5   L2*sin(x[5])*sin(x[6])   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (sqrt(3)*L1*sin(x[7]))*0.5   -(L1*sin(x[7]))*0.5   -L1*cos(x[7])   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (L2*cos(x[8])*sin(x[9]))*0.5+(sqrt(3)*L2*sin(x[8]))*0.5   (sqrt(3)*L2*cos(x[8])*sin(x[9]))*0.5-(L2*sin(x[8]))*0.5   -L2*cos(x[8])*cos(x[9])   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   (L2*cos(x[9])*sin(x[8]))*0.5   (sqrt(3)*L2*cos(x[9])*sin(x[8]))*0.5   L2*sin(x[8])*sin(x[9])   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))   -L1*cos(x[1])*sin(x[2])*sin(x[3])*(L2*M3+LC2*M2)   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L1*sin(x[1])   -L1*cos(x[1])   0.0   L1*sin(x[1])   -L1*cos(x[1])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L1*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))   J2+L2^2*M3+LC2^2*M2   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L2*cos(x[2])*sin(x[3])   L2*sin(x[2])   -L2*cos(x[2])*cos(x[3])   -L2*cos(x[2])*sin(x[3])   L2*sin(x[2])   -L2*cos(x[2])*cos(x[3])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L1*cos(x[1])*sin(x[2])*sin(x[3])*(L2*M3+LC2*M2)   0.0   sin(x[2])^2*(J2+L2^2*M3+LC2^2*M2)   0.0   0.0   0.0   0.0   0.0   0.0   -L2*cos(x[3])*sin(x[2])   0.0   L2*sin(x[2])*sin(x[3])   -L2*cos(x[3])*sin(x[2])   0.0   L2*sin(x[2])*sin(x[3])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))   -L1*cos(x[4])*sin(x[5])*sin(x[6])*(L2*M3+LC2*M2)   0.0   0.0   0.0   (sqrt(3)*L1*sin(x[4]))*0.5   (L1*sin(x[4]))*0.5   L1*cos(x[4])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L1*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))   J2+L2^2*M3+LC2^2*M2   0.0   0.0   0.0   0.0   (sqrt(3)*L2*sin(x[5]))*0.5-(L2*cos(x[5])*sin(x[6]))*0.5   (L2*sin(x[5]))*0.5+(sqrt(3)*L2*cos(x[5])*sin(x[6]))*0.5   L2*cos(x[5])*cos(x[6])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L1*cos(x[4])*sin(x[5])*sin(x[6])*(L2*M3+LC2*M2)   0.0   sin(x[5])^2*(J2+L2^2*M3+LC2^2*M2)   0.0   0.0   0.0   -(L2*cos(x[6])*sin(x[5]))*0.5   (sqrt(3)*L2*cos(x[6])*sin(x[5]))*0.5   -L2*sin(x[5])*sin(x[6])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   J1+L1^2*(M2+M3)+LC1^2*M1   L1*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))   -L1*cos(x[7])*sin(x[8])*sin(x[9])*(L2*M3+LC2*M2)   0.0   0.0   0.0   -(sqrt(3)*L1*sin(x[7]))*0.5   (L1*sin(x[7]))*0.5   L1*cos(x[7])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   L1*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))   J2+L2^2*M3+LC2^2*M2   0.0   0.0   0.0   0.0   -(L2*cos(x[8])*sin(x[9]))*0.5-(sqrt(3)*L2*sin(x[8]))*0.5   (L2*sin(x[8]))*0.5-(sqrt(3)*L2*cos(x[8])*sin(x[9]))*0.5   L2*cos(x[8])*cos(x[9])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -L1*cos(x[7])*sin(x[8])*sin(x[9])*(L2*M3+LC2*M2)   0.0   sin(x[8])^2*(J2+L2^2*M3+LC2^2*M2)   0.0   0.0   0.0   -(L2*cos(x[9])*sin(x[8]))*0.5   -(sqrt(3)*L2*cos(x[9])*sin(x[8]))*0.5   -L2*sin(x[8])*sin(x[9])   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
-    #         ]
-    #     end
-    # end
-    # term_func(t) = (λ_func(t)')*Fdx(dx_func(t),x_func(t))*x_func(t)[num_dyn_vars_adj+1:end]
+    println("End values of trajectories: ", integral_sens_1[end], "; ", int_with_lambda_2[end], "; ", post_partial_3[end], "+", -term_func.(N*Ts)+term_func(0.0), "=", post_partial_3[end]-term_func.(N*Ts)+term_func(0.0), "; ", final_expression_4[end], "+", -term_func.(N*Ts)+term_func(0.0), "=", final_expression_4[end]-term_func.(N*Ts)+term_func(0.0))
 
-    # println("End values of trajectories: ", integral_sens_1[end], "; ", int_with_lambda_2[end], "; ", post_partial_3[end], "+", -term_func.(N*Ts)+term_func(0.0), "=", post_partial_3[end]-term_func.(N*Ts)+term_func(0.0), "; ", final_expression_4[end], "+", -term_func.(N*Ts)+term_func(0.0), "=", final_expression_4[end]-term_func.(N*Ts)+term_func(0.0))
+    deb_rem_6 = [stepstep_sol.u[ind][6] for ind=eachindex(stepstep_sol.u)]
 
-    # deb_rem_6 = [stepstep_sol.u[ind][6] for ind=eachindex(stepstep_sol.u)]
+    # PREMISES: integral_sens_1 should match gradient on original sum-cost well. 
+    # int_with_lambda_2 should be similar, with a little bit of drift, otherwise something is wrong with our forward solution
+    # DEBUGGING: post_partial_3 can look a little different, since partial integration seems to have an unintuittive effect on numerical errors.
+    # However, the final value should match integral_sens_1 as well as possible, otherwise we will have issues.
+    # If adjoint solution is correct, post_partial_3 and final_expression_4 should match well, since that's where we replace lambda-expressions.
+    # NOTE: If you seem to get large numerical mismatch, try to disable disturbances and use a smoother input signal, e.g. a sinusoid. If this reduces the numerical
+    # mismatch, then perhaps the earlier mismatch is just inherent to the very quickly changing input signals
+    # I think it also should be expected that sum-cost and integral-cost will differ somewhat when inputs are so irregular
 
-    # # PREMISES: integral_sens_1 should match gradient on original sum-cost well. 
-    # # int_with_lambda_2 should be similar, with a little bit of drift, otherwise something is wrong with our forward solution
-    # # DEBUGGING: post_partial_3 can look a little different, since partial integration seems to have an unintuittive effect on numerical errors.
-    # # However, the final value should match integral_sens_1 as well as possible, otherwise we will have issues.
-    # # If adjoint solution is correct, post_partial_3 and final_expression_4 should match well, since that's where we replace lambda-expressions.
-    # # NOTE: If you seem to get large numerical mismatch, try to disable disturbances and use a smoother input signal, e.g. a sinusoid. If this reduces the numerical
-    # # mismatch, then perhaps the earlier mismatch is just inherent to the very quickly changing input signals
-    # # I think it also should be expected that sum-cost and integral-cost will differ somewhat when inputs are so irregular
-
-    # plot(integral_sens_1, label="int_cost_sens")
-    # plot!(int_with_lambda_2, label="int_sens_with_lam")
-    # plot!(post_partial_3-term_func.(0.0:Ts:N*Ts).+term_func(0.0), label="post_partial")
-    # plot!(final_expression_4-term_func.(0.0:Ts:N*Ts).+term_func(0.0), label="adj_final")
+    plot(integral_sens_1, label="int_cost_sens")
+    plot!(int_with_lambda_2, label="int_sens_with_lam")
+    plot!(post_partial_3-term_func.(0.0:Ts:N*Ts).+term_func(0.0), label="post_partial")
+    plot!(final_expression_4-term_func.(0.0:Ts:N*Ts).+term_func(0.0), label="adj_final")
 
     # # ------------------ EXTRA: COMPARING SUM AND INTEGRAL COST -----------------------
 

@@ -6005,7 +6005,7 @@ function my_pendulum_adjoint_sans_g_with_dist_sens_3(u::Function, w::Function, x
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
 
-        # Creating some of the needed disturbance from η. ASSUMING ONLY DISTURBANCE PARAMETERS ARE a1 AND a2!!!!!!
+        # Creating some of the needed disturbance from η.
         A = [-η[1]  -η[2]; 1.0   0.0]
         C = [η[3]   η[4]]
         Aθ = [-1.0  0.0; 0.0    0.0; 0.0    -1.0; 0.0   0.0; 0.0   0.0; 0.0  0.0]
@@ -6073,7 +6073,7 @@ function my_pendulum_adjoint_sans_g_with_dist_sens_3(u::Function, w::Function, x
             nothing
         end
 
-        z0  = vcat(λT[:], zeros(np))
+        z0  = vcat(λT[:], zeros(np))    # Appends terminal value for β-variables
         second_temp = Matrix{Float64}(undef, nw, nη)
         third_temp  = Matrix{Float64}(undef, 1, nη)
         for ind = 1:nη   # 3 disturbance parameters
@@ -6263,6 +6263,7 @@ function my_pendulum_adjoint_dist_sens_3(u::Function, w::Function, xw::Function,
 end
 
 function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
+    # na should be the number of disturbance parameters corresponding to the a parameters. In this case, it should really just be 1, so it's actually only an input argument to fit the signature of the other adjoint models
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
         nη = 1
@@ -6296,10 +6297,10 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
 
-        # Creating some of the needed disturbance from η. ASSUMING ONLY FREE DISTURBANCE PARAMETERS ARE a1 AND/OR a2!!!!!!
+        # Creating some of the needed disturbance from η. ASSUMING ONLY FREE DISTURBANCE PARAMETERS ARE a1
         A = [-η[1]  -η[2]; 1.0   0.0]
         C = [η[3]   η[4]]
-        Aθ = [-1.0  0.0; 0.0    0.0;]# 0.0    -1.0; 0.0   0.0]
+        Aθ = [-1.0  0.0; 0.0    0.0;]
         Cθ = zeros(1,nw) # Only depends on C-parameters, and we only compute sensitivities wrt to a-parameters. We have 1 disturbance parameter, thus 1 row
 
         ###################### INITIALIZING ADJOINT SYSTEM ####################
@@ -6350,21 +6351,15 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
         end
         
         z0  = vcat(λT[:], zeros(np))
-        # # Old attempt, hard to generalize
-        # second_temp = Matrix{Float64}(undef, nw, nη)
-        # third_temp  = Matrix{Float64}(undef, 1, nη)
-        # for ind = 1:nη   # 1 disturbance parameter
-        #     second_temp[:, ind] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
-        #     third_temp[:, ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
-        #     # second_temp[:, (ind-1)nw + 1: ind*nw] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
-        #     # third_temp[:, (ind-1)nw + 1: ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
-        # end
-        # New attempt, hopefully more generalizable
+        # SETTING UP TERMINAL VALUES FOR β-VARIABLES
+        # This part is actually overly general for this model, since here we only identify a single disturbance parameter, corresponding to one of the a-paramters
         second_temp = zeros(nw, nη)
         third_temp  = zeros(1, nη)
+        # For variables corresponding to disturbance a-parameters
         for ind = 1:na
             second_temp[:, ind] = Aθ[(ind-1)nw + 1: ind*nw, :]*xw(T) + B̃θ[(ind-1)nw + 1: ind*nw, :]*v(T)
         end
+        # For variables corresponding to disturbance c-parameters
         for ind = na+1:nη
             third_temp[:, ind]  = Cθ[ind:ind, :]*xw(T) # NOTE: SCALAR_OUTPUT is assumed
         end
@@ -6378,6 +6373,7 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
         end
         # Function returning Gp given adjoint solution
         function get_Gp(adj_sol::DAESolution)
+            # There are nx+ndist variables before the β-variables, of which there are np
             Gp = adj_sol.u[end-N_trans][nx+ndist+1:nx+ndist+np] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[:]     # This is the same as in original adjoint system just because disturbance model has zero initial conditions, independent of parameters
         end
 
@@ -7294,6 +7290,120 @@ function pendulum_adj_stepbystep_NEW(Φ::Float64, u::Function, w::Function, θ::
         dz40 = -first((λ(0.)')*Fp(x0,dx0))
         dz50 = ((x0[7]-first(y(0.)))^2)/T
         dz60 = -first((λ(0.)')*(Fp(x0,dx0) + Fx(x0,dx0)*xθ0 + Fdx(x0,dx0)*dxθ0))
+
+        z0   = zeros(6)
+        dz0  = [dz10, dz20, dz30, dz40, dz50, dz60]
+
+        dvars = fill(true,6)
+
+        r0 = zeros(length(z0))
+        f!(r0, dz0, z0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, z0, dz0, dvars, r0)
+    end
+end
+
+function pendulum_adj_stepbystep_dist(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, y::Function, dy::Function, x_func::Function, dx_func::Function, λ::Function, dλ::Function, Fp::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, T::Float64)::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        np = 1
+        nw = length(w(0.0))÷(np+1)
+        nxw = length(xw(0.0))÷(np+1)
+        nx = 7
+
+        # Pendulum original matrices
+        Fx = (x, dx) -> [2dx[6]        0               0   -1                  0           0   0
+                          0           2*dx[6]          0   0                   -1          0   0
+                          -dx[3]         0             0   2k*abs(x[4])        0           0   0
+                          0          -dx[3]            0   0               2k*abs(x[5])    0   0
+                          2x[1]      2x[2]             0   0                   0           0   0
+                          x[4]        x[5]             0   x[1]              x[2]          0   0
+                          x[2]/(L^2)  -x[1]/(L^2)      0   0                   0           0   1]
+        # (namely the derivative of F with respect to the variable dx/dt)
+        Fdx = (x, dx) -> vcat([1   0   0          0   0   2x[1]    0
+                               0   1   0          0   0   2x[2]    0
+                               0   0   -x[1]   m   0   0           0
+                               0   0   -x[2]   0   m   0           0], zeros(3,7))
+        Fddx = (x, dx) -> vcat([  0   0  0            0   0   2dx[1]    0
+                                  0   0  0            0   0   2dx[2]    0
+                                  0   0  -dx[1]       0   0   0         0
+                                  0   0  -dx[2]       0   0   0         0], zeros(3,7))
+        gₓ = (x, dx, t) -> [0.; 0.; 0.; 0.; 0.; 0.; 2(x[7]-first(y(t)))/T]
+
+        Fw = (wt) -> [0.0; 0.0; -2*wt; 0.0; 0.0; 0.0; 0.0]
+
+        # NOTE: A LITTLE HARD-CODED FOR NOW, NOT REALLY GENERALIZED FOR OTHER DISTURBANCE MODELS
+        # Creating some of the needed disturbance from η. ASSUMING ONLY FREE DISTURBANCE PARAMETERS ARE a1
+        A = [-η[1]  -η[2]; 1.0   0.0]
+        C = [η[3]   η[4]]
+        Aθ = [-1.0  0.0; 0.0    0.0;]
+        Cθ = zeros(1,nxw) # Only depends on C-parameters, and we only compute sensitivities wrt to a-parameters. We have 1 disturbance parameter, thus 1 row
+
+        # Matrices extended to include disturbance model
+        Fz = (x, dx, wt) -> [Fx(x,dx)      zeros(nx, nxw)   Fw(wt)
+                            zeros(nxw,nx)   -A         zeros(nxw, nw)
+                            zeros(1,nx)     -C              1.0]
+
+        Fdz = (x, dx) -> [Fdx(x,dx)   zeros(nx,nxw)   zeros(nx,nw)
+                         zeros(nxw,nx)  [1.0 0.0; 0.0 1.0]   zeros(nxw,nw)
+                         zeros(1,nx+nxw+nw)]
+
+        Fddz = (x, dx) -> [Fddx(x,dx)   zeros(nx,nxw)   zeros(nx,nw)
+                          zeros(nxw,nx) zeros(nxw,nxw) zeros(nxw, nw)
+                          zeros(1,nx+nxw+nw)]
+
+        gz = (x, dx, t) -> [gₓ(x,dx,t); zeros(nxw+nw,1)]
+
+        F̃p = (x, dx, xwt, vt) -> [Fp(x,dx)
+                                -Aθ*xwt - B̃θ*vt
+                                -Cθ*xwt]
+
+        # the residual function
+        function f!(res, dz, z, θ, t)
+            wt = w(t)
+            # ut = u(t)
+            xt = x_func(t)
+            dxt = dx_func(t)
+            xwt = xw(t)
+            vt = v(t)
+            x = xt[1:7]
+            dx = dxt[1:7]
+            xθ = xt[8:end]
+            dxθ = dxt[8:end]
+            zθ = vcat(xθ, xwt[3:4], wt[2:2])    # If disturbance model includes forward sensitivities, the sensitivities are the second half of the state variables (3:4) and of the output (2:2). This is hard-coded for pendulum disturbance model
+            dzθ = vcat(dxθ, Aθ*xwt[1:2] + A*xwt[3:4] + B̃θ*vt, C*(Aθ*xwt[1:2] + A*xwt[3:4] + B̃θ*vt))
+
+            res[1] = dz[1] - first((gz(x,dx,t)')*zθ)
+            res[2] = dz[2] - first( (gz(x,dx,t)')*zθ - (λ(t)')*(F̃p(x,dx,xwt[1:2],vt) + Fz(x,dx,wt[1])*zθ + Fdz(x,dx)*dzθ) )
+            res[3] = dz[3] - first( -(λ(t)')*F̃p(x,dx,xwt[1:2],vt) - ( -gz(x,dx,t)' + (λ(t)')*(Fz(x,dx,wt[1])-Fddz(x,dx)) - (dλ(t)')*Fdz(x,dx) )*zθ )
+            res[4] = dz[4] - first(( -(λ(t)')*F̃p(x,dx,xwt[1:2],vt) ))
+            # SOME BONUS DEBUG TERMS
+            res[5] = dz[5] - ((x[7]-first(y(t)))^2)/T   # Simply computing integral cost
+            res[6] = dz[6] + first((λ(t)')*(F̃p(x,dx,xwt[1:2],vt) + Fz(x,dx,wt[1])*zθ + Fdz(x,dx)*dzθ))    # This should be approximately zero, otherwise forward solution isn't right
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        x_func0 = x_func(0.)
+        dx_func0 = dx_func(0.)
+        x0 = x_func0[1:7]
+        dx0 = dx_func0[1:7]
+        xθ0 = x_func0[8:end]
+        dxθ0 = dx_func0[8:end]
+        xw0 = xw(0.0)
+        w0 = w(0.0)
+        zθ0 = vcat(xθ0, xw0[3:4], w0[2:2])
+        dzθ0 = vcat(dxθ0, A*xw0[1:2] + B̃*v(0.0), C*(A*xw0[1:2] + B̃*v(0.0)))
+        v0 = v(0.)
+
+        dz10 = first((gz(x0,dx0,0.)')*zθ0)
+        dz20 = first( (gz(x0,dx0,0.)')*zθ0 - (λ(0.)')*(F̃p(x0,dx0,xw0[1:2],v0) + Fz(x0,dx0,w0[1])*zθ0 + Fdz(x0,dx0)*dzθ0))
+        dz30 = -first((λ(0.)')*F̃p(x0,dx0,xw0[1:2],v0) - ( -gz(x0,dx0,0.)' + (λ(0.)')*(Fz(x0,dx0,w0[1])-Fddz(x0,dx0)) - (dλ(0.)')*Fdz(x0,dx0) )*zθ0)
+        dz40 = -first((λ(0.)')*F̃p(x0,dx0,xw0[1:2],v0))
+        dz50 = ((x0[7]-first(y(0.)))^2)/T
+        dz60 = -first((λ(0.)')*(F̃p(x0,dx0,xw0[1:2],v0) + Fz(x0,dx0,w0[1])*zθ0 + Fdz(x0,dx0)*dzθ0))
 
         z0   = zeros(6)
         dz0  = [dz10, dz20, dz30, dz40, dz50, dz60]
