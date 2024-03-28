@@ -1,8 +1,3 @@
-# import Random
-# using DelimitedFiles
-# using Plots
-# using SparseArrays
-
 using DifferentialEquations
 using Sundials
 using ProgressMeter

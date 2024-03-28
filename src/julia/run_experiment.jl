@@ -2,6 +2,7 @@ using LsqFit, LaTeXStrings, Dates, Interpolations
 using StatsPlots # Commented out since it breaks 3d-plotting in Julia 1.5.3
 using QuadGK
 include("simulation.jl")
+include("models.jl")
 include("noise_interpolation_multivar.jl")
 include("noise_generation.jl")
 
