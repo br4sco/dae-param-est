@@ -1,4 +1,4 @@
-using LsqFit, LaTeXStrings, Dates, Interpolations
+using LsqFit, LaTeXStrings, Dates, Interpolations, DelimitedFiles
 using StatsPlots # Commented out since it breaks 3d-plotting in Julia 1.5.3
 using QuadGK
 include("simulation.jl")
@@ -48,7 +48,7 @@ const MOH_MDL  = 2
 const DELTA    = 3
 
 # Selects which model to adapt code to
-model_id = PENDULUM
+model_id = DELTA
 
 # ==================
 # === PARAMETERS ===
@@ -143,15 +143,15 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = Array{Float64}(undef, 0)#[k]# True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = [k]# True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
     const num_dyn_vars_adj = 7 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state. Though outputs are already baked in for pendulum
-    get_all_θs(pars::Vector{Float64}) = [m, L, g, k]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Vector{Float64}) = [m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [1.0]#[0.1, 1.0, 1.0, 0.1]#, 1.0, 0.1]
-    model_sens_to_use = pendulum_dist_sens_1#_sans_g_with_dist_sens_1#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    model_sens_to_use = pendulum_sensitivity_k#_sans_g_with_dist_sens_1#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly#sans_g
     model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa1#_with_dist_sens_3
@@ -187,16 +187,16 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [γ] # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [L1, M1, J1] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
-    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    get_all_θs(pars::Vector{Float64}) = [L0, pars[1], L2, L3, LC1, LC2, pars[2], M2, M3, pars[3], J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
     # dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
-    dyn_par_bounds = [0.01 1e4]
+    dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.05]
-    model_sens_to_use = delta_robot_gc_γsens
+    const_learning_rate = [0.05, 0.005, 0.005]
+    model_sens_to_use = delta_robot_gc_L1M1J1sens
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_adjoint_γonly
     model_stepbystep = delta_adj_stepbystep_NEW
@@ -228,10 +228,15 @@ elseif model_id == DELTA
     #         sin(x[1])
     #     ;;]
 
-    # Sensitivity wrt to J1 or wrt to γ or to M1, they are all the same
-    f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
-        -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
-        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;]
+    # # Sensitivity wrt to J1 or wrt to γ or to M1, they are all the same
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
+    #     -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
+    #     L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;]
+
+    # Sensitivity wrt to [L1, M1, J1]
+    f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]+0.0   L2*cos(x[2])*sin(x[3])*x[62]+L2*cos(x[3])*sin(x[2])*x[63]      L2*cos(x[2])*sin(x[3])*x[92]+L2*cos(x[3])*sin(x[2])*x[93]   
+                                                  -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]+cos(x[1])    -L1*sin(x[1])*x[61]-L2*sin(x[2])*x[62]   -L1*sin(x[1])*x[91]-L2*sin(x[2])*x[92]
+                                                   L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33]+sin(x[1])   L1*cos(x[1])*x[61]+L2*cos(x[2])*cos(x[3])*x[62]-L2*sin(x[2])*sin(x[3])*x[63]   L1*cos(x[1])*x[91]+L2*cos(x[2])*cos(x[3])*x[92]-L2*sin(x[2])*sin(x[3])*x[93]]
 
     # # DEBUG
     # f_sens(x::Vector{Float64})::Matrix{Float64} = reshape(x[31:60], 30, 1)    # DEBUG
@@ -741,14 +746,14 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown (which is zero, I never ID it)
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # Second element of c-vector unknown (all exccept first element of c-vector actually)
-    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
+    # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
@@ -1077,21 +1082,21 @@ function perform_SGD_adam_new(
         succeeded = false
         maxtries = 10
         ind = 1
-        while !succeeded && ind <= maxtries
-            try
-                grad_est = get_grad_estimate(pars, M_rate(t))
-                succeeded = true
-            catch ex
-                println("Attempt $ind failed with error:")
-                println(ex)
-                ind += 1
-            end
-        end
-        if ind == 11
-            throw(ErrorException("Failed all $maxtries attempts to obtain gradient estimate for parameter values $(pars)"))
-        end
-        # # Original way of doing it
-        # grad_est = get_grad_estimate(pars, M_rate(t))
+        # while !succeeded && ind <= maxtries
+        #     try
+        #         grad_est = get_grad_estimate(pars, M_rate(t))
+        #         succeeded = true
+        #     catch ex
+        #         println("Attempt $ind failed with error:")
+        #         println(ex)
+        #         ind += 1
+        #     end
+        # end
+        # if ind == 11
+        #     throw(ErrorException("Failed all $maxtries attempts to obtain gradient estimate for parameter values $(pars)"))
+        # end
+        # Original way of doing it
+        grad_est = get_grad_estimate(pars, M_rate(t))
 
         beta1t = betas[1]*(λ^(t-1))
         s = beta1t*s + (1-beta1t)*grad_est
@@ -1750,7 +1755,6 @@ function plot_boxplots(θs, θ0, labels)
     hline!(p, [θ0], label = L"\theta_0", linestyle = :dot, linecolor = :gray)
     savefig("C:\\Programming\\dae-param-est\\src\\julia\\data\\results\\delta_L1_k100_100\\boxplot.png")
 end
-
 
 # -------------------------------- Ultimate super-clean debugging functions --------------------------------------
 
