@@ -5,6 +5,7 @@ include("simulation.jl")
 include("models.jl")
 include("noise_interpolation_multivar.jl")
 include("noise_generation.jl")
+include("minimizers.jl")
 
 seed = 1234
 Random.seed!(seed)
@@ -157,6 +158,7 @@ if model_id == PENDULUM
     model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa1#_with_dist_sens_3
     model_stepbystep = pendulum_adj_stepbystep_NEW#pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
     model_stepbystep_dist = pendulum_adj_stepbystep_dist
+    sgd_version_to_use = perform_SGD_adam_new
     Fpk = (x, dx) -> [0.; 0.; abs(x[4])*x[4]; abs(x[5])*x[5]; 0.; 0.; 0.;;]
     Fpm = (x, dx) -> [.0; .0; dx[4]; dx[5]+g; .0; .0; .0;;]
     FpL = (x, dx) -> [ .0; .0; .0; .0; -2L; .0; .0;;]
@@ -181,25 +183,28 @@ elseif model_id == MOH_MDL
     model_to_use = model_mohamed
     model_adj_to_use = mohamed_adjoint_new
     model_stepbystep = mohamed_stepbystep
+    sgd_version_to_use = perform_SGD_adam_new
 
     f(x::Vector{Float64}) = x[1]#x[2]
     # f_sens should return a matrix/column vector with each row corresponding to a different output component and each column corresponding to a different parameter
     f_sens(x::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [L1, M1, J1] # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
-    get_all_θs(pars::Vector{Float64}) = [L0, pars[1], L2, L3, LC1, LC2, pars[2], M2, M3, pars[3], J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    get_all_θs(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, pars[1], M2, M3, J1, J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
     # dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
-    dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
-    @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.05, 0.005, 0.005]
-    model_sens_to_use = delta_robot_gc_L1M1J1sens
+    dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
+    dyn_par_bounds[2:3,:] = [0.01   1.6; 1.89   1e4] # Setting bounds for L1 and L2
+    @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
+    const_learning_rate = [0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
+    model_sens_to_use = delta_robot_gc_M1sens
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_adjoint_γonly
     model_stepbystep = delta_adj_stepbystep_NEW
+    sgd_version_to_use = perform_SGD_adam_new_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Only used for adjoint debugging purposes
     FpL1 = (x, dx) -> [cos(x[1])*dx[27]+cos(x[1])*dx[30]-sin(x[1])*dx[26]-sin(x[1])*dx[29]; 0.0; 0.0; -cos(x[4])*dx[27]-(sin(x[4])*dx[26])*0.5-(sqrt(3)*sin(x[4])*dx[25])*0.5; 0.0; 0.0; (sqrt(3)*sin(x[7])*dx[28])*0.5-(sin(x[7])*dx[29])*0.5-cos(x[7])*dx[30]; 0.0; 0.0; sin(x[1])*dx[20]-cos(x[1])*dx[24]-cos(x[1])*dx[21]+sin(x[1])*dx[23]-0.0*cos(x[1])*(M2+M3)+dx[11]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+2*L1*dx[10]*(M2+M3)+x[11]^2*(L2*M3+LC2*M2)*(cos(x[2])*sin(x[1])-cos(x[1])*cos(x[3])*sin(x[2]))-cos(x[1])*sin(x[2])*sin(x[3])*dx[12]*(L2*M3+LC2*M2)-cos(x[1])*cos(x[3])*sin(x[2])*x[12]^2*(L2*M3+LC2*M2)-2*cos(x[1])*cos(x[2])*sin(x[3])*x[11]*x[12]*(L2*M3+LC2*M2); dx[10]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+x[10]^2*(L2*M3+LC2*M2)*(cos(x[1])*sin(x[2])-cos(x[2])*cos(x[3])*sin(x[1])); sin(x[1])*sin(x[2])*sin(x[3])*x[10]^2*(L2*M3+LC2*M2)-cos(x[1])*sin(x[2])*sin(x[3])*dx[10]*(L2*M3+LC2*M2); cos(x[4])*dx[21]+(sin(x[4])*dx[20])*0.5-0.0*cos(x[4])*(M2+M3)+dx[14]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+2*L1*dx[13]*(M2+M3)+x[14]^2*(L2*M3+LC2*M2)*(cos(x[5])*sin(x[4])-cos(x[4])*cos(x[6])*sin(x[5]))+(sqrt(3)*sin(x[4])*dx[19])*0.5-cos(x[4])*sin(x[5])*sin(x[6])*dx[15]*(L2*M3+LC2*M2)-cos(x[4])*cos(x[6])*sin(x[5])*x[15]^2*(L2*M3+LC2*M2)-2*cos(x[4])*cos(x[5])*sin(x[6])*x[14]*x[15]*(L2*M3+LC2*M2); dx[13]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+x[13]^2*(L2*M3+LC2*M2)*(cos(x[4])*sin(x[5])-cos(x[5])*cos(x[6])*sin(x[4])); sin(x[4])*sin(x[5])*sin(x[6])*x[13]^2*(L2*M3+LC2*M2)-cos(x[4])*sin(x[5])*sin(x[6])*dx[13]*(L2*M3+LC2*M2); cos(x[7])*dx[24]+(sin(x[7])*dx[23])*0.5-0.0*cos(x[7])*(M2+M3)+dx[17]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+2*L1*dx[16]*(M2+M3)+x[17]^2*(L2*M3+LC2*M2)*(cos(x[8])*sin(x[7])-cos(x[7])*cos(x[9])*sin(x[8]))-(sqrt(3)*sin(x[7])*dx[22])*0.5-cos(x[7])*sin(x[8])*sin(x[9])*dx[18]*(L2*M3+LC2*M2)-cos(x[7])*cos(x[9])*sin(x[8])*x[18]^2*(L2*M3+LC2*M2)-2*cos(x[7])*cos(x[8])*sin(x[9])*x[17]*x[18]*(L2*M3+LC2*M2); dx[16]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+x[16]^2*(L2*M3+LC2*M2)*(cos(x[7])*sin(x[8])-cos(x[8])*cos(x[9])*sin(x[7])); sin(x[7])*sin(x[8])*sin(x[9])*x[16]^2*(L2*M3+LC2*M2)-cos(x[7])*sin(x[8])*sin(x[9])*dx[16]*(L2*M3+LC2*M2); (sqrt(3)*cos(x[4]))*0.5; cos(x[1])+cos(x[4])*0.5; sin(x[1])-sin(x[4]); -(sqrt(3)*cos(x[7]))*0.5; cos(x[1])+cos(x[7])*0.5; sin(x[1])-sin(x[7]); -(sqrt(3)*sin(x[4])*x[13])*0.5; -sin(x[1])*x[10]-(sin(x[4])*x[13])*0.5; cos(x[1])*x[10]-cos(x[4])*x[13]; (sqrt(3)*sin(x[7])*x[16])*0.5; -sin(x[1])*x[10]-(sin(x[7])*x[16])*0.5; cos(x[1])*x[10]-cos(x[7])*x[16]; 0.0; -cos(x[1]); -sin(x[1]);;]
     Fpγ  = (x, dx) -> [0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; x[10]; x[11]; x[12]; x[13]; x[14]; x[15]; x[16]; x[17]; x[18]; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0]
@@ -218,6 +223,17 @@ elseif model_id == DELTA
     # f_sens should return a matrix with each row corresponding to a different output component and each column corresponding to a different parameter
     ##################################################################################################################################################
 
+    # sans_p-part
+    f_sens_base(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
+                                                        -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
+                                                        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;]
+    # p-parts
+    f_sens_L0(x::Vector{Float64})::Matrix{Float64} = [0.0; 1.0; 0.0;;]
+    f_sens_L1(x::Vector{Float64})::Matrix{Float64} = [0.0; cos(x[1]); sin(x[1]);;]
+    f_sens_L2(x::Vector{Float64})::Matrix{Float64} = [sin(x[2])*sin(x[3]); cos(x[2]); cos(x[3])*sin(x[2]);;]
+    f_sens_L3(x::Vector{Float64})::Matrix{Float64} = [0.0; -1.0; 0.0;;]
+    f_sens_other(x::Vector{Float64})::Matrix{Float64} = zeros(3,1)
+
     # # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
     # f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
     #     -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
@@ -227,16 +243,23 @@ elseif model_id == DELTA
     #         cos(x[1])
     #         sin(x[1])
     #     ;;]
+    # # NEW
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_L1(x)
 
-    # # Sensitivity wrt to J1 or wrt to γ or to M1, they are all the same
+    # Sensitivity wrt to whichever parameter except L0, L1, L2, L3, all others are the same
     # f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
     #     -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
     #     L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;]
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_other(x)
 
-    # Sensitivity wrt to [L1, M1, J1]
-    f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]+0.0   L2*cos(x[2])*sin(x[3])*x[62]+L2*cos(x[3])*sin(x[2])*x[63]      L2*cos(x[2])*sin(x[3])*x[92]+L2*cos(x[3])*sin(x[2])*x[93]   
-                                                  -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]+cos(x[1])    -L1*sin(x[1])*x[61]-L2*sin(x[2])*x[62]   -L1*sin(x[1])*x[91]-L2*sin(x[2])*x[92]
-                                                   L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33]+sin(x[1])   L1*cos(x[1])*x[61]+L2*cos(x[2])*cos(x[3])*x[62]-L2*sin(x[2])*sin(x[3])*x[63]   L1*cos(x[1])*x[91]+L2*cos(x[2])*cos(x[3])*x[92]-L2*sin(x[2])*sin(x[3])*x[93]]
+    # # Sensitivity wrt to [L1, M1, J1]
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]+0.0   L2*cos(x[2])*sin(x[3])*x[62]+L2*cos(x[3])*sin(x[2])*x[63]      L2*cos(x[2])*sin(x[3])*x[92]+L2*cos(x[3])*sin(x[2])*x[93]   
+    #                                               -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]+cos(x[1])    -L1*sin(x[1])*x[61]-L2*sin(x[2])*x[62]   -L1*sin(x[1])*x[91]-L2*sin(x[2])*x[92]
+    #                                                L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33]+sin(x[1])   L1*cos(x[1])*x[61]+L2*cos(x[2])*cos(x[3])*x[62]-L2*sin(x[2])*sin(x[3])*x[63]   L1*cos(x[1])*x[91]+L2*cos(x[2])*cos(x[3])*x[92]-L2*sin(x[2])*sin(x[3])*x[93]]
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x),1,3) + hcat(f_sens_L1(x), f_sens_other(x), f_sens_other(x))
+
+    # Sensitivity wrt to all parameters
+    f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x), 1, 12) + hcat(f_sens_L0(x), f_sens_L1(x), f_sens_L2(x), f_sens_L3(x), repeat(f_sens_other(x), 1, 8))
 
     # # DEBUG
     # f_sens(x::Vector{Float64})::Matrix{Float64} = reshape(x[31:60], 30, 1)    # DEBUG
@@ -622,12 +645,13 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         @warn "Only using maxiters=200 right now"
         if num_stacks == 1
             opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-                perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
+                sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
         else#if num_stacks>1
             opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-                perform_SGD_adam_new((free_pars, M_mean) -> get_gradient_estimate_p_stacked(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
+                sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p_stacked(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
         end
 
+        # @warn "NOT WRITING BACKUPS RIGHT NOW!"
         writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
         writedlm(joinpath(data_dir, "tmp/backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
         writedlm(joinpath(data_dir, "tmp/backup_trace_e$e.csv"), trace_proposed[e], ',')
@@ -1002,135 +1026,6 @@ function get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
     # @warn "Using x_tol = 1e-12 instead of default 1e-8"
     fit_result, trace = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default: inplace = false, x_tol = 1e-8
     return fit_result, trace
-end
-
-function perform_SGD_adam(
-    get_grad_estimate::Function,
-    pars0::Vector{Float64},                        # Initial guess for parameters
-    bounds::Matrix{Float64},                      # Parameter bounds
-    learning_rate::Function=learning_rate_vec;
-    tol::Float64=1e-6,
-    maxiters=200,
-    verbose=false,
-    betas::Vector{Float64} = [0.9, 0.999])   # betas are the decay parameters of moment estimates
-    # betas::Vector{Float64} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
-
-    eps = 0.#1e-8
-    q = 20  # TODO: This is a little arbitrary, but because of low tolerance, the stopping criterion is never reached anyway
-    last_q_norms = fill(Inf, q)
-    running_criterion() = mean(last_q_norms) > tol
-    s = zeros(size(pars0)) # First moment estimate
-    r = zeros(size(pars0)) # Second moment estimate
-
-    t = 1
-    pars = pars0
-    trace = [pars]
-    grad_trace = []
-    while t <= maxiters
-        grad_est = get_grad_estimate(pars, M_rate(t))
-
-        s = betas[1]*s + (1-betas[1])*grad_est
-        r = betas[2]*r + (1-betas[2])*(grad_est.^2)
-        shat = s/(1-betas[1]^t)
-        rhat = r/(1-betas[2]^t)
-        step = -learning_rate(t, norm(grad_est)).*shat./(sqrt.(rhat).+eps)
-        # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
-        # running_criterion(grad_est) || break
-        if verbose
-            println("Iteration $t, average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
-        end
-        running_criterion() || break
-        pars = pars + step
-        project_on_bounds!(pars, bounds)
-        push!(trace, pars)
-        push!(grad_trace, grad_est)
-        # (t-1)%10+1 maps t to a number between 1 and 10 (inclusive)
-        last_q_norms[(t-1)%q+1] = norm(grad_est)
-        t += 1
-    end
-    return pars, trace, grad_trace
-end
-
-# Also adds time-varying beta_1, dependent on the new hyper-parameter λ
-function perform_SGD_adam_new(
-    get_grad_estimate::Function,
-    pars0::Vector{Float64},                        # Initial guess for parameters
-    bounds::Matrix{Float64},                      # Parameter bounds
-    learning_rate::Function=learning_rate_vec_red;
-    tol::Float64=1e-6,
-    maxiters=200,
-    verbose=false,
-    betas::Vector{Float64} = [0.9, 0.999],
-    # λ = 0.5)   # betas are the decay parameters of moment estimates   # NOTE: I used to use this, then I started deubbing adjoint on 17/10/2023
-    λ = 1-1e-4)   # betas are the decay parameters of moment estimates
-    # betas::Vector{Float64} = [0.5, 0.999])   # betas are the decay parameters of moment estimates
-
-    eps = 0.#1e-8
-    q = 20# TODO: This is a little arbitrary, but because of low tolerance, the stopping criterion is never reached anyway
-    last_q_norms = fill(Inf, q)
-    running_criterion() = mean(last_q_norms) > tol
-    s = zeros(size(pars0)) # First moment estimate
-    r = zeros(size(pars0)) # Second moment estimate
-
-    t = 1
-    pars = pars0
-    trace = [pars]
-    grad_trace = []
-    while t <= maxiters
-        # New way, of repeating simulation on convergence failure
-        grad_est = zeros(size(pars0))
-        succeeded = false
-        maxtries = 10
-        ind = 1
-        # while !succeeded && ind <= maxtries
-        #     try
-        #         grad_est = get_grad_estimate(pars, M_rate(t))
-        #         succeeded = true
-        #     catch ex
-        #         println("Attempt $ind failed with error:")
-        #         println(ex)
-        #         ind += 1
-        #     end
-        # end
-        # if ind == 11
-        #     throw(ErrorException("Failed all $maxtries attempts to obtain gradient estimate for parameter values $(pars)"))
-        # end
-        # Original way of doing it
-        grad_est = get_grad_estimate(pars, M_rate(t))
-
-        beta1t = betas[1]*(λ^(t-1))
-        s = beta1t*s + (1-beta1t)*grad_est
-        r = betas[2]*r + (1-betas[2])*(grad_est.^2)
-        shat = s/(1-betas[1]^t) # Seems like betas[1] should be used instead of beta1t here
-        rhat = r/(1-betas[2]^t)
-        unscaled_step = -shat./(sqrt.(rhat).+eps)
-        step = learning_rate(t, norm(grad_est)).*unscaled_step
-        # step = -learning_rate_vec_red(t, norm(grad_est)).*shat./(sqrt.(rhat).+eps)
-        # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
-        # running_criterion(grad_est) || break
-        if verbose
-            println("Iteration $t, average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
-        end
-        running_criterion() || break
-        pars = pars + step
-        project_on_bounds!(pars, bounds)
-        push!(trace, pars)
-        push!(grad_trace, grad_est)
-        # (t-1)%10+1 maps t to a number between 1 and 10 (inclusive)
-        last_q_norms[(t-1)%q+1] = norm(grad_est)
-        t += 1
-    end
-    return pars, trace, grad_trace
-end
-
-# Row i of bounds should have two columns, where first element is lower bound
-# for parameter i, and second element is upper bound for parameter i
-function project_on_bounds!(vec::Vector{Float64}, bounds::Matrix{Float64})
-    low_inds = findall(vec .< bounds[:,1])
-    high_inds = findall(vec .> bounds[:,2])
-    vec[low_inds] = bounds[low_inds, 1]
-    vec[high_inds] = bounds[high_inds, 2]
-    nothing
 end
 
 # Simulates system with specified white noise
