@@ -195,12 +195,13 @@ elseif model_id == DELTA
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     get_all_θs(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, pars[1], M2, M3, J1, J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
-    # dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
+    # OLD: dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
     dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
-    dyn_par_bounds[2:3,:] = [0.01   1.6; 1.89   1e4] # Setting bounds for L1 and L2
+    dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
     const_learning_rate = [0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
-    model_sens_to_use = delta_robot_gc_M1sens
+    model_sens_to_use = delta_robot_gc_allparsens
+    # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_adjoint_γonly
     model_stepbystep = delta_adj_stepbystep_NEW

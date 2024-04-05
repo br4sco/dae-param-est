@@ -180,7 +180,7 @@ function perform_SGD_adam_new_deltaversion(
         end
         running_criterion() || break
         pars = pars + step
-        bounds[4,:] = [pars[1]-0.504, pars[1]] # Constraints L0-0.504 <= L3 <= L0
+        bounds[4,:] = [max(pars[1]-pars[3], 0.01), pars[1]+pars[3]] # Constrains max(0.01, L0-L2) <= L3 <= L0+L2
         project_on_bounds!(pars, bounds)
         push!(trace, pars)
         push!(grad_trace, grad_est)
