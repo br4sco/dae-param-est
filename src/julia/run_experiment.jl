@@ -190,22 +190,21 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
-    get_all_θs(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, pars[1], M2, M3, J1, J2, g, γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    # NOTE: These bounds on L1 are set so that L1 is consistent with initial state of delta robot. If the initial state is changed, the consistent interval for L1 will also change
-    # OLD: dyn_par_bounds = [2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01] # I had to tighten the bounds a little, here with 0.01, to avoid numerical issues at boundary
-    dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
-    dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    dyn_par_bounds = [0.01 1e4]
+    # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
+    # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
-    const_learning_rate = [0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
-    model_sens_to_use = delta_robot_gc_allparsens
+    const_learning_rate = [0.05]#[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
+    model_sens_to_use = delta_robot_gc_γsens#delta_robot_gc_allparsens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_adjoint_γonly
     model_stepbystep = delta_adj_stepbystep_NEW
-    sgd_version_to_use = perform_SGD_adam_new_deltaversion  # Needs to update bounds of L3 dynamically based on L0
+    sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Only used for adjoint debugging purposes
     FpL1 = (x, dx) -> [cos(x[1])*dx[27]+cos(x[1])*dx[30]-sin(x[1])*dx[26]-sin(x[1])*dx[29]; 0.0; 0.0; -cos(x[4])*dx[27]-(sin(x[4])*dx[26])*0.5-(sqrt(3)*sin(x[4])*dx[25])*0.5; 0.0; 0.0; (sqrt(3)*sin(x[7])*dx[28])*0.5-(sin(x[7])*dx[29])*0.5-cos(x[7])*dx[30]; 0.0; 0.0; sin(x[1])*dx[20]-cos(x[1])*dx[24]-cos(x[1])*dx[21]+sin(x[1])*dx[23]-0.0*cos(x[1])*(M2+M3)+dx[11]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+2*L1*dx[10]*(M2+M3)+x[11]^2*(L2*M3+LC2*M2)*(cos(x[2])*sin(x[1])-cos(x[1])*cos(x[3])*sin(x[2]))-cos(x[1])*sin(x[2])*sin(x[3])*dx[12]*(L2*M3+LC2*M2)-cos(x[1])*cos(x[3])*sin(x[2])*x[12]^2*(L2*M3+LC2*M2)-2*cos(x[1])*cos(x[2])*sin(x[3])*x[11]*x[12]*(L2*M3+LC2*M2); dx[10]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+x[10]^2*(L2*M3+LC2*M2)*(cos(x[1])*sin(x[2])-cos(x[2])*cos(x[3])*sin(x[1])); sin(x[1])*sin(x[2])*sin(x[3])*x[10]^2*(L2*M3+LC2*M2)-cos(x[1])*sin(x[2])*sin(x[3])*dx[10]*(L2*M3+LC2*M2); cos(x[4])*dx[21]+(sin(x[4])*dx[20])*0.5-0.0*cos(x[4])*(M2+M3)+dx[14]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+2*L1*dx[13]*(M2+M3)+x[14]^2*(L2*M3+LC2*M2)*(cos(x[5])*sin(x[4])-cos(x[4])*cos(x[6])*sin(x[5]))+(sqrt(3)*sin(x[4])*dx[19])*0.5-cos(x[4])*sin(x[5])*sin(x[6])*dx[15]*(L2*M3+LC2*M2)-cos(x[4])*cos(x[6])*sin(x[5])*x[15]^2*(L2*M3+LC2*M2)-2*cos(x[4])*cos(x[5])*sin(x[6])*x[14]*x[15]*(L2*M3+LC2*M2); dx[13]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+x[13]^2*(L2*M3+LC2*M2)*(cos(x[4])*sin(x[5])-cos(x[5])*cos(x[6])*sin(x[4])); sin(x[4])*sin(x[5])*sin(x[6])*x[13]^2*(L2*M3+LC2*M2)-cos(x[4])*sin(x[5])*sin(x[6])*dx[13]*(L2*M3+LC2*M2); cos(x[7])*dx[24]+(sin(x[7])*dx[23])*0.5-0.0*cos(x[7])*(M2+M3)+dx[17]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+2*L1*dx[16]*(M2+M3)+x[17]^2*(L2*M3+LC2*M2)*(cos(x[8])*sin(x[7])-cos(x[7])*cos(x[9])*sin(x[8]))-(sqrt(3)*sin(x[7])*dx[22])*0.5-cos(x[7])*sin(x[8])*sin(x[9])*dx[18]*(L2*M3+LC2*M2)-cos(x[7])*cos(x[9])*sin(x[8])*x[18]^2*(L2*M3+LC2*M2)-2*cos(x[7])*cos(x[8])*sin(x[9])*x[17]*x[18]*(L2*M3+LC2*M2); dx[16]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+x[16]^2*(L2*M3+LC2*M2)*(cos(x[7])*sin(x[8])-cos(x[8])*cos(x[9])*sin(x[7])); sin(x[7])*sin(x[8])*sin(x[9])*x[16]^2*(L2*M3+LC2*M2)-cos(x[7])*sin(x[8])*sin(x[9])*dx[16]*(L2*M3+LC2*M2); (sqrt(3)*cos(x[4]))*0.5; cos(x[1])+cos(x[4])*0.5; sin(x[1])-sin(x[4]); -(sqrt(3)*cos(x[7]))*0.5; cos(x[1])+cos(x[7])*0.5; sin(x[1])-sin(x[7]); -(sqrt(3)*sin(x[4])*x[13])*0.5; -sin(x[1])*x[10]-(sin(x[4])*x[13])*0.5; cos(x[1])*x[10]-cos(x[4])*x[13]; (sqrt(3)*sin(x[7])*x[16])*0.5; -sin(x[1])*x[10]-(sin(x[7])*x[16])*0.5; cos(x[1])*x[10]-cos(x[7])*x[16]; 0.0; -cos(x[1]); -sin(x[1]);;]
     Fpγ  = (x, dx) -> [0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; x[10]; x[11]; x[12]; x[13]; x[14]; x[15]; x[16]; x[17]; x[18]; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0]
@@ -251,7 +250,7 @@ elseif model_id == DELTA
     # f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
     #     -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
     #     L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;]
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_other(x)
+    f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_other(x)
 
     # # Sensitivity wrt to [L1, M1, J1]
     # f_sens(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]+0.0   L2*cos(x[2])*sin(x[3])*x[62]+L2*cos(x[3])*sin(x[2])*x[63]      L2*cos(x[2])*sin(x[3])*x[92]+L2*cos(x[3])*sin(x[2])*x[93]   
@@ -259,8 +258,8 @@ elseif model_id == DELTA
     #                                                L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33]+sin(x[1])   L1*cos(x[1])*x[61]+L2*cos(x[2])*cos(x[3])*x[62]-L2*sin(x[2])*sin(x[3])*x[63]   L1*cos(x[1])*x[91]+L2*cos(x[2])*cos(x[3])*x[92]-L2*sin(x[2])*sin(x[3])*x[93]]
     # f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x),1,3) + hcat(f_sens_L1(x), f_sens_other(x), f_sens_other(x))
 
-    # Sensitivity wrt to all parameters
-    f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x), 1, 12) + hcat(f_sens_L0(x), f_sens_L1(x), f_sens_L2(x), f_sens_L3(x), repeat(f_sens_other(x), 1, 8))
+    # # Sensitivity wrt to all parameters
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x), 1, 12) + hcat(f_sens_L0(x), f_sens_L1(x), f_sens_L2(x), f_sens_L3(x), repeat(f_sens_other(x), 1, 8))
 
     # # DEBUG
     # f_sens(x::Vector{Float64})::Matrix{Float64} = reshape(x[31:60], 30, 1)    # DEBUG
@@ -566,9 +565,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         return get_Gp(adj_sol)
     end
 
-    # TODO: Here you have M÷2 hard-coded, while forward sense uses a M_mean variable. Make sure they match right now.
     function get_gradient_adjoint(y, free_pars, compute_Gp, M_mean::Int=1)
-        Zm = [randn(Nw, n_tot) for m = 1:M]
+        Zm = [randn(Nw, n_tot) for m = 1:2M_mean]
         W_meta = exp_data.W_meta
         nx = W_meta.nx
         n_out = W_meta.n_out
@@ -586,7 +584,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         dy_est  = (y[y_len+1:end,1]-y[1:end-y_len,1])/Ts
         dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
         sampling_ratio = Int(Ts/Tsλ)
-        solve_func(m) = solve_sens_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug
+        solve_func(m) = solve_sens_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug_with_sens  # NOTE: TODO: THE NUMBER OF TIME SAMPLES RETURNED BY THIS SOLVE SEEMS VERY WEIRD!
         Xcomp_m, _, _ = solve_in_parallel_sens_debug(m -> solve_func(m), 1:2M_mean, 7, 14:14, sampling_ratio)
         # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
         # mean(temp, dims=2)[:]
@@ -627,7 +625,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
     # TODO: It seems it might be get_gradient_adjoint() that results in warning "Using arrays or dicts to store parameters of different types can hurt performance". Fix it?
-    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)#get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)# get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
     # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
 
     get_gradient_estimate_p_stacked(free_pars, M_mean, e) = get_gradient_estimate_stacked(vcat([Y[:,(ind-1)*E+e] for ind=1:num_stacks]...), free_pars, isws, M_mean, num_stacks)
@@ -646,10 +644,10 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         @warn "Only using maxiters=200 right now"
         if num_stacks == 1
             opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-                sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
+                sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
         else#if num_stacks>1
             opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-                sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p_stacked(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=200)
+                sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p_stacked(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
         end
 
         # @warn "NOT WRITING BACKUPS RIGHT NOW!"
@@ -1138,6 +1136,20 @@ function simulate_system_sens(
     Nw = exp_data.Nw
     Zm = [randn(Nw, n_tot) for m = 1:M]
     simulate_system_sens(exp_data, free_pars, M, dist_sens_inds, isws, Zm)
+end
+
+function write_results_to_file(path::String, opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, durations)
+    # To make a trace-file with E = 1 readable by readdlm, replace all
+    # "]," with "\n" and all "[" by "", and lastly "]" by ""
+    writedlm(path*"opt_pars_baseline.csv", opt_pars_baseline, ',')
+    writedlm(path*"opt_pars_proposed.csv", opt_pars_proposed, ',')
+    writedlm(path*"avg_pars_proposed.csv", avg_pars_proposed, ',')
+    writedlm(path*"trace_base.csv", trace_base, ',')
+    writedlm(path*"trace_proposed.csv", trace_proposed, ',')
+    writedlm(path*"trace_gradient.csv", trace_gradient, ',')
+    writedlm(path*"setup_duration.csv", Dates.value(durations[1]), ',')
+    writedlm(path*"baseline_durations.csv", Dates.value.(durations[2]), ',')
+    writedlm(path*"proposed_durations.csv", Dates.value.(durations[3]), ',')
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================

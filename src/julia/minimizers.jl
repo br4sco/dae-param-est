@@ -90,7 +90,7 @@ function perform_SGD_adam_new(
         #     throw(ErrorException("Failed all $maxtries attempts to obtain gradient estimate for parameter values $(pars)"))
         # end
         # Original way of doing it
-        grad_est = get_grad_estimate(pars, M_rate(t))
+        grad_est = get_grad_estimate(pars, M_rate(t))   # TODO: THIS USES GLOBAL FUNCTION M_rate(t), ISN'T THAT A WEIRD CHOICE?
 
         beta1t = betas[1]*(λ^(t-1))
         s = beta1t*s + (1-beta1t)*grad_est
