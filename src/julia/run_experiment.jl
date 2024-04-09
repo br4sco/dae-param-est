@@ -577,7 +577,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     end
 
     function get_gradient_adjoint_distsens(y, free_pars, compute_Gp, M_mean::Int=1)
-        Zm = [randn(Nw, n_tot) for _ = 1:M]
+        Zm = [randn(Nw, n_tot) for _ = 1:2M_mean]
         W_meta = exp_data.W_meta
         nx = W_meta.nx
         n_out = W_meta.n_out
@@ -609,9 +609,13 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
 
+    # NOTE: About adjoint method and num_stacks: We can simply multiply M by num_stacks to achieve the same effect as if we obtained Gp by averaging the
+    # gradient obtained from every data-set in the stack. This is because the final Gp is anyway obtained by averaging over all M, so it doesn't matter if we
+    # average over M averages, or if we just average once over M*num_stacks gradients
+
     # TODO: It seems it might be get_gradient_adjoint() that results in warning "Using arrays or dicts to store parameters of different types can hurt performance". Fix it?
-    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)# get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean)
-    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
+    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)# get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean*num_stacks)
+    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean*num_stacks)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
 
     get_gradient_estimate_p_stacked(free_pars, M_mean, e) = get_gradient_estimate_stacked(vcat([Y[:,(ind-1)*E+e] for ind=1:num_stacks]...), free_pars, isws, M_mean, num_stacks)
 

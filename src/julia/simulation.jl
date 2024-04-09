@@ -90,6 +90,7 @@ function solve_in_parallel_block(solve, is, k)
     return Y
 end
 
+# Returns matrix, with np rows and M columns
 function solve_adj_in_parallel(solve, is)
   M = length(is)
   p = Progress(M, 1, "Running $(M) simulations...", 50)
@@ -153,19 +154,20 @@ function solve_in_parallel_sens_debug(solve, is, yind, sensinds, sampling_ratio)
     matout, Y, sens
 end
 
-# NOTE: Not updated according to new principles, I'm not even sure if it's used anymore
+# NOTE: This has a very similar structure to solve_in_parallel_sens_debug, but implemented a little differently. Might be worth at some occation
+# to evaluate which function is better written and make sure to write the two in a similar way
 function solve_in_parallel_debug(solve, is, yind, sampling_ratio)
     M = length(is)
     p = Progress(M, 1, "Running $(M) simulations...", 50)
-    out = solve(is[1])
+    # the rows of out correspond to different times, and the columns to different state components
+    out = transpose(hcat(solve(is[1])...))
     matout = [Matrix{Float64}(undef, size(out)) for m=1:M]
     Y = zeros(size(out[1:sampling_ratio:end,:], 1), M)
-    # sens = zeros(size(out,1), M)
     matout[1] = out
     Y[:,1]    = out[1:sampling_ratio:end, yind]
     next!(p)
     Threads.@threads for m = 2:M
-        out = solve(is[m])
+        out = transpose(hcat(solve(is[m])...))
         matout[m] = out
         Y[:,m]  = out[1:sampling_ratio:end, yind]
         next!(p)

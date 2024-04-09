@@ -1,5 +1,7 @@
 include("Model_type.jl")
 
+################################ DELTA ROBOT MODELS ################################
+
 function delta_robot(Φ::Float64, u::Function, w::Function, θ::Vector{Float64})::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = θ[12], γ = θ[13]
         pole = 5
@@ -1852,6 +1854,8 @@ function delta_adj_stepbystep_NEW(Φ::Float64, u::Function, w::Function, θ::Vec
     end
 end
 
+################################ DELTA ROBOT INITIALIZATIONS ################################
+
 function get_delta_initial_L0sensonly(θ, z, dz, H, m1, m2, m3, HinvM, cgBu)
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
 
@@ -3311,6 +3315,8 @@ function get_delta_initial_comp_with_mats(θ, u0, w0)
         return z, dz, H, m1, m2, m3, HinvM, cgBu
     end
 end
+
+################################ PENDULUM MODELS ################################
 
 function pendulum_new(Φ::Float64, u::Function, w::Function, θ::Vector{Float64})::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -7206,6 +7212,8 @@ function pendulum_adj_stepbystep_dist(u::Function, w::Function, xw::Function, v:
         Model(f!, t -> 0.0, z0, dz0, dvars, r0)
     end
 end
+
+################################ MISCELLAENOUS MODELS ################################
 
 function model_mohamed(Φ::Float64, u::Function, w::Function, θ::Vector{Float64})
     # NOTE: Φ not used, just passed to have consistent interface
