@@ -290,7 +290,7 @@ const maxiters = Int64(1e8)
 
 solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
   realize_model_sens(u, w, free_dyn_pars, N),
-  saveat = 0:Ts:(N*Ts),
+  saveat = 0:Ts:N*Ts,
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
@@ -298,7 +298,7 @@ solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kw
 )
 solve_sens_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, myTs::Float64; kwargs...) = solve(
   realize_model_sens(u, w, free_dyn_pars, N),
-  saveat = 0:myTs:(N*Ts-0.00001),
+  saveat = 0:myTs:N*Ts,
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
@@ -314,7 +314,7 @@ solvew(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs.
 )
 solve_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, myTs::Float64; kwargs...) = solve(
     realize_model(u, w, free_dyn_pars, N),
-    saveat = 0:myTs:(N*Ts-0.00001),
+    saveat = 0:myTs:N*Ts,
     abstol = abstol,
     reltol = reltol,
     maxiters = maxiters;
@@ -331,7 +331,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     u = exp_data.u
     Y = exp_data.Y
     # TODO: Is this stacked way of saving multidimensional Y really the best? Maybe
-    N = size(Y,1)÷y_len-1    # TODO: This -1 is rly because I generate too few samples, we want this N to turn out e.g. equal to 100 but it ends up being 99
+    N = size(Y,1)÷y_len-1
     Nw = exp_data.Nw
     nx = W_meta.nx
     n_in = W_meta.n_in
@@ -640,7 +640,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
-        @warn "Only using maxiters=200 right now"
+        @warn "Only using maxiters=100 right now"
         if num_stacks == 1
             opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
                 sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
@@ -797,7 +797,7 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
                     # ends, so we require a margin of a few samples of the noise
                     # to ensure that we can provide such values. EDIT: TODO: Do we really? Or was this just because of your poorly implemented interpolation? Let's try having margin 0
     Nw = size(input, 1)÷n_in
-    N = Int((Nw - N_margin)*δ÷Ts)÷y_len     # Number of steps we can take
+    N = Int((Nw - N_margin)*δ/Ts)÷y_len     # Number of steps we can take
     W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds, num_rel)
 
     # u(t::Float64) = sin(t)*ones(3)
@@ -930,15 +930,22 @@ function mk_noise_interp(C::Matrix{Float64},
                          δ::Float64)
     let
         n_tot = size(C, 2)
+        n_max = size(XW,1)÷n_tot-1
         function xw(t::Float64)
             # n*δ <= t <= (n+1)*δ
             n = Int(t÷δ)
-            # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
-            k = n * n_tot + 1
+            if n >= n_max
+                # The disturbance only has samples from t=0.0 to t=N*Ts-δ. 
+                # The requested t was large enough to t=N*Ts that we must return last sample of disturbance instead of interpolating
+                return C*XW[end-n_tot+1:end, m]
+            else
+                # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
+                k = n * n_tot + 1
 
-            xl = XW[k:(k + n_tot - 1), m]
-            xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
-            return C*(xl + (t-n*δ)*(xu-xl)/δ)
+                xl = XW[k:(k + n_tot - 1), m]
+                xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+                return C*(xl + (t-n*δ)*(xu-xl)/δ)
+            end
         end
     end
 end
@@ -950,15 +957,22 @@ function mk_xw_interp(C::Matrix{Float64},
 
     let
         n_tot = size(C, 2)
+        n_max = size(XW,1)÷n_tot-1
         function xw(t::Float64)
             # n*δ <= t <= (n+1)*δ
             n = Int(t÷δ)
-            # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
-            k = n * n_tot + 1
+            if n >= n_max
+                # The disturbance only has samples from t=0.0 to t=N*Ts-δ. 
+                # The requested t was large enough to t=N*Ts that we must return last sample of disturbance instead of interpolating
+                return XW[end-n_tot+1:end, m]
+            else
+                # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
+                k = n * n_tot + 1
 
-            xl = XW[k:(k + n_tot - 1), m]
-            xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
-            return (xl + (t-n*δ)*(xu-xl)/δ)
+                xl = XW[k:(k + n_tot - 1), m]
+                xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+                return (xl + (t-n*δ)*(xu-xl)/δ)
+            end
         end
     end
 end
