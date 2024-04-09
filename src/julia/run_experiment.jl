@@ -622,6 +622,16 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     trace_step     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
     trace_lrate     = [ [Float64[]] for e=1:E]        ## DEBUG!!!!!
     proposed_durations = Array{Millisecond, 1}(undef, E)
+
+    # # Use this block of code to move random number generator forward exactly as if experiments 1:e_skip had been performed
+    # # This allows for exact reproducibility of any experiment, regardless of which experiment we start with
+    # e_skip = 2
+    # for t=1:5*e_skip# 1:maxiters
+    #     for m=1:2M_rate(t)
+    #         randn(Nw, n_tot)
+    #     end
+    # end
+
     # @warn "Not running proposed identification now"
     for e=1:E
         time_start = now()
