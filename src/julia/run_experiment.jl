@@ -156,9 +156,11 @@ if model_id == PENDULUM
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly#sans_g
     model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa1#_with_dist_sens_3
+    sgd_version_to_use = perform_SGD_adam_new
+    # Models for debug:
     model_stepbystep = pendulum_adj_stepbystep_NEW#pendulum_adj_stepbystep_k#pendulum_adj_stepbystep_deb
     model_stepbystep_dist = pendulum_adj_stepbystep_dist
-    sgd_version_to_use = perform_SGD_adam_new
+
     Fpk = (x, dx) -> [0.; 0.; abs(x[4])*x[4]; abs(x[5])*x[5]; 0.; 0.; 0.;;]
     Fpm = (x, dx) -> [.0; .0; dx[4]; dx[5]+g; .0; .0; .0;;]
     FpL = (x, dx) -> [ .0; .0; .0; .0; -2L; .0; .0;;]
@@ -202,9 +204,11 @@ elseif model_id == DELTA
     model_sens_to_use = delta_robot_gc_allparsens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_adjoint_γonly
-    model_stepbystep = delta_adj_stepbystep_NEW
+    model_adj_to_use = delta_robot_gc_adjoint_allpar
     sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
+    # Models for debug:
+    model_stepbystep = delta_adj_stepbystep_NEW
+    
     # Only used for adjoint debugging purposes
     FpL1 = (x, dx) -> [cos(x[1])*dx[27]+cos(x[1])*dx[30]-sin(x[1])*dx[26]-sin(x[1])*dx[29]; 0.0; 0.0; -cos(x[4])*dx[27]-(sin(x[4])*dx[26])*0.5-(sqrt(3)*sin(x[4])*dx[25])*0.5; 0.0; 0.0; (sqrt(3)*sin(x[7])*dx[28])*0.5-(sin(x[7])*dx[29])*0.5-cos(x[7])*dx[30]; 0.0; 0.0; sin(x[1])*dx[20]-cos(x[1])*dx[24]-cos(x[1])*dx[21]+sin(x[1])*dx[23]-0.0*cos(x[1])*(M2+M3)+dx[11]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+2*L1*dx[10]*(M2+M3)+x[11]^2*(L2*M3+LC2*M2)*(cos(x[2])*sin(x[1])-cos(x[1])*cos(x[3])*sin(x[2]))-cos(x[1])*sin(x[2])*sin(x[3])*dx[12]*(L2*M3+LC2*M2)-cos(x[1])*cos(x[3])*sin(x[2])*x[12]^2*(L2*M3+LC2*M2)-2*cos(x[1])*cos(x[2])*sin(x[3])*x[11]*x[12]*(L2*M3+LC2*M2); dx[10]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+x[10]^2*(L2*M3+LC2*M2)*(cos(x[1])*sin(x[2])-cos(x[2])*cos(x[3])*sin(x[1])); sin(x[1])*sin(x[2])*sin(x[3])*x[10]^2*(L2*M3+LC2*M2)-cos(x[1])*sin(x[2])*sin(x[3])*dx[10]*(L2*M3+LC2*M2); cos(x[4])*dx[21]+(sin(x[4])*dx[20])*0.5-0.0*cos(x[4])*(M2+M3)+dx[14]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+2*L1*dx[13]*(M2+M3)+x[14]^2*(L2*M3+LC2*M2)*(cos(x[5])*sin(x[4])-cos(x[4])*cos(x[6])*sin(x[5]))+(sqrt(3)*sin(x[4])*dx[19])*0.5-cos(x[4])*sin(x[5])*sin(x[6])*dx[15]*(L2*M3+LC2*M2)-cos(x[4])*cos(x[6])*sin(x[5])*x[15]^2*(L2*M3+LC2*M2)-2*cos(x[4])*cos(x[5])*sin(x[6])*x[14]*x[15]*(L2*M3+LC2*M2); dx[13]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+x[13]^2*(L2*M3+LC2*M2)*(cos(x[4])*sin(x[5])-cos(x[5])*cos(x[6])*sin(x[4])); sin(x[4])*sin(x[5])*sin(x[6])*x[13]^2*(L2*M3+LC2*M2)-cos(x[4])*sin(x[5])*sin(x[6])*dx[13]*(L2*M3+LC2*M2); cos(x[7])*dx[24]+(sin(x[7])*dx[23])*0.5-0.0*cos(x[7])*(M2+M3)+dx[17]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+2*L1*dx[16]*(M2+M3)+x[17]^2*(L2*M3+LC2*M2)*(cos(x[8])*sin(x[7])-cos(x[7])*cos(x[9])*sin(x[8]))-(sqrt(3)*sin(x[7])*dx[22])*0.5-cos(x[7])*sin(x[8])*sin(x[9])*dx[18]*(L2*M3+LC2*M2)-cos(x[7])*cos(x[9])*sin(x[8])*x[18]^2*(L2*M3+LC2*M2)-2*cos(x[7])*cos(x[8])*sin(x[9])*x[17]*x[18]*(L2*M3+LC2*M2); dx[16]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+x[16]^2*(L2*M3+LC2*M2)*(cos(x[7])*sin(x[8])-cos(x[8])*cos(x[9])*sin(x[7])); sin(x[7])*sin(x[8])*sin(x[9])*x[16]^2*(L2*M3+LC2*M2)-cos(x[7])*sin(x[8])*sin(x[9])*dx[16]*(L2*M3+LC2*M2); (sqrt(3)*cos(x[4]))*0.5; cos(x[1])+cos(x[4])*0.5; sin(x[1])-sin(x[4]); -(sqrt(3)*cos(x[7]))*0.5; cos(x[1])+cos(x[7])*0.5; sin(x[1])-sin(x[7]); -(sqrt(3)*sin(x[4])*x[13])*0.5; -sin(x[1])*x[10]-(sin(x[4])*x[13])*0.5; cos(x[1])*x[10]-cos(x[4])*x[13]; (sqrt(3)*sin(x[7])*x[16])*0.5; -sin(x[1])*x[10]-(sin(x[7])*x[16])*0.5; cos(x[1])*x[10]-cos(x[7])*x[16]; 0.0; -cos(x[1]); -sin(x[1]);;]
     Fpγ  = (x, dx) -> [0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; x[10]; x[11]; x[12]; x[13]; x[14]; x[15]; x[16]; x[17]; x[18]; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0]
@@ -253,7 +257,7 @@ elseif model_id == DELTA
     # f(x::Vector{Float64}) = x[1:24]
     # f_sens(x::Vector{Float64}) = x[1:48]
     # Since none of the state variables are the outputs, we add output sensitivites at the end. Those three extra states are e.g. needed for adjoint method.
-    f_sens_deb(x::Vector{Float64}) = vcat(x[31:end], f_sens(x))
+    f_sens_deb(x::Vector{Float64}) = inject_adj_sens(x, f_sens(x))
     f_debug(x::Vector{Float64}) = vcat(x[1:30], f(x))
 end
 
@@ -614,7 +618,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     # average over M averages, or if we just average once over M*num_stacks gradients
 
     # TODO: It seems it might be get_gradient_adjoint() that results in warning "Using arrays or dicts to store parameters of different types can hurt performance". Fix it?
-    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)# get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean*num_stacks)
+    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean*num_stacks)# get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
     # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean*num_stacks)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
 
     get_gradient_estimate_p_stacked(free_pars, M_mean, e) = get_gradient_estimate_stacked(vcat([Y[:,(ind-1)*E+e] for ind=1:num_stacks]...), free_pars, isws, M_mean, num_stacks)
@@ -1163,6 +1167,20 @@ function write_results_to_file(path::String, opt_pars_baseline, opt_pars_propose
     writedlm(path*"setup_duration.csv", Dates.value(durations[1]), ',')
     writedlm(path*"baseline_durations.csv", Dates.value.(durations[2]), ',')
     writedlm(path*"proposed_durations.csv", Dates.value.(durations[3]), ',')
+end
+
+# For adjoint method, the outputs of the system need to be the last state-variables. If x is the state of the system with all sensitivities, but without the outputs,
+# then this function takes the sensitivities from the ny x np matrix adj_sens and inserts them correctly, so that the function returns the state with all sensitivities, 
+# where the outputs are included in the state variables
+function inject_adj_sens(x::Vector{Float64}, adj_sens::Matrix{Float64})
+    np = size(adj_sens,2)
+    out = zeros(num_dyn_vars_adj*np)
+    for ind = 1:np
+        # The first num_dyn_vars elements of x are the nominal states, only after that do we get the state sensitivities.
+        out[(ind-1)*num_dyn_vars_adj+1:(ind-1)*num_dyn_vars_adj+num_dyn_vars] = x[ind*num_dyn_vars+1:(ind+1)*num_dyn_vars]
+        out[(ind-1)*num_dyn_vars_adj+num_dyn_vars+1:ind*num_dyn_vars_adj] = adj_sens[:,ind]
+    end
+    return out
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
