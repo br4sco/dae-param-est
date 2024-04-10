@@ -192,19 +192,19 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
-    get_all_θs(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    # dyn_par_bounds = [0.01 1e4]
-    dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
-    dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    dyn_par_bounds = [0.01 1e4]
+    # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
+    # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
-    const_learning_rate = [0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
-    model_sens_to_use = delta_robot_gc_allparsens
+    const_learning_rate = [0.05]#[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
+    model_sens_to_use = delta_robot_gc_γsens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_adjoint_allpar
+    model_adj_to_use = delta_robot_gc_adjoint_γonly
     sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
     model_stepbystep = delta_adj_stepbystep_NEW
@@ -242,13 +242,13 @@ elseif model_id == DELTA
     # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_L1(x)
 
     # Sensitivity wrt to whichever parameter except L0, L1, L2, L3, all others are the same
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_other(x)
+    f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_other(x)
 
     # # Sensitivity wrt to [L1, M1, J1]
     # f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x),1,3) + hcat(f_sens_L1(x), f_sens_other(x), f_sens_other(x))
 
     # Sensitivity wrt to all parameters
-    f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x), 1, 12) + hcat(f_sens_L0(x), f_sens_L1(x), f_sens_L2(x), f_sens_L3(x), repeat(f_sens_other(x), 1, 8))
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x), 1, 12) + hcat(f_sens_L0(x), f_sens_L1(x), f_sens_L2(x), f_sens_L3(x), repeat(f_sens_other(x), 1, 8))
 
     # # DEBUG
     # f_sens(x::Vector{Float64})::Matrix{Float64} = reshape(x[31:60], 30, 1)    # DEBUG
@@ -409,17 +409,17 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     trace_base = [[pars0] for e=1:E]
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
-    @warn "Not running baseline identification now"
-    for e=[]#1:E
+    # @warn "Not running baseline identification now"
+    for e=1:E
         time_start = now()
         # HACK: Uses trace returned due to hacked LsqFit package
         if num_stacks > 1
             Y_true_stacked = vcat([Y[N_trans+1:end,(ind-1)*E+e] for ind=1:num_stacks]...)
-            baseline_result, baseline_trace = get_fit_sens(Y_true_stacked, pars0,
+            baseline_result = get_fit_sens(Y_true_stacked, pars0,
                 baseline_model_parametrized_stacked, jacobian_model_b_stacked,
                 par_bounds[:,1], par_bounds[:,2])
         else
-            baseline_result, baseline_trace = get_fit_sens(Y[N_trans+1:end,e], pars0,
+            baseline_result = get_fit_sens(Y[N_trans+1:end,e], pars0,
                 baseline_model_parametrized, jacobian_model_b,
                 par_bounds[:,1], par_bounds[:,2])
         end
@@ -430,9 +430,9 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
 
         # Sometimes (the first returned value I think) the baseline_trace
         # has no elements, and therefore doesn't contain the metadata x
-        if length(baseline_trace) > 1
-            for j=2:length(baseline_trace)
-                push!(trace_base[e], baseline_trace[j].metadata["x"])
+        if length(baseline_result.trace) > 1
+            for j=2:length(baseline_result.trace)
+                push!(trace_base[e], trace_base[e][end]+baseline_result.trace[j].metadata["dx"])
             end
         end
         baseline_durations[e] = now()-time_start
@@ -1036,12 +1036,8 @@ end
 
 # Uses a jacobian model (for system output) instead of estimating jacobian from forward difference
 function get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
-    # HACK: Uses trace returned due to hacked LsqFit package
-    # Use this line if you are using the modified LsqFit-package that also
-    # returns trace
-    # @warn "Using x_tol = 1e-12 instead of default 1e-8"
-    fit_result, trace = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default: inplace = false, x_tol = 1e-8
-    return fit_result, trace
+    fit_result = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default: inplace = false, x_tol = 1e-8
+    # return fit_result, trace
 end
 
 # Simulates system with specified white noise
