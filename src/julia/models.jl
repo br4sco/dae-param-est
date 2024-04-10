@@ -714,8 +714,6 @@ function delta_robot_gc_L1M1J1sens(Φ::Float64, u::Function, w::Function, θ::Ve
             nothing
         end
 
-        z0, dz0 = get_delta_initial_L1M1J1sens_comp(θ, u(0.0), w(0.0))
-
         z0dyn, dz0dyn, H, m1, m2, m3, HinvM, cgBu = get_delta_initial_comp_with_mats(θ, u(0.0), w(0.0))
         zL1, dzL1 = get_delta_initial_L1sensonly(θ, z0dyn, dz0dyn, H, m1, m2, m3, HinvM, cgBu)
         zM1, dzM1 = get_delta_initial_M1sensonly(θ, z0dyn, dz0dyn, H, m1, m2, m3, HinvM, cgBu)
