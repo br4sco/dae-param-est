@@ -147,6 +147,7 @@ if model_id == PENDULUM
     const free_dyn_pars_true = [k]# True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
     const num_dyn_vars_adj = 7 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state. Though outputs are already baked in for pendulum
+    use_adjoint = true
     get_all_θs(pars::Vector{Float64}) = [m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
@@ -176,6 +177,7 @@ elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
     const num_dyn_vars = 2
+    use_adjoint = true
     get_all_θs(pars::Vector{Float64}) = pars#free_dyn_pars_true
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = [0.01 1e4]
@@ -195,6 +197,7 @@ elseif model_id == DELTA
     const free_dyn_pars_true = [γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
+    use_adjoint = true
     get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     dyn_par_bounds = [0.01 1e4]
     # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
@@ -617,11 +620,19 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     # gradient obtained from every data-set in the stack. This is because the final Gp is anyway obtained by averaging over all M, so it doesn't matter if we
     # average over M averages, or if we just average once over M*num_stacks gradients
 
-    # TODO: It seems it might be get_gradient_adjoint() that results in warning "Using arrays or dicts to store parameters of different types can hurt performance". Fix it?
-    get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean*num_stacks)# get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
-    # get_gradient_estimate_p(free_pars, M_mean, e) = get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean*num_stacks)#get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
+    # Picking correct way of computing gradients
+    if use_adjoint
+        if length(dist_par_inds) > 0
+            get_gradient_estimate_p = (free_pars, M_mean, e) -> get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean*num_stacks)
+        else
+            get_gradient_estimate_p = (free_pars, M_mean, e) -> get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean*num_stacks)
+        end
+    elseif num_stacks > 1
+        get_gradient_estimate_p = (free_pars, M_mean, e) -> get_gradient_estimate_stacked(vcat([Y[:,(ind-1)*E+e] for ind=1:num_stacks]...), free_pars, isws, M_mean, num_stacks)
+    else
+        get_gradient_estimate_p = (free_pars, M_mean, e) -> get_gradient_estimate(Y[:,e], free_pars, isws, M_mean)
+    end
 
-    get_gradient_estimate_p_stacked(free_pars, M_mean, e) = get_gradient_estimate_stacked(vcat([Y[:,(ind-1)*E+e] for ind=1:num_stacks]...), free_pars, isws, M_mean, num_stacks)
 
     opt_pars_proposed = zeros(length(pars0), E)
     avg_pars_proposed = zeros(length(pars0), E)
@@ -645,13 +656,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"
-        if num_stacks == 1
-            opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
+        opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
                 sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
-        else#if num_stacks>1
-            opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
-                sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p_stacked(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
-        end
 
         # @warn "NOT WRITING BACKUPS RIGHT NOW!"
         writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
