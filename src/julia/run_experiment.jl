@@ -321,7 +321,8 @@ solvew(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs.
 )
 solve_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, myTs::Float64; kwargs...) = solve(
     realize_model(u, w, free_dyn_pars, N),
-    saveat = 0:myTs:N*Ts,
+    # Because of numerical inaccuracies, solve() often returns one sample more than the length of 0:myTs:N*Ts, just past time N*Ts. To avoid this, we subtract 0.0001
+    saveat = 0:myTs:N*Ts-0.0001,
     abstol = abstol,
     reltol = reltol,
     maxiters = maxiters;
