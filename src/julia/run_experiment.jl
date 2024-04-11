@@ -231,9 +231,9 @@ elseif model_id == DELTA
     ##################################################################################################################################################
 
     # sans_p-part
-    f_sens_base(x::Vector{Float64})::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[32]+L2*cos(x[3])*sin(x[2])*x[33]
-                                                        -L1*sin(x[1])*x[31]-L2*sin(x[2])*x[32]
-                                                        L1*cos(x[1])*x[31]+L2*cos(x[2])*cos(x[3])*x[32]-L2*sin(x[2])*sin(x[3])*x[33];;]
+    f_sens_base(x::Vector{Float64}, par_ind::Int)::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[30*par_ind+2]+L2*cos(x[3])*sin(x[2])*x[30*par_ind+3]
+                                                                -L1*sin(x[1])*x[30*par_ind+1]-L2*sin(x[2])*x[30*par_ind+2]
+                                                                L1*cos(x[1])*x[30*par_ind+1]+L2*cos(x[2])*cos(x[3])*x[30*par_ind+2]-L2*sin(x[2])*sin(x[3])*x[30*par_ind+3];;]
     # p-parts
     f_sens_L0(x::Vector{Float64})::Matrix{Float64} = [0.0; 1.0; 0.0;;]
     f_sens_L1(x::Vector{Float64})::Matrix{Float64} = [0.0; cos(x[1]); sin(x[1]);;]
@@ -244,17 +244,17 @@ elseif model_id == DELTA
     # # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
     # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_L1(x)
 
-    # # Sensitivity wrt to whichever parameter except L0, L1, L2, L3, all others are the same
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_other(x)
+    # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
+    f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x, 1)+f_sens_other(x)
 
     # # Sensitivity wrt to [L1, M1, J1]
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x),1,3) + hcat(f_sens_L1(x), f_sens_other(x), f_sens_other(x))
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_L1(x)+f_sens_base(x,1), f_sens_other(x)+f_sens_base(x,2), f_sens_other(x)+f_sens_base(x,3))
 
     # Sensitivity wrt to all parameters
-    f_sens(x::Vector{Float64})::Matrix{Float64} = repeat(f_sens_base(x), 1, 12) + hcat(f_sens_L0(x), f_sens_L1(x), f_sens_L2(x), f_sens_L3(x), repeat(f_sens_other(x), 1, 8))
-
-    # # DEBUG
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = reshape(x[31:60], 30, 1)    # DEBUG
+    f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, 1)+f_sens_L0(x), f_sens_base(x, 2)+f_sens_L1(x), f_sens_base(x, 3)+f_sens_L2(x), 
+        f_sens_base(x, 4)+f_sens_L3(x), f_sens_base(x, 5)+f_sens_other(x), f_sens_base(x, 6)+f_sens_other(x), f_sens_base(x, 7)+f_sens_other(x),
+        f_sens_base(x, 8)+f_sens_other(x), f_sens_base(x, 9)+f_sens_other(x), f_sens_base(x, 10)+f_sens_other(x), f_sens_base(x, 11)+f_sens_other(x),
+        f_sens_base(x, 12)+f_sens_other(x))
 
     # # Just getting all states
     # f(x::Vector{Float64}) = x[1:24]
