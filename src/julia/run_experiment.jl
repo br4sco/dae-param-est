@@ -199,7 +199,7 @@ elseif model_id == DELTA
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     use_adjoint = false
     get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]] #vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    dyn_par_bounds = [0.01 1e4]
+    dyn_par_bounds = [0.01 1e4]#Array{Float64}(undef, 0, 2)
     # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
@@ -252,6 +252,9 @@ elseif model_id == DELTA
 
     # Sensitivity wrt to γ and one disturbance parameter
     f_sens(x::Vector{Float64})::Matrix{Float64} = [f_sens_base(x, 1)+f_sens_other(x)    f_sens_base(x, 2)+f_sens_other(x)]
+
+    # # Sensitivity wrt to one disturbance parameter
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x, 1)+f_sens_other(x)
 
     # Sensitivity wrt to all parameters
     # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, 1)+f_sens_L0(x), f_sens_base(x, 2)+f_sens_L1(x), f_sens_base(x, 3)+f_sens_L2(x), 
@@ -316,7 +319,7 @@ solve_sens_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, 
 )
 solvew(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
   realize_model(u, w, free_dyn_pars, N),
-  saveat = 0:Ts:(N*Ts),
+  saveat = 0:Ts:N*Ts,
   abstol = abstol,
   reltol = reltol,
   maxiters = maxiters;
