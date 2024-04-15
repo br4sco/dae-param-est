@@ -199,12 +199,12 @@ elseif model_id == DELTA
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     use_adjoint = true
     get_all_θs(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    # dyn_par_bounds = [0.01 1e4]
-    dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
-    dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
+    dyn_par_bounds = [0.01 1e4]
+    # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
+    # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
-    const_learning_rate = [0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
-    model_sens_to_use = delta_robot_gc_allparsens
+    const_learning_rate = [0.1, 0.01]#[0.05, 0.1, 0.1, 0.005, 0.005, 0.1, 0.005, 0.005, 0.005, 0.005, 0.01, 0.1]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
+    model_sens_to_use = delta_robot_gc_γ_dist_sens_1
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_adjoint_allpar
@@ -250,11 +250,14 @@ elseif model_id == DELTA
     # # Sensitivity wrt to [L1, M1, J1]
     # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_L1(x)+f_sens_base(x,1), f_sens_other(x)+f_sens_base(x,2), f_sens_other(x)+f_sens_base(x,3))
 
+    # Sensitivity wrt to γ and one disturbance parameter
+    f_sens(x::Vector{Float64})::Matrix{Float64} = [f_sens_base(x, 1)+f_sens_other(x)    f_sens_base(x, 2)+f_sens_other(x)]
+
     # Sensitivity wrt to all parameters
-    f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, 1)+f_sens_L0(x), f_sens_base(x, 2)+f_sens_L1(x), f_sens_base(x, 3)+f_sens_L2(x), 
-        f_sens_base(x, 4)+f_sens_L3(x), f_sens_base(x, 5)+f_sens_other(x), f_sens_base(x, 6)+f_sens_other(x), f_sens_base(x, 7)+f_sens_other(x),
-        f_sens_base(x, 8)+f_sens_other(x), f_sens_base(x, 9)+f_sens_other(x), f_sens_base(x, 10)+f_sens_other(x), f_sens_base(x, 11)+f_sens_other(x),
-        f_sens_base(x, 12)+f_sens_other(x))
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, 1)+f_sens_L0(x), f_sens_base(x, 2)+f_sens_L1(x), f_sens_base(x, 3)+f_sens_L2(x), 
+        # f_sens_base(x, 4)+f_sens_L3(x), f_sens_base(x, 5)+f_sens_other(x), f_sens_base(x, 6)+f_sens_other(x), f_sens_base(x, 7)+f_sens_other(x),
+        # f_sens_base(x, 8)+f_sens_other(x), f_sens_base(x, 9)+f_sens_other(x), f_sens_base(x, 10)+f_sens_other(x), f_sens_base(x, 11)+f_sens_other(x),
+        # f_sens_base(x, 12)+f_sens_other(x))
 
     # # Just getting all states
     # f(x::Vector{Float64}) = x[1:24]
@@ -273,7 +276,7 @@ h_debug_with_sens(sol) = apply_outputfun(x->vcat(f_debug(x), f_sens_deb(x)), sol
 h_sens_deb(sol) = apply_two_outputfun(f_debug, f_sens_deb, sol)
 
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
-learning_rate_vec_red(t::Int, grad_norm::Float64) = t>25 ? const_learning_rate./sqrt(100*t) : const_learning_rate./sqrt(t)
+learning_rate_vec_red(t::Int, grad_norm::Float64) = t>50 ? const_learning_rate./sqrt(100*t) : const_learning_rate./sqrt(t)
 
 const num_dyn_pars = length(free_dyn_pars_true)#size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Vector{Float64}, N::Int) = problem(
