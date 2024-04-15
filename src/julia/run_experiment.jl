@@ -194,11 +194,11 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
-    use_adjoint = true
-    get_all_θs(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    use_adjoint = false
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]] #vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     dyn_par_bounds = [0.01 1e4]
     # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
@@ -244,8 +244,8 @@ elseif model_id == DELTA
     # # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
     # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_L1(x)
 
-    # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
-    f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x, 1)+f_sens_other(x)
+    # # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x, 1)+f_sens_other(x)
 
     # # Sensitivity wrt to [L1, M1, J1]
     # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_L1(x)+f_sens_base(x,1), f_sens_other(x)+f_sens_base(x,2), f_sens_other(x)+f_sens_base(x,3))
@@ -782,14 +782,14 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown (which is zero, I never ID it)
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # Second element of c-vector unknown (all exccept first element of c-vector actually)
-    # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
+    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
@@ -2293,4 +2293,30 @@ function for_sens_debug_multipar(expid::String, par_vals::Vector{Float64}, K::In
     end
 
     return cost_grads, num_costs
+end
+
+function disturbance_sensitivity_debug(expid::String)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    nx = W_meta.nx
+    dist_sens_inds = W_meta.free_par_inds
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    N = size(exp_data.Y, 1)÷y_len-1
+    n_tot = nx*n_in
+    Nw = exp_data.Nw
+    Zm = [randn(Nw, n_tot) for m = 1:M]
+
+    η1 = W_meta.η
+    η2 = copy(η1)
+    η2[1] += 0.01
+
+    dmdl1 = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η1, nx, n_out), δ, dist_sens_inds)
+    dmdl2 = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η2, nx, n_out), δ, dist_sens_inds)
+    XWm1 = simulate_noise_process_mangled(dmdl1, Zm)
+    XWm2 = simulate_noise_process_mangled(dmdl2, Zm)
+    wmm1 = mk_noise_interp(dmdl1.Cd, XWm1, 1, δ)
+    wmm2 = mk_noise_interp(dmdl2.Cd, XWm2, 1, δ)
+    dwm(t::Float64) = (wmm2(t)-wmm1(t))/0.01
+    return wmm1, wmm2, dwm
 end
