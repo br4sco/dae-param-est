@@ -170,7 +170,7 @@ if model_id == PENDULUM
     f(x::Vector{Float64}, θ::Vector{Float64}) = x[7]               # applied on the state at each step
     # f_sens should return a matrix/column vector with each row corresponding to a different output component and each column corresponding to a different parameter
     f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[14];;]# x[21] x[28] x[35]]# x[42] x[49]]# x[28]]##[x[14] x[21] x[28] x[35] x[42]]   # NOTE: Hard-coded right now
-    # f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]                                                                                           #tuesday debug starting here
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64}) = [x[14], x[21], x[28]]                                                                                           #tuesday debug starting here
     f_sens_deb(x::Vector{Float64}, θ::Vector{Float64}) = x[8:end]
     f_debug(x::Vector{Float64}, θ::Vector{Float64}) = x[1:7]
 elseif model_id == MOH_MDL
@@ -191,7 +191,7 @@ elseif model_id == MOH_MDL
 
     f(x::Vector{Float64}) = x[1]#x[2]
     # f_sens should return a matrix/column vector with each row corresponding to a different output component and each column corresponding to a different parameter
-    f_sens(x::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
     const free_dyn_pars_true = [L1]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
@@ -219,7 +219,7 @@ elseif model_id == DELTA
 
     # # If output is all three servo angles
     # f(x::Vector{Float64}) = [x[1],x[4],x[7]]    # All three servo angles
-    # f_sens(x::Vector{Float64}) = [x[25],x[28],x[31]]
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64}) = [x[25],x[28],x[31]]
     # # If output is position of end effector, expressed in angles of first arm
     f(x::Vector{Float64}, θ::Vector{Float64}) = [θ[3]*sin(x[2])*sin(x[3]) #L2*sin(x[2])*sin(x[3])
         θ[2]*cos(x[1]) + θ[3]*cos(x[2]) + θ[1] - θ[4] #L1*cos(x[1]) + L2*cos(x[2]) + L0 - L3
@@ -246,32 +246,32 @@ elseif model_id == DELTA
     f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_L1(x)
 
     # # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x, 1)+f_sens_other(x)
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
 
     # # Sensitivity wrt to [L1, M1, J1]
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_L1(x)+f_sens_base(x,1), f_sens_other(x)+f_sens_base(x,2), f_sens_other(x)+f_sens_base(x,3))
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_L1(x)+f_sens_base(x,θ,1), f_sens_other(x)+f_sens_base(x,θ,2), f_sens_other(x)+f_sens_base(x,θ,3))
 
     # Sensitivity wrt to γ and one disturbance parameter
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = [f_sens_base(x, 1)+f_sens_other(x)    f_sens_base(x, 2)+f_sens_other(x)]
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [f_sens_base(x, θ, 1)+f_sens_other(x)    f_sens_base(x, θ, 2)+f_sens_other(x)]
 
     # # Sensitivity wrt to debug2-case parameters
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, 1)+f_sens_other(x), f_sens_base(x, 2)+f_sens_other(x))#, f_sens_base(x, 3)+f_sens_L2(x))#, 
-    #     # f_sens_base(x, 4)+f_sens_L3(x), f_sens_base(x, 5)+f_sens_other(x), f_sens_base(x, 6)+f_sens_other(x), f_sens_base(x, 7)+f_sens_other(x),
-    #     # f_sens_base(x, 8)+f_sens_other(x), f_sens_base(x, 9)+f_sens_other(x), f_sens_base(x, 10)+f_sens_other(x), f_sens_base(x, 11)+f_sens_other(x),
-    #     # f_sens_base(x, 12)+f_sens_other(x))
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_other(x), f_sens_base(x, θ, 2)+f_sens_other(x))#, f_sens_base(x, θ, 3)+f_sens_L2(x))#, 
+    #     # f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
+    #     # f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
+    #     # f_sens_base(x, θ, 12)+f_sens_other(x))
 
     # # Sensitivity wrt to one disturbance parameter
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x, 1)+f_sens_other(x)
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
 
     # Sensitivity wrt to all parameters
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, 1)+f_sens_L0(x), f_sens_base(x, 2)+f_sens_L1(x), f_sens_base(x, 3)+f_sens_L2(x), 
-        # f_sens_base(x, 4)+f_sens_L3(x), f_sens_base(x, 5)+f_sens_other(x), f_sens_base(x, 6)+f_sens_other(x), f_sens_base(x, 7)+f_sens_other(x),
-        # f_sens_base(x, 8)+f_sens_other(x), f_sens_base(x, 9)+f_sens_other(x), f_sens_base(x, 10)+f_sens_other(x), f_sens_base(x, 11)+f_sens_other(x),
-        # f_sens_base(x, 12)+f_sens_other(x))
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
+        # f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
+        # f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
+        # f_sens_base(x, θ, 12)+f_sens_other(x))
 
     # # Just getting all states
     # f(x::Vector{Float64}) = x[1:24]
-    # f_sens(x::Vector{Float64}) = x[1:48]
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64}) = x[1:48]
     # Since none of the state variables are the outputs, we add output sensitivites at the end. Those three extra states are e.g. needed for adjoint method.
     f_sens_deb(x::Vector{Float64}, θ::Vector{Float64}) = inject_adj_sens(x, f_sens(x, θ))
     f_debug(x::Vector{Float64}, θ::Vector{Float64}) = vcat(x[1:30], f(x, θ))
