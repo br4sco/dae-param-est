@@ -167,12 +167,12 @@ if model_id == PENDULUM
     FpL = (x, dx) -> [ .0; .0; .0; .0; -2L; .0; .0;;]
     deb_Fp = Fpk
 
-    f(x::Vector{Float64}) = x[7]               # applied on the state at each step
+    f(x::Vector{Float64}, θ::Vector{Float64}) = x[7]               # applied on the state at each step
     # f_sens should return a matrix/column vector with each row corresponding to a different output component and each column corresponding to a different parameter
-    f_sens(x::Vector{Float64})::Matrix{Float64} = [x[14];;]# x[21] x[28] x[35]]# x[42] x[49]]# x[28]]##[x[14] x[21] x[28] x[35] x[42]]   # NOTE: Hard-coded right now
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[14];;]# x[21] x[28] x[35]]# x[42] x[49]]# x[28]]##[x[14] x[21] x[28] x[35] x[42]]   # NOTE: Hard-coded right now
     # f_sens(x::Vector{Float64}) = [x[14], x[21], x[28]]                                                                                           #tuesday debug starting here
-    f_sens_deb(x::Vector{Float64}) = x[8:end]
-    f_debug(x::Vector{Float64}) = x[1:7]
+    f_sens_deb(x::Vector{Float64}, θ::Vector{Float64}) = x[8:end]
+    f_debug(x::Vector{Float64}, θ::Vector{Float64}) = x[1:7]
 elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
@@ -194,20 +194,20 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [L1]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     use_adjoint = false
-    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]] #vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    get_all_θs(pars::Vector{Float64}) = [L0, pars[1], L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ] #vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     dyn_par_bounds = [0.01 1e4]#Array{Float64}(undef, 0, 2)
     # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
-    const_learning_rate = [0.1, 0.01]#[0.05, 0.1, 0.1, 0.005, 0.005, 0.1, 0.005, 0.005, 0.005, 0.005, 0.01, 0.1]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
-    model_sens_to_use = delta_robot_gc_γ_dist_sens_1
+    const_learning_rate = [0.1]#[0.05, 0.1, 0.1, 0.005, 0.005, 0.1, 0.005, 0.005, 0.005, 0.005, 0.01, 0.1]#[0.005]#[0.05, 0.005, 0.005]#allpars:[0.05, 0.05, 0.05, 0.005, 0.005, 0.05, 0.005, 0.005, 0.005, 0.005, 0.005, 0.05]
+    model_sens_to_use = delta_robot_gc_L1sens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_adjoint_allpar
+    model_adj_to_use = delta_robot_gc_adjoint_L1only
     sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
     model_stepbystep = delta_adj_stepbystep_NEW
@@ -215,15 +215,15 @@ elseif model_id == DELTA
     # Only used for adjoint debugging purposes
     FpL1 = (x, dx) -> [cos(x[1])*dx[27]+cos(x[1])*dx[30]-sin(x[1])*dx[26]-sin(x[1])*dx[29]; 0.0; 0.0; -cos(x[4])*dx[27]-(sin(x[4])*dx[26])*0.5-(sqrt(3)*sin(x[4])*dx[25])*0.5; 0.0; 0.0; (sqrt(3)*sin(x[7])*dx[28])*0.5-(sin(x[7])*dx[29])*0.5-cos(x[7])*dx[30]; 0.0; 0.0; sin(x[1])*dx[20]-cos(x[1])*dx[24]-cos(x[1])*dx[21]+sin(x[1])*dx[23]-0.0*cos(x[1])*(M2+M3)+dx[11]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+2*L1*dx[10]*(M2+M3)+x[11]^2*(L2*M3+LC2*M2)*(cos(x[2])*sin(x[1])-cos(x[1])*cos(x[3])*sin(x[2]))-cos(x[1])*sin(x[2])*sin(x[3])*dx[12]*(L2*M3+LC2*M2)-cos(x[1])*cos(x[3])*sin(x[2])*x[12]^2*(L2*M3+LC2*M2)-2*cos(x[1])*cos(x[2])*sin(x[3])*x[11]*x[12]*(L2*M3+LC2*M2); dx[10]*(L2*M3+LC2*M2)*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+x[10]^2*(L2*M3+LC2*M2)*(cos(x[1])*sin(x[2])-cos(x[2])*cos(x[3])*sin(x[1])); sin(x[1])*sin(x[2])*sin(x[3])*x[10]^2*(L2*M3+LC2*M2)-cos(x[1])*sin(x[2])*sin(x[3])*dx[10]*(L2*M3+LC2*M2); cos(x[4])*dx[21]+(sin(x[4])*dx[20])*0.5-0.0*cos(x[4])*(M2+M3)+dx[14]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+2*L1*dx[13]*(M2+M3)+x[14]^2*(L2*M3+LC2*M2)*(cos(x[5])*sin(x[4])-cos(x[4])*cos(x[6])*sin(x[5]))+(sqrt(3)*sin(x[4])*dx[19])*0.5-cos(x[4])*sin(x[5])*sin(x[6])*dx[15]*(L2*M3+LC2*M2)-cos(x[4])*cos(x[6])*sin(x[5])*x[15]^2*(L2*M3+LC2*M2)-2*cos(x[4])*cos(x[5])*sin(x[6])*x[14]*x[15]*(L2*M3+LC2*M2); dx[13]*(L2*M3+LC2*M2)*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+x[13]^2*(L2*M3+LC2*M2)*(cos(x[4])*sin(x[5])-cos(x[5])*cos(x[6])*sin(x[4])); sin(x[4])*sin(x[5])*sin(x[6])*x[13]^2*(L2*M3+LC2*M2)-cos(x[4])*sin(x[5])*sin(x[6])*dx[13]*(L2*M3+LC2*M2); cos(x[7])*dx[24]+(sin(x[7])*dx[23])*0.5-0.0*cos(x[7])*(M2+M3)+dx[17]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+2*L1*dx[16]*(M2+M3)+x[17]^2*(L2*M3+LC2*M2)*(cos(x[8])*sin(x[7])-cos(x[7])*cos(x[9])*sin(x[8]))-(sqrt(3)*sin(x[7])*dx[22])*0.5-cos(x[7])*sin(x[8])*sin(x[9])*dx[18]*(L2*M3+LC2*M2)-cos(x[7])*cos(x[9])*sin(x[8])*x[18]^2*(L2*M3+LC2*M2)-2*cos(x[7])*cos(x[8])*sin(x[9])*x[17]*x[18]*(L2*M3+LC2*M2); dx[16]*(L2*M3+LC2*M2)*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+x[16]^2*(L2*M3+LC2*M2)*(cos(x[7])*sin(x[8])-cos(x[8])*cos(x[9])*sin(x[7])); sin(x[7])*sin(x[8])*sin(x[9])*x[16]^2*(L2*M3+LC2*M2)-cos(x[7])*sin(x[8])*sin(x[9])*dx[16]*(L2*M3+LC2*M2); (sqrt(3)*cos(x[4]))*0.5; cos(x[1])+cos(x[4])*0.5; sin(x[1])-sin(x[4]); -(sqrt(3)*cos(x[7]))*0.5; cos(x[1])+cos(x[7])*0.5; sin(x[1])-sin(x[7]); -(sqrt(3)*sin(x[4])*x[13])*0.5; -sin(x[1])*x[10]-(sin(x[4])*x[13])*0.5; cos(x[1])*x[10]-cos(x[4])*x[13]; (sqrt(3)*sin(x[7])*x[16])*0.5; -sin(x[1])*x[10]-(sin(x[7])*x[16])*0.5; cos(x[1])*x[10]-cos(x[7])*x[16]; 0.0; -cos(x[1]); -sin(x[1]);;]
     Fpγ  = (x, dx) -> [0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; x[10]; x[11]; x[12]; x[13]; x[14]; x[15]; x[16]; x[17]; x[18]; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0]
-    deb_Fp = Fpγ
+    deb_Fp = FpL1
 
     # # If output is all three servo angles
     # f(x::Vector{Float64}) = [x[1],x[4],x[7]]    # All three servo angles
     # f_sens(x::Vector{Float64}) = [x[25],x[28],x[31]]
     # # If output is position of end effector, expressed in angles of first arm
-    f(x::Vector{Float64}) = [L2*sin(x[2])*sin(x[3])
-        L1*cos(x[1]) + L2*cos(x[2]) + L0 - L3
-        L1*sin(x[1]) + L2*sin(x[2])*cos(x[3])]
+    f(x::Vector{Float64}, θ::Vector{Float64}) = [θ[3]*sin(x[2])*sin(x[3]) #L2*sin(x[2])*sin(x[3])
+        θ[2]*cos(x[1]) + θ[3]*cos(x[2]) + θ[1] - θ[4] #L1*cos(x[1]) + L2*cos(x[2]) + L0 - L3
+        θ[2]*sin(x[1]) + θ[3]*sin(x[2])*cos(x[3])] #L1*sin(x[1]) + L2*sin(x[2])*cos(x[3])]
     # f(x::Vector{Float64}) = x[1:30]   # DEBUG
     
     ##################################################################################################################################################
@@ -231,9 +231,10 @@ elseif model_id == DELTA
     ##################################################################################################################################################
 
     # sans_p-part
-    f_sens_base(x::Vector{Float64}, par_ind::Int)::Matrix{Float64} = [L2*cos(x[2])*sin(x[3])*x[30*par_ind+2]+L2*cos(x[3])*sin(x[2])*x[30*par_ind+3]
-                                                                -L1*sin(x[1])*x[30*par_ind+1]-L2*sin(x[2])*x[30*par_ind+2]
-                                                                L1*cos(x[1])*x[30*par_ind+1]+L2*cos(x[2])*cos(x[3])*x[30*par_ind+2]-L2*sin(x[2])*sin(x[3])*x[30*par_ind+3];;]
+    f_sens_base(x::Vector{Float64}, θ::Vector{Float64}, par_ind::Int)::Matrix{Float64} = 
+        [θ[3]*cos(x[2])*sin(x[3])*x[30*par_ind+2]+θ[3]*cos(x[3])*sin(x[2])*x[30*par_ind+3] #L2*cos(x[2])*sin(x[3])*x[30*par_ind+2]+L2*cos(x[3])*sin(x[2])*x[30*par_ind+3]
+        -θ[2]*sin(x[1])*x[30*par_ind+1]-θ[3]*sin(x[2])*x[30*par_ind+2] #-L1*sin(x[1])*x[30*par_ind+1]-L2*sin(x[2])*x[30*par_ind+2]
+        θ[2]*cos(x[1])*x[30*par_ind+1]+θ[3]*cos(x[2])*cos(x[3])*x[30*par_ind+2]-θ[3]*sin(x[2])*sin(x[3])*x[30*par_ind+3];;] #L1*cos(x[1])*x[30*par_ind+1]+L2*cos(x[2])*cos(x[3])*x[30*par_ind+2]-L2*sin(x[2])*sin(x[3])*x[30*par_ind+3];;]
     # p-parts
     f_sens_L0(x::Vector{Float64})::Matrix{Float64} = [0.0; 1.0; 0.0;;]
     f_sens_L1(x::Vector{Float64})::Matrix{Float64} = [0.0; cos(x[1]); sin(x[1]);;]
@@ -241,8 +242,8 @@ elseif model_id == DELTA
     f_sens_L3(x::Vector{Float64})::Matrix{Float64} = [0.0; -1.0; 0.0;;]
     f_sens_other(x::Vector{Float64})::Matrix{Float64} = zeros(3,1)
 
-    # # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
-    # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x)+f_sens_L1(x)
+    # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_L1(x)
 
     # # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
     # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x, 1)+f_sens_other(x)
@@ -251,7 +252,13 @@ elseif model_id == DELTA
     # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_L1(x)+f_sens_base(x,1), f_sens_other(x)+f_sens_base(x,2), f_sens_other(x)+f_sens_base(x,3))
 
     # Sensitivity wrt to γ and one disturbance parameter
-    f_sens(x::Vector{Float64})::Matrix{Float64} = [f_sens_base(x, 1)+f_sens_other(x)    f_sens_base(x, 2)+f_sens_other(x)]
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = [f_sens_base(x, 1)+f_sens_other(x)    f_sens_base(x, 2)+f_sens_other(x)]
+
+    # # Sensitivity wrt to debug2-case parameters
+    # f_sens(x::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, 1)+f_sens_other(x), f_sens_base(x, 2)+f_sens_other(x))#, f_sens_base(x, 3)+f_sens_L2(x))#, 
+    #     # f_sens_base(x, 4)+f_sens_L3(x), f_sens_base(x, 5)+f_sens_other(x), f_sens_base(x, 6)+f_sens_other(x), f_sens_base(x, 7)+f_sens_other(x),
+    #     # f_sens_base(x, 8)+f_sens_other(x), f_sens_base(x, 9)+f_sens_other(x), f_sens_base(x, 10)+f_sens_other(x), f_sens_base(x, 11)+f_sens_other(x),
+    #     # f_sens_base(x, 12)+f_sens_other(x))
 
     # # Sensitivity wrt to one disturbance parameter
     # f_sens(x::Vector{Float64})::Matrix{Float64} = f_sens_base(x, 1)+f_sens_other(x)
@@ -266,20 +273,22 @@ elseif model_id == DELTA
     # f(x::Vector{Float64}) = x[1:24]
     # f_sens(x::Vector{Float64}) = x[1:48]
     # Since none of the state variables are the outputs, we add output sensitivites at the end. Those three extra states are e.g. needed for adjoint method.
-    f_sens_deb(x::Vector{Float64}) = inject_adj_sens(x, f_sens(x))
-    f_debug(x::Vector{Float64}) = vcat(x[1:30], f(x))
+    f_sens_deb(x::Vector{Float64}, θ::Vector{Float64}) = inject_adj_sens(x, f_sens(x, θ))
+    f_debug(x::Vector{Float64}, θ::Vector{Float64}) = vcat(x[1:30], f(x, θ))
 end
 
-y_len = length(f(ones(num_dyn_vars)))
-h(sol) = apply_outputfun(f, sol)                            # for our model
-h_comp(sol) = apply_two_outputfun(f, f_sens, sol)           # for complete model with dynamics sensitivity
-h_sens(sol) = apply_outputfun(f_sens, sol)                  # for only returning sensitivity 
-h_debug(sol) = apply_outputfun(f_debug, sol)
-h_debug_with_sens(sol) = apply_outputfun(x->vcat(f_debug(x), f_sens_deb(x)), sol)
-h_sens_deb(sol) = apply_two_outputfun(f_debug, f_sens_deb, sol)
+y_len = length(f(ones(num_dyn_vars), get_all_θs(free_dyn_pars_true)))
+h(sol,θ) = apply_outputfun(x->f(x,θ), sol)                            # for our model
+h_comp(sol,θ) = apply_two_outputfun(x->f(x,θ), x->f_sens(x,θ), sol)           # for complete model with dynamics sensitivity
+h_sens(sol,θ) = apply_outputfun(x->f_sens(x,θ), sol)                  # for only returning sensitivity 
+h_debug(sol,θ) = apply_outputfun(x->f_debug(x,θ), sol)
+h_debug_with_sens(sol,θ) = apply_outputfun(x->vcat(f_debug(x,θ), f_sens_deb(x,θ)), sol)
+h_sens_deb(sol,θ) = apply_two_outputfun(x->f_debug(x,θ), x->f_sens_deb(x,θ), sol)
+# data-set output function
+h_data(sol,θ) = apply_outputfun(x -> f(x,θ) .+ σ * randn(size(f(x,θ))), sol)
 
 learning_rate_vec(t::Int, grad_norm::Float64) = const_learning_rate#if (t < 100) const_learning_rate else ([0.1/(t-99.0), 1.0/(t-99.0)]) end#, 1.0, 1.0]  #NOTE Dimensions must be equal to number of free parameters
-learning_rate_vec_red(t::Int, grad_norm::Float64) = t>50 ? const_learning_rate./sqrt(100*t) : const_learning_rate./sqrt(t)
+learning_rate_vec_red(t::Int, grad_norm::Float64) = const_learning_rate./sqrt(t)# t>50 ? const_learning_rate./sqrt(100*t) : const_learning_rate./sqrt(t)
 
 const num_dyn_pars = length(free_dyn_pars_true)#size(dyn_par_bounds, 1)
 realize_model_sens(u::Function, w::Function, pars::Vector{Float64}, N::Int) = problem(
@@ -309,14 +318,6 @@ solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kw
   maxiters = maxiters;
   kwargs...,
 )
-solve_sens_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, myTs::Float64; kwargs...) = solve(
-  realize_model_sens(u, w, free_dyn_pars, N),
-  saveat = 0:myTs:N*Ts,
-  abstol = abstol,
-  reltol = reltol,
-  maxiters = maxiters;
-  kwargs...,
-)
 solvew(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
   realize_model(u, w, free_dyn_pars, N),
   saveat = 0:Ts:N*Ts,
@@ -333,10 +334,7 @@ solve_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::In
     reltol = reltol,
     maxiters = maxiters;
     kwargs...,
-  )
-
-# data-set output function
-h_data(sol) = apply_outputfun(x -> f(x) .+ σ * randn(size(f(x))), sol)
+)
 
 function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, num_stacks::Int=1)
     start_datetime = now()
@@ -370,7 +368,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         # NOTE: The true input is encoded in the solvew_sens()-function, but this function
         # still needs to to take two input arguments, so dummy_input could just be
         # anything, it's not used anyway
-        Y_base = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N ) |> h
+        Y_base = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N ) |> sol -> h(sol,get_all_θs(pars))
 
         # NOTE: SCALAR_OUTPUT is assumed. Edit: I think I generalized to multivariate output in a way that makes this still work
         # Y_base is either a vector of vectors (inner vector is a multi-dimensional output) or a vector of scalars.
@@ -379,7 +377,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     end
 
     function jacobian_model_b(dummy_input, free_pars)
-        jac = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> h_sens
+        jac = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> sol -> h_sens(sol,get_all_θs(free_pars))
         return vcat(jac[N_trans+1:end, :]...)
     end
 
@@ -387,7 +385,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         # NOTE: The true input is encoded in the solvew_sens()-function, but this function
         # still needs to to take two input arguments, so dummy_input could just be
         # anything, it's not used anyway
-        Y_base_deep = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N ) |> h
+        Y_base_deep = solvew(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars, N ) |> sol -> h(sol,get_all_θs(pars))
         # Y_base_deep is either a vector of vectors (inner vector is a multi-dimensional output) or a vector of scalars.
         Y_base_flat = vcat(Y_base_deep[N_trans+1:end]...)
         Y_base_stacked = zeros(num_stacks*length(Y_base_flat))
@@ -399,7 +397,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     end
 
     function jacobian_model_b_stacked(dummy_input, free_pars)
-        jac_deep = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> h_sens
+        jac_deep = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> sol -> h_sens(sol,get_all_θs(free_pars))
         jac_flat = vcat(jac_deep[N_trans+1:end, :]...)
         len = size(jac_flat, 1)
         jac_stacked = zeros(num_stacks*size(jac_flat,1), size(jac_flat,2))
@@ -524,7 +522,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
         # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
         mdl_sens = model_sens_to_use(φ0, u, wmm_m, get_all_θs(free_pars))
-        xp0 = reshape(f_sens_deb(mdl_sens.x0), num_dyn_vars_adj, length(f_sens_deb(mdl_sens.x0))÷num_dyn_vars_adj)
+        xp0 = reshape(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)), num_dyn_vars_adj, length(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)))÷num_dyn_vars_adj)
 
         # ----------------- Actually solving adjoint system ------------------------
         mdl_adj, get_Gp = model_adj_to_use(u, wmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
@@ -583,7 +581,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         dy_est  = (y[y_len+1:end,1]-y[1:end-y_len,1])/Ts
         dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
         sampling_ratio = Int(Ts/Tsλ)
-        solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug
+        solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> sol -> h_debug(sol,get_all_θs(free_pars))
         Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)
         # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
         # mean(temp, dims=2)[:]
@@ -612,8 +610,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         dy_est  = (y[y_len+1:end,1]-y[1:end-y_len,1])/Ts
         dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
         sampling_ratio = Int(Ts/Tsλ)
-        # solve_func(m) = solve_sens_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug  # TODO: DON'T SOLVE SENS HERE!!!!
-        solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> h_debug
+        solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> sol -> h_debug(sol,get_all_θs(free_pars))
         Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)    # NOTE: Have to make sure not to solve problem with forward sensitivities, that might not work and also just defeats purpose of adjoint method
         # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
         # mean(temp, dims=2)[:]
@@ -713,7 +710,7 @@ function get_outputs(expid::String, pars0::Vector{Float64})
     # C = reshape(η[nx+1:end], (n_out, n_tot))
 
     # === Computes output of the baseline model ===
-    Y_base, sens_base = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars0, N) |> h_comp
+    Y_base, sens_base = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), pars0, N) |> sol -> h_comp(sol,get_all_θs(pars0))
 
     # === Computes outputs of the proposed model ===
     # TODO: Should we consider storing and loading white noise, to improve repeatability
@@ -743,7 +740,7 @@ function get_outputs(expid::String, pars0::Vector{Float64})
     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
     calc_mean_y_N_prop(N::Int, free_pars::Vector{Float64}, m::Int) =
-        solvew_sens(u, t -> wmm(m)(t), free_pars, N) |> h_comp
+        solvew_sens(u, t -> wmm(m)(t), free_pars, N) |> sol -> h_comp(sol,get_all_θs(free_pars))
     calc_mean_y_prop(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N_prop(N, free_pars, m)
     Ym_prop, sens_m_prop = solve_in_parallel_sens(m -> calc_mean_y_prop(pars0, m), ms)
     Y_mean_prop = reshape(mean(Ym_prop, dims = 2), :)
@@ -785,14 +782,14 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown (which is zero, I never ID it)
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # Second element of c-vector unknown (all exccept first element of c-vector actually)
-    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
+    # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
@@ -832,7 +829,7 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
         we = (m::Int) -> mk_noise_interp(C_true, XW, m, δ)
 
         for ind = 1:num_stacks
-            nested_y = solvew(u, we(ind), free_dyn_pars_true, N) |> h_data
+            nested_y = solvew(u, we(ind), free_dyn_pars_true, N) |> sol -> h_data(sol,get_all_θs(free_dyn_pars_true))
             y[:,ind] = vcat(nested_y...)
         end
         return y
@@ -844,7 +841,7 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
         # w = mk_newer_noise_interp(a_vec, C_true, demangle_XW(XW, n_tot), 1, n_in, δ, isws[e:e])
         # Linear interpolation
         w = mk_noise_interp(C_true, XW, 1, δ)
-        nested_y = solvew(u, w, free_dyn_pars_true, N) |> h_data
+        nested_y = solvew(u, w, free_dyn_pars_true, N) |> sol -> h_data(sol,get_all_θs(free_dyn_pars_true))
         return vcat(nested_y...)
     end
 
@@ -857,8 +854,6 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
         if num_stacks > 1
             Y = solve_in_parallel_block(e -> solve_block(e, isws), es, num_stacks)
         else
-            # # solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
-            # Y = solve_in_parallel(e -> solvew(u, we(e), free_dyn_pars_true, N) |> h_data, es)
             Y = solve_in_parallel(e -> solve_wrapper(e, isws), es)
         end
         return Y
@@ -880,7 +875,7 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     # # in the same Y
     # @warn "Debugging sim. First 5 XW: $(XW[1:5])"
     # wdebug = mk_noise_interp(C_true, XW, 1, δ)
-    # my_y = solvew(u, wdebug, free_dyn_pars_true, N) |> h
+    # my_y = solvew(u, wdebug, free_dyn_pars_true, N) |> sol -> h(sol,get_all_θs(free_dyn_pars_true))
     # writedlm("data/experiments/pendulum_sensitivity/my_y.csv", my_y, ',')
 
     reset_isws!(isws)
@@ -1086,7 +1081,7 @@ function simulate_system(
     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), C, XWm, m, n_in, δ, isws)
 
     calc_mean_y_N(N::Int, free_pars::Vector{Float64}, m::Int) =
-        solvew(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h
+        solvew(exp_data.u, t -> wmm(m)(t), free_pars, N) |> sol -> h(sol,get_all_θs(free_pars))
     calc_mean_y(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, free_pars, m)
     return solve_in_parallel(m -> calc_mean_y(free_pars, m), collect(1:M))   # Returns Ym
 end
@@ -1142,7 +1137,7 @@ function simulate_system_sens(
     # wmm(m::Int) = mk_newer_noise_interp(view(η, 1:nx), dmdl.Cd, XWm, m, n_in, δ, isws)
 
     calc_mean_y_N(N::Int, free_pars::Vector{Float64}, m::Int) =
-        solvew_sens(exp_data.u, t -> wmm(m)(t), free_pars, N) |> h_comp
+        solvew_sens(exp_data.u, t -> wmm(m)(t), free_pars, N) |> sol -> h_comp(sol,get_all_θs(free_pars))
     calc_mean_y(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, free_pars, m)
     return solve_in_parallel_sens(m -> calc_mean_y(free_pars, m), collect(1:M))  # Returns Ym and JacsYm
 end
@@ -1487,16 +1482,16 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     # Total data-set will be of length K*N, so K number of smaller data-sets will be used to compute cost
     # E = size(Y, 2)
     # DEBUG
-    E = 100
-    myM = 1000#8
+    E = 1#00
+    myM = 100#8
     Zm = [randn(Nw, n_tot) for m = 1:myM*K]
     myZeros = [zeros(Nw, n_tot) for k=1:K]
 
-    # ref = 1.4#free_dyn_pars_true[1]
-    # myδ = 0.01
-    # vals = ref-11myδ:myδ:ref+11myδ
-    vals = 1.37:0.005:1.43
-    # vals = ref-myδ:myδ:ref+myδ
+    ref = 2.1#free_dyn_pars_true[1]
+    myδ = 0.1
+    vals = ref-5myδ:myδ:ref+5myδ
+    # vals = 1.37:0.005:1.43
+    # # vals = ref-myδ:myδ:ref+myδ
 
     cost_vals = [zeros(length(vals)) for e=1:E]
     cost_base = [zeros(length(vals)) for e=1:E]
@@ -2274,7 +2269,7 @@ function for_sens_debug(expid::String, par_val::Float64, K::Int)
         cost = get_cost_value(ystacked, ysim_stacked)
         cost2 = get_cost_value(ystacked, ysim_stacked2)
         cost_grad = first(get_cost_gradient(ystacked, ysim_stacked, [jac_stacked]))
-        num_cost = (cost2-cost)/myδ
+        num_cost_grad = (cost2-cost)/myδ
     else
         cost = NaN
         cost2 = NaN
@@ -2283,7 +2278,7 @@ function for_sens_debug(expid::String, par_val::Float64, K::Int)
     end
 
     # for delta, something seems funky with computing the output, works fine if we just check sensitivity of every variable...
-    return ysim_stacked, ysim_stacked2, jac_stacked, num_y_grad, cost_grad, num_cost
+    return ysim_stacked, ysim_stacked2, jac_stacked, num_y_grad, cost_grad, num_cost_grad
 end
 
 # NOTE: Only debugs gradient of cost function
@@ -2296,6 +2291,47 @@ function for_sens_debug_multipar(expid::String, par_vals::Vector{Float64}, K::In
     end
 
     return cost_grads, num_costs
+end
+
+function state_sens_debug(expid::String, par_val::Float64, K::Int)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_tot = nx*n_in
+    n_out = W_meta.n_out
+    dist_sens_inds = W_meta.free_par_inds
+
+    Zm = [randn(Nw, n_tot) for m = 1:K]
+
+
+    η = exp_data.get_all_ηs([par_val])
+    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
+    # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+    XWm = simulate_noise_process_mangled(dmdl, Zm)
+    wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+
+    myδ = 0.01
+    sol1 = solvew_sens(exp_data.u, t -> wmm(1)(t), [par_val], N)
+    sol2 = solvew_sens(exp_data.u, t -> wmm(1)(t), [par_val.+myδ], N)
+    mat1 = hcat(sol1.u...)
+    mat2 = hcat(sol2.u...)
+    x1 = mat1[1:num_dyn_vars, :]
+    x1θ = mat1[num_dyn_vars+1:end, :]
+    x2 = mat2[1:num_dyn_vars, :]
+    x2θ = mat2[num_dyn_vars+1:end, :]
+    y1 = hcat([f(mat1[:,ind], get_all_θs([par_val])) for ind=1:size(mat1,2)]...)
+    y2 = hcat([f(mat2[:,ind], get_all_θs([par_val.+myδ])) for ind=1:size(mat2,2)]...)
+    y1θ = hcat([f_sens(mat1[:,ind], get_all_θs([par_val])) for ind=1:size(mat1,2)]...)
+    y2θ = hcat([f_sens(mat2[:,ind], get_all_θs([par_val.+myδ])) for ind=1:size(mat2,2)]...)
+
+    num_xθ = (x2-x1)./myδ
+    num_yθ = (y2-y1)./myδ
+
+    return x1, x2, x1θ, x2θ, num_xθ, y1, y2, y1θ, y2θ, num_yθ
 end
 
 function disturbance_sensitivity_debug(expid::String)
