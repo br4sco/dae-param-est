@@ -547,10 +547,12 @@ function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     bias::Float64=0.0, scale::Float64=1.0)::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
 
     mdl, meta_raw, η0 = gen(Ts, scale=scale)
-    metadata = DataFrame(nx = meta_raw[1], n_in = meta_raw[2], n_out = meta_raw[3], η = η0, bias=bias, num_rel = M, num_samp=Nw+1)
+    metadata = DataFrame(nx = meta_raw[1], n_in = meta_raw[2], n_out = meta_raw[3], η = η0, bias=bias, num_rel = M)
     n_tot = size(mdl.Cd,2)
 
-    ZS = [randn(Nw+1, n_tot) for m = 1:M]   # Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}, i.e. a total of N_w+1 samples
+    # We used to have Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}, i.e. a total of N_w+1 samples, 
+    # but I think I changed the meaning of N_w, so just N_w is what it should be now
+    ZS = [randn(Nw, n_tot) for m = 1:M]
     XW = simulate_noise_process_mangled(mdl, ZS)
     XW, get_system_output_mangled(mdl, XW).+ bias, metadata
 end
