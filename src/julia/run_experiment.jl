@@ -343,7 +343,7 @@ solve_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::In
 
 function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, num_stacks::Int=1)
     start_datetime = now()
-    exp_data, isws = get_experiment_data(expid, num_stacks)
+    exp_data, isws = get_experiment_data(expid)
     W_meta = exp_data.W_meta
     u = exp_data.u
     Y = exp_data.Y
@@ -753,7 +753,7 @@ function get_outputs(expid::String, pars0::Vector{Float64})
     return Y, Y_base, sens_base, Ym_prop, Y_mean_prop, sens_m_prop
 end
 
-function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{ExperimentData, Array{InterSampleWindow, 1}}
+function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSampleWindow, 1}}
     # A single realization of the disturbance serves as input
     # input is assumed to contain the input signal, and not the state
     input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')[:]
@@ -771,7 +771,7 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     n_in = Int(W_meta_raw[1,2])
     n_out = Int(W_meta_raw[1,3])
     num_rel = Int(W_meta_raw[1,6])
-    E = num_rel÷num_stacks
+    E = num_rel
     n_tot = nx*n_in
     # Parameters of true system. η = [a_pars c_pars], where the first nx elements are paramters of the A-matrix, and the remaining are parameters of the C-matrix
     η_true = W_meta_raw[:,4]
@@ -824,23 +824,6 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
     # @warn "USING SINUSOID AS INPUT INSTEAD"
     u(t::Float64) = linear_interpolation_multivar(input, δ, n_u_out)(t)
 
-    function solve_block(e::Int, isws::Vector{InterSampleWindow})::Matrix{Float64}
-        y = zeros(y_len*(N+1), num_stacks)
-        # Only reads those realisations of XW corresponding to the currently treated block of num_stacks realisations
-        # ntasks=1 since using several parallel processes only seemed to cause odd bugs
-        XW = transpose(CSV.read("data/experiments/$(expid)/XW_T.csv", CSV.Tables.matrix, ntasks=1; header=false, skipto=(e-1)*num_stacks+1, limit=num_stacks))
-        # # Exact interpolation
-        # we = (m::Int) -> mk_newer_noise_interp(a_vec, C_true, demangle_XW(XW, n_tot), m, n_in, δ, isws[(e-1)*num_stacks+1:e*num_stacks])
-        # Linear interpolation
-        we = (m::Int) -> mk_noise_interp(C_true, XW, m, δ)
-
-        for ind = 1:num_stacks
-            nested_y = solvew(u, we(ind), free_dyn_pars_true, N) |> sol -> h_data(sol,get_all_θs(free_dyn_pars_true))
-            y[:,ind] = vcat(nested_y...)
-        end
-        return y
-    end
-
     function solve_wrapper(e::Int, isws::Vector{InterSampleWindow})::Vector{Float64}
         XW = transpose(CSV.read("data/experiments/$(expid)/XW_T.csv", CSV.Tables.matrix; header=false, skipto=e, limit=1))
         # # Exact interpolation
@@ -857,12 +840,7 @@ function get_experiment_data(expid::String, num_stacks::Int=1)::Tuple{Experiment
         # @assert (Nw <= size(XWs, 1)) "Disturbance data size mismatch ($(Nw) > $(size(XWs, 1)))"
         es = 1:E
         # we = mk_we(XWs, isws)
-        if num_stacks > 1
-            Y = solve_in_parallel_block(e -> solve_block(e, isws), es, num_stacks)
-        else
-            Y = solve_in_parallel(e -> solve_wrapper(e, isws), es)
-        end
-        return Y
+        solve_in_parallel(e -> solve_wrapper(e, isws), es)  # returns Y
     end
 
     if isfile(data_Y_path(expid))
@@ -1488,7 +1466,7 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     # Total data-set will be of length K*N, so K number of smaller data-sets will be used to compute cost
     # E = size(Y, 2)
     # DEBUG
-    E = 100
+    E = 1
     myM = 100#8
     Zm = [randn(Nw, n_tot) for m = 1:myM*K]
     # myZeros = [zeros(Nw, n_tot) for k=1:K]
@@ -1498,8 +1476,7 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     ref = 0.0#free_dyn_pars_true[1]
     myδ = 0.1
     # vals = ref-10myδ:myδ:ref+10myδ
-    vals = 0.5:0.2:2.5
-    # vals = 1.37:0.005:1.43
+    vals = 0.5:0.2:3.5
     # # vals = ref-myδ:myδ:ref+myδ
 
     cost_vals = [zeros(length(vals)) for e=1:E]

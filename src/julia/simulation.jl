@@ -75,21 +75,6 @@ function solve_in_parallel(solve, is)
   Y
 end
 
-function solve_in_parallel_block(solve, is, k)
-    M = length(is)
-    p = Progress(M, 1, "Running $(M) simulations with block size $k...", 50)
-    y1 = solve(is[1])
-    ny = length(y1[1])
-    Y = zeros(ny*size(y1,1), M*k)
-    Y[:, 1:k] += y1
-    next!(p)
-    Threads.@threads for m = 2:M
-        Y[:, (m-1)*k+1:m*k] += solve(is[m])
-        next!(p)
-    end
-    return Y
-end
-
 # Returns matrix, with np rows and M columns
 function solve_adj_in_parallel(solve, is)
   M = length(is)
