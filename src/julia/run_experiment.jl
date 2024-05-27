@@ -334,7 +334,7 @@ solvew(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs.
 solve_customstep(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int, myTs::Float64; kwargs...) = solve(
     realize_model(u, w, free_dyn_pars, N),
     # Because of numerical inaccuracies, solve() often returns one sample more than the length of 0:myTs:N*Ts, just past time N*Ts. To avoid this, we subtract 0.0001
-    saveat = 0:myTs:N*Ts-0.0001,
+    saveat = 0:myTs:N*Ts-myTs/2,
     abstol = abstol,
     reltol = reltol,
     maxiters = maxiters;
@@ -532,7 +532,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         # ----------------- Actually solving adjoint system ------------------------
         mdl_adj, get_Gp = model_adj_to_use(u, wmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
         adj_prob = problem_reverse(mdl_adj, N, Ts)
-        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-Tso/2), abstol =  abstol, reltol = reltol,
             maxiters = maxiters)
 
         return get_Gp(adj_sol)
@@ -561,7 +561,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         # ----------------- Actually solving adjoint system ------------------------
         mdl_adj, get_Gp = model_adj_to_use_dist_sens(u, wmm_m, xwmm_m, vmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, B̃, B̃ηa, η, na)
         adj_prob = problem_reverse(mdl_adj, N, Ts)
-        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-0.00001), abstol =  abstol, reltol = reltol,
+        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-Tso/2), abstol =  abstol, reltol = reltol,
             maxiters = maxiters)
 
         return get_Gp(adj_sol)
@@ -654,7 +654,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     # # Use this block of code to move random number generator forward exactly as if experiments 1:e_skip had been performed
     # # This allows for exact reproducibility of any experiment, regardless of which experiment we start with
     # e_skip = 2
-    # for t=1:5*e_skip# 1:maxiters
+    # for t=1:5*e_skip# 1:maxiters*e_skip is what it should say
     #     for m=1:2M_rate(t)
     #         randn(Nw, n_tot)
     #     end
