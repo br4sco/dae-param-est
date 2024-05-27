@@ -1,5 +1,8 @@
 using Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra
 
+seed = 54321    # Important that random samples generated here are independent of those generated in run_experiment.jl
+Random.seed!(seed)
+
 struct CT_SS_Model
     # Continuous-time state-space model on the form
     # dx/dt = A*x + B*u

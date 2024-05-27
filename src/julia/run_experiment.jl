@@ -58,10 +58,10 @@ model_id = DELTA
 # === TIME ===
 # The relationship between number of data samples N and number of noise samples
 # Nw is given by Nw >= (Ts/δ)*N
-const δ = 0.01                  # noise sampling time
-const Ts = 0.1                  # step-size
-const Tsλ = 0.01
-const Tso = 0.01
+const δ = 2e-5                  # noise sampling time
+const Ts = 2e-4                  # step-size
+const Tsλ = 2e-5
+const Tso = 2e-5
 # const δ = 0.001                  # noise sampling time
 # const Ts = 0.001                  # step-size
 const M = 4#00       # Number of monte-carlo simulations used for estimating mean
@@ -1466,7 +1466,7 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     # Total data-set will be of length K*N, so K number of smaller data-sets will be used to compute cost
     # E = size(Y, 2)
     # DEBUG
-    E = 1
+    E = 10
     myM = 100#8
     Zm = [randn(Nw, n_tot) for m = 1:myM*K]
     # myZeros = [zeros(Nw, n_tot) for k=1:K]
@@ -1476,7 +1476,7 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     ref = 0.0#free_dyn_pars_true[1]
     myδ = 0.1
     # vals = ref-10myδ:myδ:ref+10myδ
-    vals = 0.5:0.2:3.5
+    vals = 0.5:0.1:1.6
     # # vals = ref-myδ:myδ:ref+myδ
 
     cost_vals = [zeros(length(vals)) for e=1:E]
@@ -1515,6 +1515,62 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     duration = now()-time_start
 
     return all_pars, cost_vals, cost_base, duration#, grad_vals
+end
+
+function gridsearch_baseline(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    E = 25
+
+    ref = 0.0#free_dyn_pars_true[1]
+    myδ = 0.1
+    # vals = ref-10myδ:myδ:ref+10myδ
+    # vals = 0.5:0.05:3.5 # RAN ALREADY
+    vals = 3.6:0.05:10.0
+    # # vals = ref-myδ:myδ:ref+myδ
+
+    # cost_vals = [zeros(length(vals)) for e=1:E]
+    cost_base = [zeros(length(vals)) for e=1:E]
+    # grad_vals = [zeros(length(vals)) for e=1:E]
+    all_pars = zeros(length(free_dyn_pars_true), length(vals))
+    time_start = now()
+    # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
+    for (ind, my_par) in enumerate(vals)
+        for e = 1:E
+            @info "Computing cost for p=$my_par, or after clamping, p=$(clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2]))"
+            pars = [clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2])]
+
+            all_pars[:,ind] = pars
+            Ybase = solvew(exp_data.u, t -> zeros(3), pars, N) |> sol -> vcat(h(sol,get_all_θs(pars))...)
+            cost_base[e][ind] += mean((Y[N_trans+1:end, e].-Ybase[N_trans+1:end]).^2)
+            
+            # cost_base[e][ind] = cost_base[e][ind]/K
+            # Ym = mean(simulate_system(exp_data, pars, myM, dist_sens_inds, isws, Zm), dims=2)
+
+            # # BONUS: Computing cost function gradient
+            # Ymsens, jacsYm = simulate_system_sens(exp_data, pars, 1, dist_sens_inds, isws)
+            # grad_vals[e][ind] = first(get_cost_gradient(Y[N_trans+1:end, e], Ymsens[:,1:1], jacsYm[1:1], N_trans))
+            @info "Completed computing cost for e = $e out of $E, ind =  $ind out of $(length(vals))"
+        end
+        writedlm("data/experiments/tmp/backup_cost_base_par$ind.csv", [cost_base[e][ind] for e=1:E], ',')
+    end
+    duration = now()-time_start
+
+    return all_pars, cost_base, duration#, grad_vals
 end
 
 # Different parameter values used for each e
