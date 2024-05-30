@@ -64,13 +64,15 @@ const Tsλ = 2e-5
 const Tso = 2e-5
 # const δ = 0.001                  # noise sampling time
 # const Ts = 0.001                  # step-size
-const M = 4#00       # Number of monte-carlo simulations used for estimating mean
+const M = Threads.nthreads()÷2#4#00       # Number of monte-carlo simulations used for estimating mean
 # TODO: Surely we don't need to collect these, a range should work just as well?
 const ms = collect(1:M)
 const W = 100           # Number of intervals for which isw stores data
 const Q = 1000          # Number of conditional samples stored per interval
+const interp_type = Cubic()
 
-M_rate_max = min(4, M)#100#8#4#16
+
+M_rate_max = M#min(4, M)#100#8#4#16   
 # max_allowed_step = 1.0  # Maximum magnitude of step that SGD is allowed to take
 # M_rate(t) specifies over how many realizations the output jacobian estimate
 # should be computed at iteration t. NOTE: A total of 2*M_rate(t) iterations
@@ -207,7 +209,7 @@ elseif model_id == DELTA
     model_sens_to_use = delta_robot_gc_γsens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_adjoint_γonly
+    model_adj_to_use = delta_robot_gc_adjoint_γonly_new
     sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
     model_stepbystep = delta_adj_stepbystep_NEW
@@ -515,14 +517,23 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     end
 
     function compute_Gp_adj(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m)
-        # NOTE: m shouldn't be larger than M÷2
-        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
-        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
-        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
-        der_est2 = get_der_est(0.0:Tsλ:N*Ts, x2_func)
+        # --------------------- Old way, using my custom-made interpolation -------------------------
+        # # NOTE: m shouldn't be larger than M÷2
+        # x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
+        # x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
+        # der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
+        # der_est2 = get_der_est(0.0:Tsλ:N*Ts, x2_func)
+        # # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        # dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
+        # dx2 = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est2)
+        # ------------------ New way, using built-in more powerful interpolation functions ----------------------------
+        x_func  = extrapolate(scale(interpolate(xvec1, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec1,2)), Line())
+        x2_func = extrapolate(scale(interpolate(xvec2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec2,2)), Line())
+        der_est  = get_der_est2(0.0:Tsλ:N*Ts, x_func, size(xvec1,2))
+        der_est2 = get_der_est2(0.0:Tsλ:N*Ts, x2_func, size(xvec1,2))
         # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
-        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
-        dx2 = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est2)
+        dx = extrapolate(scale(interpolate(der_est, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts-Tsλ/2, 1:size(xvec1,2)), Line())
+        dx2 = extrapolate(scale(interpolate(der_est2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts-Tsλ/2, 1:size(xvec2,2)), Line())
 
         # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
         # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
@@ -581,16 +592,16 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         XWm = simulate_noise_process_mangled(dmdl, Zm)
         wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
 
-        # NOTE: No optoin of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
-        y_func  = linear_interpolation_multivar(y[:,1], Ts, y_len)
+        # NOTE: No option of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
+        # y_func  = linear_interpolation_multivar(y[:,1], Ts, y_len)        # Old, custom interpolation
+        y_func  = extrapolate(scale(interpolate(transpose(reshape(y[:,1], y_len, :)), (BSpline(interp_type), NoInterp())), 0.0:Ts:N*Ts, 1:y_len), Line())   # New, better interpolation
         dy_est  = (y[y_len+1:end,1]-y[1:end-y_len,1])/Ts
-        dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
+        # dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)        # Old, custom interpolation
+        dy_func = extrapolate(scale(interpolate(transpose(reshape(dy_est, y_len, :)), (BSpline(interp_type), NoInterp())), 0.0:Ts:(N-1)*Ts, 1:y_len), Line())   # New, better interpolation
         sampling_ratio = Int(Ts/Tsλ)
         solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> sol -> h_debug(sol,get_all_θs(free_pars))
         Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)
-        # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
-        # mean(temp, dims=2)[:]
-        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean), dims=2)[:]
+        mean(solve_adj_in_parallel2(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean, length(free_pars)), dims=2)[:]
     end
 
     function get_gradient_adjoint_distsens(y, free_pars, compute_Gp, M_mean::Int=1)
@@ -620,7 +631,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
         # mean(temp, dims=2)[:]
         na = length(findall(W_meta.free_par_inds .<= nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
-        mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:M_mean), dims=2)[:]
+        # mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:M_mean), dims=2)[:]
+        mean(solve_adj_in_parallel2(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:M_mean, length(free_pars)), dims=2)[:]
     end
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
@@ -911,6 +923,17 @@ function get_der_est(ts, func::Function)
     return der_est
 end
 
+# For new and improved interpolation handling
+function get_der_est2(ts, func, dim)
+    der_est = zeros(length(ts)-1, dim)
+    for (i,t) = enumerate(ts)
+        if i > 1
+            der_est[i-1,:] = (func(t,1:dim)-func(ts[i-1],1:dim))./(t-ts[i-1])
+        end
+    end
+    return der_est
+end
+
 function get_mvar_cubic(ts, der_est::AbstractMatrix{Float64})
     # Rows of der_est are assumed to be different values of t, columns of
     # matrix are assumed to be different elements of the vector-valued process
@@ -1123,7 +1146,8 @@ function simulate_system_sens(
     calc_mean_y_N(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew_sens(exp_data.u, t -> wmm(m)(t), free_pars, N) |> sol -> h_comp(sol,get_all_θs(free_pars))
     calc_mean_y(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, free_pars, m)
-    return solve_in_parallel_sens(m -> calc_mean_y(free_pars, m), collect(1:M))  # Returns Ym and JacsYm
+    return solve_in_parallel_sens2(m -> calc_mean_y(free_pars, m), collect(1:M), ny, length(free_pars), N)  # Returns Ym and JacsYm
+    # return solve_in_parallel_sens(m -> calc_mean_y(free_pars, m), collect(1:M))  # Returns Ym and JacsYm
 end
 
 # Simulates system with newly generated white noise
