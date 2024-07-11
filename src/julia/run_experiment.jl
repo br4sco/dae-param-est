@@ -49,7 +49,7 @@ const MOH_MDL  = 2
 const DELTA    = 3
 
 # Selects which model to adapt code to
-model_id = DELTA
+model_id = DELTA     # Remember that δ and T_s might depend on the model, I used different ones for Pendulum and for Delta robot
 
 # ==================
 # === PARAMETERS ===
@@ -58,10 +58,10 @@ model_id = DELTA
 # === TIME ===
 # The relationship between number of data samples N and number of noise samples
 # Nw is given by Nw >= (Ts/δ)*N
-const δ = 2e-5                  # noise sampling time
-const Ts = 2e-4                  # step-size
-const Tsλ = 2e-5
-const Tso = 2e-5
+const δ = 2e-5#0.01#2e-5                  # noise sampling time
+const Ts = 2e-4#0.1#2e-4                  # step-size
+const Tsλ = 2e-5#0.01#2e-5
+const Tso = 2e-5#0.01#2e-5
 # const δ = 0.001                  # noise sampling time
 # const Ts = 0.001                  # step-size
 const M = Threads.nthreads()÷2#4#00       # Number of monte-carlo simulations used for estimating mean
@@ -166,7 +166,7 @@ if model_id == PENDULUM
 
     Fpk = (x, dx) -> [0.; 0.; abs(x[4])*x[4]; abs(x[5])*x[5]; 0.; 0.; 0.;;]
     Fpm = (x, dx) -> [.0; .0; dx[4]; dx[5]+g; .0; .0; .0;;]
-    FpL = (x, dx) -> [ .0; .0; .0; .0; -2L; .0; .0;;]
+    FpL = (x, dx) -> [.0; .0; .0; .0; -2L; .0; .0;;]
     deb_Fp = Fpk
 
     f(x::Vector{Float64}, θ::Vector{Float64}) = x[7]               # applied on the state at each step
@@ -205,8 +205,8 @@ elseif model_id == DELTA
     # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
-    const_learning_rate = [0.05]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.05, 0.05, 0.05, 0.05, 0.05, 0.2]
-    model_sens_to_use = delta_robot_gc_γsens
+    const_learning_rate = [0.2]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
+    model_sens_to_use = delta_robot_gc_γsens#allparsens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_adjoint_γonly_new
@@ -319,6 +319,8 @@ const maxiters = Int64(1e8)
 
 solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
   realize_model_sens(u, w, free_dyn_pars, N),
+  # In e.g. solve_customstep we subtract half the sampling interval from the final time. This seems enough to make sure the length of sol.t is actually
+  # N samples. However, here we seem to have to subtract a whole sampling-interval extra for the same effect.
   saveat = 0:Ts:N*Ts,
   abstol = abstol,
   reltol = reltol,
@@ -327,6 +329,8 @@ solvew_sens(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kw
 )
 solvew(u::Function, w::Function, free_dyn_pars::Vector{Float64}, N::Int; kwargs...) = solve(
   realize_model(u, w, free_dyn_pars, N),
+  # In e.g. solve_customstep we subtract half the sampling interval from the final time. This seems enough to make sure the length of sol.t is actually
+  # N samples. However, here we seem to have to subtract a whole sampling-interval extra for the same effect.
   saveat = 0:Ts:N*Ts,
   abstol = abstol,
   reltol = reltol,
@@ -441,7 +445,6 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         opt_pars_baseline[:, e] = coef(baseline_result)
 
         println("Completed for dataset $e for parameters $(opt_pars_baseline[:,e])")
-        writedlm(joinpath(data_dir, "tmp/backup_baseline_e$e.csv"), opt_pars_baseline[:,e], ',')
 
         # Sometimes (the first returned value I think) the baseline_trace
         # has no elements, and therefore doesn't contain the metadata x
@@ -450,6 +453,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
                 push!(trace_base[e], trace_base[e][end]+baseline_result.trace[j].metadata["dx"])
             end
         end
+        writedlm(joinpath(data_dir, "tmp/backup_baseline_e$e.csv"), opt_pars_baseline[:,e], ',')
+        writedlm(joinpath(data_dir, "tmp/backup_baseline_trace_e$e.csv"), trace_base[e], ',')
         baseline_durations[e] = now()-time_start
     end
 
@@ -491,7 +496,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1) # x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[m])
         x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2) # x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, Xcomp_m[M÷2+m])
         der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
-        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise (edit: more than N+1 elements or what?)
         dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
         
 
@@ -587,7 +592,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
 
         η = exp_data.get_all_ηs(free_pars)
 
-        dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+        dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
         XWm = simulate_noise_process_mangled(dmdl, Zm)
         wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
@@ -747,7 +752,7 @@ function get_outputs(expid::String, pars0::Vector{Float64})
             Z_sens[m][:, (i-1)*n_sens+nx+1:i*n_sens] = randn(Nw, q_a*nx)
         end
     end
-    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+    dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Z_sens)
     wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
@@ -828,7 +833,7 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
                     # ends, so we require a margin of a few samples of the noise
                     # to ensure that we can provide such values. EDIT: TODO: Do we really? Or was this just because of your poorly implemented interpolation? Let's try having margin 0
     Nw = size(input, 1)÷n_in
-    N = Int((Nw - N_margin)*δ/Ts)÷y_len     # Number of steps we can take
+    N = Int((Nw - N_margin)*(δ/Ts))÷y_len     # Number of steps we can take
     W_meta = DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds, num_rel)
 
     # u(t::Float64) = sin(t)*ones(3)
@@ -1078,7 +1083,7 @@ function simulate_system(
     # C = reshape(η[nx+1:end], (n_out, n_tot))  # Not correct when disturbance model is parametrized, use dmdl.Cd instead
 
     # dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, nx, n_out), δ)
-    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
+    dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
     wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
@@ -1134,7 +1139,7 @@ function simulate_system_sens(
     # η = p[dθ+1: dθ+dη]
     # # C = reshape(η[nx+1:end], (n_out, n_tot))
 
-    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
+    dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
     wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
@@ -1146,7 +1151,7 @@ function simulate_system_sens(
     calc_mean_y_N(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew_sens(exp_data.u, t -> wmm(m)(t), free_pars, N) |> sol -> h_comp(sol,get_all_θs(free_pars))
     calc_mean_y(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, free_pars, m)
-    return solve_in_parallel_sens2(m -> calc_mean_y(free_pars, m), collect(1:M), ny, length(free_pars), N)  # Returns Ym and JacsYm
+    return solve_in_parallel_sens2(m -> calc_mean_y(free_pars, m), collect(1:M), y_len, length(free_pars), N)  # Returns Ym and JacsYm
     # return solve_in_parallel_sens(m -> calc_mean_y(free_pars, m), collect(1:M))  # Returns Ym and JacsYm
 end
 
@@ -1163,7 +1168,8 @@ function simulate_system_sens(
     n_in = W_meta.n_in
     n_tot = nx*n_in
     Nw = exp_data.Nw
-    Zm = [randn(Nw, n_tot) for m = 1:M]
+    # Zm = [randn(Nw, n_tot*(length(free_pars)+1)) for m = 1:M]   # Differentiation first, discretisation second
+    Zm = [randn(Nw, n_tot) for m = 1:M]   # Discretisation first, differentiation second
     simulate_system_sens(exp_data, free_pars, M, dist_sens_inds, isws, Zm)
 end
 
@@ -1413,7 +1419,7 @@ function read_from_backup(dir::String, E::Int)
     avg_pars_proposed = zeros(k, E)
     trace_proposed = [zeros(its, k) for e=1:E]
     for e=1:E
-        # opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
+        opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
         opt_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_proposed_e$e.csv"), ',')
         avg_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_average_e$e.csv"), ',')
         trace_proposed[e] = readdlm(joinpath(dir, "backup_trace_e$e.csv"), ',')
@@ -1499,9 +1505,11 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
 
     ref = 0.0#free_dyn_pars_true[1]
     myδ = 0.1
-    # vals = ref-10myδ:myδ:ref+10myδ
-    vals = 0.5:0.1:1.6
-    # # vals = ref-myδ:myδ:ref+myδ
+    # # vals = ref-10myδ:myδ:ref+10myδ
+    # vals = 0.5:0.1:1.6
+    # # # vals = ref-myδ:myδ:ref+myδ
+    # vals = 0.5:0.25:1.5
+    vals = 6.25-2*1.0:1.0:6.25+2*1.0
 
     cost_vals = [zeros(length(vals)) for e=1:E]
     cost_base = [zeros(length(vals)) for e=1:E]
@@ -1564,7 +1572,8 @@ function gridsearch_baseline(expid::String, N_trans::Int = 0)
     myδ = 0.1
     # vals = ref-10myδ:myδ:ref+10myδ
     # vals = 0.5:0.05:3.5 # RAN ALREADY
-    vals = 3.6:0.05:10.0
+    # vals = 3.6:0.05:10.0
+    vals = 0.5:0.5:12.0
     # # vals = ref-myδ:myδ:ref+myδ
 
     # cost_vals = [zeros(length(vals)) for e=1:E]
@@ -1595,6 +1604,65 @@ function gridsearch_baseline(expid::String, N_trans::Int = 0)
     duration = now()-time_start
 
     return all_pars, cost_base, duration#, grad_vals
+end
+
+function gridsearch_baseline_with_traj(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    E = 5#25
+
+    ref = 0.0#free_dyn_pars_true[1]
+    myδ = 0.1
+    # vals = ref-10myδ:myδ:ref+10myδ
+    # vals = 0.5:0.05:3.5 # RAN ALREADY
+    # vals = 3.6:0.05:10.0
+    vals = 0.5:0.5:12.0
+    # # vals = ref-myδ:myδ:ref+myδ
+
+    # cost_vals = [zeros(length(vals)) for e=1:E]
+    cost_base = [zeros(length(vals)) for e=1:E]
+    # grad_vals = [zeros(length(vals)) for e=1:E]
+    all_pars = zeros(length(free_dyn_pars_true), length(vals))
+    time_start = now()
+    Ybase_log = [zeros(y_len*(N+1), length(vals)) for e=1:E]
+    # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
+    for (ind, my_par) in enumerate(vals)
+        for e = 1:E
+            @info "Computing cost for p=$my_par, or after clamping, p=$(clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2]))"
+            pars = [clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2])]
+
+            all_pars[:,ind] = pars
+            Ybase = solvew(exp_data.u, t -> zeros(3), pars, N) |> sol -> vcat(h(sol,get_all_θs(pars))...)
+            Ybase_log[e][:,ind] = Ybase
+            cost_base[e][ind] += mean((Y[N_trans+1:end, e].-Ybase[N_trans+1:end]).^2)
+            
+            # cost_base[e][ind] = cost_base[e][ind]/K
+            # Ym = mean(simulate_system(exp_data, pars, myM, dist_sens_inds, isws, Zm), dims=2)
+
+            # # BONUS: Computing cost function gradient
+            # Ymsens, jacsYm = simulate_system_sens(exp_data, pars, 1, dist_sens_inds, isws)
+            # grad_vals[e][ind] = first(get_cost_gradient(Y[N_trans+1:end, e], Ymsens[:,1:1], jacsYm[1:1], N_trans))
+            @info "Completed computing cost for e = $e out of $E, ind =  $ind out of $(length(vals))"
+        end
+        writedlm("data/experiments/tmp/backup_cost_base_par$ind.csv", [cost_base[e][ind] for e=1:E], ',')
+    end
+    duration = now()-time_start
+
+    return all_pars, cost_base, duration, Ybase_log, Y
 end
 
 # Different parameter values used for each e
@@ -2116,7 +2184,7 @@ function adjoint_dist_debug(expid::String)
     # ---------------------------------------------------------------------------------------------------
     
     η_true = exp_data.get_all_ηs(free_pars_true)
-    dmdl_sens = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η_true, nxw, n_out), δ, dist_par_inds)
+    dmdl_sens = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η_true, nxw, n_out), δ, dist_par_inds)
     # NOTE: OPTION 1: Use the rows below here for linear interpolation
     @time XWm_sens = simulate_noise_process_mangled(dmdl_sens, Zm)
     wmm_sens(m::Int) = mk_noise_interp(dmdl_sens.Cd, XWm_sens, m, δ)
@@ -2389,7 +2457,7 @@ function for_sens_debug(expid::String, par_val::Float64, K::Int)
 
     # all_y_len = length(f_sens(ones(num_dyn_vars)))  
 
-    myδ = 0.001
+    myδ = 0.01
     Ysim, jacs = simulate_system_sens(exp_data, [par_val], K, dist_sens_inds, isws, Zm)
     Ysim2 = simulate_system(exp_data, [par_val.+myδ], K, dist_sens_inds, isws, Zm)
     ystacked = vcat(Y[:,1:K]...)
@@ -2417,6 +2485,50 @@ function for_sens_debug(expid::String, par_val::Float64, K::Int)
 
     # for delta, something seems funky with computing the output, works fine if we just check sensitivity of every variable...
     return ysim_stacked, ysim_stacked2, jac_stacked, num_y_grad, cost_grad, num_cost_grad
+end
+
+# Single-realization cost wrt one parameter
+function cost_det_plot_with_sens_1d(expid::String, par_val::Float64, myδ::Float64, num_steps::Int, K::Int)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_tot = nx*n_in
+    dist_sens_inds = W_meta.free_par_inds
+
+    # @warn "Zm now generated for differentiation-first approach! It's all hard-coded right now"
+    # Zm = [randn(Nw, 2n_tot) for m = 1:100]#K]
+    Zm = [randn(Nw, n_tot) for m = 1:100]#K]
+    ystacked = vcat(Y[:,1:K]...)
+
+    par_range = par_val-num_steps*myδ:myδ:par_val+num_steps*myδ
+    cost_vals = zeros(length(par_range))
+    grad_vals = zeros(length(par_range))
+    for (ind,par)=enumerate(par_range)
+        # Ysim, jacs = simulate_system_sens(exp_data, [par], K, dist_sens_inds, isws, Zm)
+        Ysim, jacs = simulate_system_sens(exp_data, [par], 100, dist_sens_inds, isws, Zm)
+        # We can change f to get all states instead of only output. However, then we should ensure that
+        # y_len is unchanged, since the true output Y assumes the unchanged y_len. Therefore, we use a 
+        # separate my_y_len here so that we can ensure that y_len is unchanged
+        my_y_len = length(f(ones(num_dyn_vars), get_all_θs(free_dyn_pars_true)))
+        ysim_stacked = reshape(Ysim[:,1:K][:], my_y_len*(N+1)*K, 1)    # Reshapes to obtain a column Matrix
+        jac_stacked = reshape(hcat(jacs[1:K]...)[:], my_y_len*(N+1)*K, 1)    # Reshapes to obtain a column Matrix
+
+        # Computing costs only works when f returns the same output as Y, and not e.g. the entire state vector
+        if my_y_len == y_len
+            cost = get_cost_value(ystacked, ysim_stacked)
+            cost_grad = first(get_cost_gradient(ystacked, ysim_stacked, [jac_stacked]))
+        else
+            throw(DimensionMismatch("my_y_len is not equal to y_len, can't compute cost values"))
+        end
+        cost_vals[ind] = cost
+        grad_vals[ind] = cost_grad
+    end
+
+    return par_range, cost_vals, grad_vals
 end
 
 # NOTE: Only debugs gradient of cost function
@@ -2447,7 +2559,7 @@ function state_sens_debug(expid::String, par_val::Float64, K::Int)
 
 
     η = exp_data.get_all_ηs([par_val])
-    dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
+    dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_sens_inds)
     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
     XWm = simulate_noise_process_mangled(dmdl, Zm)
     wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
@@ -2488,8 +2600,8 @@ function disturbance_sensitivity_debug(expid::String)
     η2 = copy(η1)
     η2[1] += 0.01
 
-    dmdl1 = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η1, nx, n_out), δ, dist_sens_inds)
-    dmdl2 = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η2, nx, n_out), δ, dist_sens_inds)
+    dmdl1 = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η1, nx, n_out), δ, dist_sens_inds)
+    dmdl2 = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η2, nx, n_out), δ, dist_sens_inds)
     XWm1 = simulate_noise_process_mangled(dmdl1, Zm)
     XWm2 = simulate_noise_process_mangled(dmdl2, Zm)
     wmm1 = mk_noise_interp(dmdl1.Cd, XWm1, 1, δ)

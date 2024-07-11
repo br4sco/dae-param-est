@@ -156,8 +156,8 @@ function solve_in_parallel_sens2(solve, is, ny, np, N)
     # ny = length(y1[1])
     # Ysens = [Matrix{Float64}(undef, ny*length(sens1), length(sens1[1])÷ny) for m=1:M]
     # Y = zeros(ny*length(y1), M)
-    Ysens = [Matrix{Float64}(undef, ny*N, np) for m=1:M]
-    Y = zeros(ny*N, M)
+    Ysens = [Matrix{Float64}(undef, ny*(N+1), np) for m=1:M]
+    Y = zeros(ny*(N+1), M)
     # Y[:,1] += vcat(y1...)   # Flattens the array
     # Ysens[1] = vcat(sens1...)
     # next!(p)

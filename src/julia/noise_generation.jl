@@ -255,6 +255,72 @@ function discretize_ct_noise_model_with_sensitivities_alt(
     return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
 end
 
+# New version, after realizing that in fact the SDE should be differentiated before it is discretized.
+# This makes it much simpler to obtain the sensitivity matrices
+function discretize_ct_noise_model_with_sensitivities_alt_new(
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
+    # sens_inds: indices of parameter with respect to which we compute the
+    # sensitivity of disturbance output w
+
+    nx = size(mdl.A,1)
+    n_out = size(mdl.C, 1)
+    n_in  = size(mdl.C, 2)÷nx
+    function get_k_j_i(zeta::Int64)::Tuple{Int64, Int64, Int64}
+        k = rem( (zeta-1), nx ) + 1
+        j = rem( (zeta - k - nx), nx*n_in)÷nx + 1
+        i = (zeta - j*nx - k)÷(nx*n_in) + 1
+        return k, j, i
+    end
+
+    # Indices of free parameters corresponding to "a-vector" in disturbance model
+    sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
+    nη   = length(sens_inds)
+    na = length(sens_inds_a)
+    nx_sens = (1+na)*nx
+
+    Aηa = zeros(na*nx, nx)
+    for i = 1:na
+        Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
+    end
+
+    
+    # Working under the assumption B_θ = 0
+    M = [mdl.A             zeros(nx, na*nx)                mdl.B*(mdl.B')       zeros(nx, nx*na);
+         Aηa         kron(Matrix(1.0I, na, na), mdl.A)   zeros(nx*na, nx)       zeros(nx*na, nx*na);
+         zeros(nx, nx)     zeros(nx, nx*na)                -mdl.A'              -Aηa';
+         zeros(nx*na, nx)    zeros(nx*na, nx*na)           zeros(nx*na, nx)      kron(Matrix(1.0I, na, na), -mdl.A')]
+    Mexp = exp(M*Ts)
+
+    Ad   = Mexp[1:nx*(na+1), 1:nx*(na+1)]
+    Dd =     Hermitian(Mexp[1:nx*(na+1),nx*(na+1)+1:2nx*(na+1)]*(Ad'))
+    Bd = (cholesky(Dd).L)*(Ad')
+
+    C_mat = zeros((nη+1)n_out, nx_sens*n_in)
+    for row_block = 1:nη+1
+        if row_block == 1
+            for col_block = 1:n_in
+                C_mat[(row_block-1)*n_out+1:row_block*n_out,
+                    (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
+                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+                # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
+                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
+            end
+        elseif row_block <= na+1
+            ind = row_block-1
+            for col_block = 1:n_in
+                C_mat[(row_block-1)*n_out+1:row_block*n_out,
+                    ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
+                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+            end
+        else
+            k, j, i = get_k_j_i(sens_inds[row_block-1])
+            C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
+        end
+    end
+
+    return DT_SS_Model(Ad, Bd, C_mat, zeros(nx_sens*n_in), Ts)
+end
+
 function discretize_ct_noise_model_with_sensitivities_for_adj(
     mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the

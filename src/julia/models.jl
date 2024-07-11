@@ -1185,6 +1185,7 @@ function delta_robot_gc_dist_sens_1(Φ::Float64, u::Function, w::Function, θ::V
     end
 end
 
+# NOTE: Use *_new version of function to be compatible with improved interpolation!
 function delta_robot_gc_adjoint_γonly(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
