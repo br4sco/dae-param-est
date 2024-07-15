@@ -157,7 +157,7 @@ if model_id == PENDULUM
     const_learning_rate = [1.0]#[0.1, 1.0, 0.1]
     model_sens_to_use = pendulum_sensitivity_k#_with_dist_sens_1#_sans_g_with_dist_sens_1#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
-    model_adj_to_use = my_pendulum_adjoint_konly
+    model_adj_to_use = my_pendulum_adjoint_konly_new
     model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa1#_with_dist_sens_3
     sgd_version_to_use = perform_SGD_adam_new
     # Models for debug:
@@ -1977,17 +1977,18 @@ function adjoint_dyn_debug(expid::String)
     # Extracts entire state trajecotry from first forward solution
     xvec1 = vcat(transpose(h_debug_with_sens(sol_for_exact, get_all_θs(free_dyn_pars_true)))...)   # transpose so that result is a matrix, with each row being one of the inner vectors (h_sens_deb returns a vector of vectors)
 
-    # ????????????????????????????????????????????????????????????????????????????????????????
-    # TODO: USE NEW INTERPOLATIONS, WITH THAT COOL NOTATION???????????????????????????????????
-    # ????????????????????????????????????????????????????????????????????????????????????????
-
     # Creates functions for output, states, and their derivatives using interpolation.
-    y_func  = linear_interpolation_multivar(Y[:,1], Ts, y_len)
+    # y_func  = linear_interpolation_multivar(Y[:,1], Ts, y_len)
+    y_func = extrapolate(scale(interpolate(Y[:,1], BSpline(interp_type)), 0.0:Ts:N*Ts), Line())
     dy_est  = (Y[y_len+1:end,1]-Y[1:end-y_len,1])/Ts
-    dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
-    x_func  = get_mvar_cubic(ts_exact, xvec1)
-    der_est  = get_der_est(ts_exact, x_func)
-    dx_func = get_mvar_cubic(ts_exact[1:end-1], der_est)
+    # dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
+    dy_func = extrapolate(scale(interpolate(dy_est, BSpline(interp_type)), 0.0:Ts:(N-1)*Ts), Line())
+    # x_func  = get_mvar_cubic(ts_exact, xvec1)
+    x_func = extrapolate(scale(interpolate(xvec1, (BSpline(interp_type), NoInterp())), ts_exact, 1:size(xvec1,2)), Line())
+    # der_est  = get_der_est(ts_exact, x_func)
+    der_est  = get_der_est2(ts_exact, x_func, size(xvec1, 2))
+    dx_func = extrapolate(scale(interpolate(der_est, (BSpline(interp_type), NoInterp())), ts_exact[1:end-1], 1:size(der_est,2)), Line())
+    # dx_func = get_mvar_cubic(ts_exact[1:end-1], der_est)
 
     # Computing xp0, initial conditions of derivative of x wrt to p
     mdl = model_to_use(φ0, u, wmm(1), get_all_θs(free_dyn_pars_true))
@@ -2240,12 +2241,17 @@ function adjoint_dist_debug(expid::String)
     xvec1 = vcat(transpose(h_debug_with_sens(sol_for_exact, get_all_θs(free_dyn_pars_true)))...)   # transpose so that result is a matrix, with each row being one of the inner vectors (h_sens_deb returns a vector of vectors)
 
     # Creates functions for output, states, and their derivatives using interpolation.
-    y_func  = linear_interpolation_multivar(Y[:,1], Ts, y_len)
+    # y_func  = linear_interpolation_multivar(Y[:,1], Ts, y_len)
+    y_func = extrapolate(scale(interpolate(Y[:,1], BSpline(interp_type)), 0.0:Ts:N*Ts), Line())
     dy_est  = (Y[y_len+1:end,1]-Y[1:end-y_len,1])/Ts
-    dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
-    x_func  = get_mvar_cubic(ts_exact, xvec1)
-    der_est  = get_der_est(ts_exact, x_func)
-    dx_func = get_mvar_cubic(ts_exact[1:end-1], der_est)
+    # dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
+    dy_func = extrapolate(scale(interpolate(dy_est, BSpline(interp_type)), 0.0:Ts:(N-1)*Ts), Line())
+    # x_func  = get_mvar_cubic(ts_exact, xvec1)
+    x_func = extrapolate(scale(interpolate(xvec1, (BSpline(interp_type), NoInterp())), ts_exact, 1:size(xvec1,2)), Line())
+    # der_est  = get_der_est(ts_exact, x_func)
+    der_est  = get_der_est2(ts_exact, x_func, size(xvec1, 2))
+    dx_func = extrapolate(scale(interpolate(der_est, (BSpline(interp_type), NoInterp())), ts_exact[1:end-1], 1:size(der_est,2)), Line())
+    # dx_func = get_mvar_cubic(ts_exact[1:end-1], der_est)
 
     # Computing xp0, initial conditions of derivative of x wrt to p
     mdl = model_to_use(φ0, u, wmm_sens(1), get_all_θs(free_dyn_pars_true))
