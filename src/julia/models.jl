@@ -8264,7 +8264,7 @@ function my_pendulum_adjoint_dist_sens_3(u::Function, w::Function, xw::Function,
     end
 end
 
-function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
+function my_pendulum_adjoint_distsensa1_new(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
     # na should be the number of disturbance parameters corresponding to the a parameters. In this case, it should really just be 1, so it's actually only an input argument to fit the signature of the other adjoint models
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
@@ -8276,25 +8276,25 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
 
-        Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
-                    0           2*dx(t)[6]          0   0                   -1          0   0
-                    -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
-                    0            -dx(t)[3]          0   0               2k*abs(x(t)[5]) 0   0
-                    2x(t)[1]      2x(t)[2]          0   0                   0           0   0
-                    x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
-                    x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
+        Fx = t -> [2dx(t,6)        0               0   -1                  0           0   0
+                    0           2*dx(t,6)          0   0                   -1          0   0
+                    -dx(t,3)         0             0   2k*abs(x(t,4))     0           0   0
+                    0            -dx(t,3)          0   0               2k*abs(x(t,5)) 0   0
+                    2x(t,1)      2x(t,2)          0   0                   0           0   0
+                    x(t,4)        x(t,5)          0   x(t,1)            x(t,2)      0   0
+                    x(t,2)/(L^2)  -x(t,1)/(L^2)   0   0                   0           0   1]
         # (namely the derivative of F with respect to the variable x_p)
-        Fdx = t -> vcat([1   0   0          0   0   2x(t)[1]    0
-                         0   1   0          0   0   2x(t)[2]    0
-                         0   0   -x(t)[1]   m   0   0           0
-                         0   0   -x(t)[2]   0   m   0           0], zeros(3,7))
-        Fddx = t -> vcat([  0   0  0            0   0   2dx(t)[1]    0
-                            0   0  0            0   0   2dx(t)[2]    0
-                            0   0  -dx(t)[1]    0   0   0            0
-                            0   0  -dx(t)[2]    0   0   0            0], zeros(3,7))
-        # Fp = t -> [.0; .0; abs(x(t)[4])*x(t)[4]; abs(x(t)[5])*x(t)[5]; .0; .0; .0]
-        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-first(y(t)))/T]
-        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-first(dy(t)))/T]
+        Fdx = t -> vcat([1   0   0          0   0   2x(t,1)    0
+                         0   1   0          0   0   2x(t,2)    0
+                         0   0   -x(t,1)   m   0   0           0
+                         0   0   -x(t,2)   0   m   0           0], zeros(3,7))
+        Fddx = t -> vcat([  0   0  0            0   0   2dx(t,1)    0
+                            0   0  0            0   0   2dx(t,2)    0
+                            0   0  -dx(t,1)    0   0   0            0
+                            0   0  -dx(t,2)    0   0   0            0], zeros(3,7))
+        # Fp = t -> [.0; .0; abs(x(t,4))*x(t,4); abs(x(t,5))*x(t,5); .0; .0; .0]
+        gₓ  = t -> [0    0    0    0    0    0    2(x2(t,7)-first(y(t)))/T]
+        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t,7)-first(dy(t)))/T]
 
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
@@ -8331,13 +8331,13 @@ function my_pendulum_adjoint_distsensa1(u::Function, w::Function, xw::Function, 
         # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
         function f!(res, dz, z, θ, t)
             # Completely unreadabe but most efficient version (still not a huge improvement)
-            res[1]  = dz[1] - 2*dx(t)[6]*z[1] + dx(t)[3]*z[3] - 2*x(t)[1]*z[5] - x(t)[4]*z[6] - (x(t)[2]*z[7])/(L^2)
-            res[2]  = dz[2] - 2*dx(t)[6]*z[2] + dx(t)[3]*z[4] - 2*x(t)[2]*z[5] - x(t)[5]*z[6] + (x(t)[1]*z[7])/(L^2)
-            res[3]  = -x(t)[1]*dz[3] - x(t)[2]*dz[4] - dx(t)[1]*z[3] - dx(t)[2]*z[4]
-            res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t)[4])*z[3] - x(t)[1]*z[6]
-            res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t)[5])*z[4] - x(t)[2]*z[6]
-            res[6]  = 2*x(t)[1]*dz[1] + 2*x(t)[2]*dz[2] + 2*dx(t)[1]*z[1] + 2*dx(t)[2]*z[2]
-            res[7]  = (2*(x2(t)[7] - first(y(t))))/T - z[7]
+            res[1]  = dz[1] - 2*dx(t,6)*z[1] + dx(t,3)*z[3] - 2*x(t,1)*z[5] - x(t,4)*z[6] - (x(t,2)*z[7])/(L^2)
+            res[2]  = dz[2] - 2*dx(t,6)*z[2] + dx(t,3)*z[4] - 2*x(t,2)*z[5] - x(t,5)*z[6] + (x(t,1)*z[7])/(L^2)
+            res[3]  = -x(t,1)*dz[3] - x(t,2)*dz[4] - dx(t,1)*z[3] - dx(t,2)*z[4]
+            res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t,4))*z[3] - x(t,1)*z[6]
+            res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t,5))*z[4] - x(t,2)*z[6]
+            res[6]  = 2*x(t,1)*dz[1] + 2*x(t,2)*dz[2] + 2*dx(t,1)*z[1] + 2*dx(t,2)*z[2]
+            res[7]  = (2*(x2(t,7) - first(y(t))))/T - z[7]
 
             # NOTE: η here then has to contain free_parameters and true values for the non-free ones
             res[8]  = dz[8] + z[9] - η[1]*z[8] + η[3]*z[10]
@@ -8552,6 +8552,113 @@ function my_pendulum_adjoint_distsensa2(u::Function, w::Function, xw::Function, 
         r0 = zeros(length(z0))
         f!(r0, dz0, z0, [], 0.0)
         # @info "r0 is: $r0 here, λ0: $λ0, dλ0: $dλ0"
+
+        # t -> 0.0 is just a dummy function, not to be used
+        return Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp, debugs
+    end
+end
+
+function my_pendulum_foradj_distsensa1(u::Function, w::Function, xw_full::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type, η::Vector{Float64}, na::Int, N_trans::Int=0)
+    # na should be the number of disturbance parameters corresponding to the a parameters. In this case, it should really just be 1, so it's actually only an input argument to fit the signature of the other adjoint models
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        np = size(xp0,2)
+        nx = size(xp0,1)
+        nw = length(xw_full(0.0))÷(np+1)    # xw_full has not only the disturbance state (of dimension nw), but also its sensitivity wrt to the np parameters
+        @assert (np == 1) "my_pendulum_adjoint_konly_with_distsensa is hard-coded to only handle parameter a1. Make sure to pass correct xp0"   # NOTE: Maybe this one is more general than a1 specifically? Can handle either a-paramter mayhbe??
+
+        Fx = t -> [2dx(t,6)        0               0   -1                  0           0   0
+                    0           2*dx(t,6)          0   0                   -1          0   0
+                    -dx(t,3)         0             0   2k*abs(x(t,4))     0           0   0
+                    0            -dx(t,3)          0   0               2k*abs(x(t,5)) 0   0
+                    2x(t,1)      2x(t,2)          0   0                   0           0   0
+                    x(t,4)        x(t,5)          0   x(t,1)            x(t,2)      0   0
+                    x(t,2)/(L^2)  -x(t,1)/(L^2)   0   0                   0           0   1]
+        # (namely the derivative of F with respect to the variable x_p)
+        Fdx = t -> vcat([1   0   0          0   0   2x(t,1)    0
+                         0   1   0          0   0   2x(t,2)    0
+                         0   0   -x(t,1)   m   0   0           0
+                         0   0   -x(t,2)   0   m   0           0], zeros(3,7))
+        Fddx = t -> vcat([  0   0  0            0   0   2dx(t,1)    0
+                            0   0  0            0   0   2dx(t,2)    0
+                            0   0  -dx(t,1)    0   0   0            0
+                            0   0  -dx(t,2)    0   0   0            0], zeros(3,7))
+        # Fp = t -> [.0; .0; abs(x(t,4))*x(t,4); abs(x(t,5))*x(t,5); .0; .0; .0]
+        gₓ  = t -> [0    0    0    0    0    0    2(x2(t,7)-first(y(t)))/T]
+        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t,7)-first(dy(t)))/T]
+
+        # NOTE: Convention is used that derivatives wrt to θ stack along cols
+        # while derivatives wrt to x stack along rows
+
+        # Creating some of the needed disturbance from η. ASSUMING ONLY FREE DISTURBANCE PARAMETERS ARE a1
+        C = [η[3]   η[4]]
+
+        ###################### INITIALIZING ADJOINT SYSTEM ####################
+        # Indices 1-4 are differential (d), while 5-7 are algebraic (a)
+        dinds  = 1:4
+        ainds  = 5:7
+        λinds  = 1:7
+        λT  = zeros(7)
+        dλT = zeros(7)
+        temp = (-gₓ(T))/vcat(Fdx(T)[dinds,:], -Fx(T)[ainds,:])
+        λT[dinds] = zeros(length(dinds))
+        λT[ainds] = temp[ainds]
+        dλT[dinds] = temp[dinds]
+        temp = (-gdₓ(T) + (dλT[dinds]')*(Fx(T)[dinds,:] - Fddx(T)[dinds,:] - Fdx(T)[dinds,:]) + (λT[ainds]')*Fx(T)[ainds,:])/vcat(Fdx(T)[dinds,:], -Fx(T)[ainds,:])
+        dλT[ainds] = temp[ainds]
+
+        # the residual function
+        # NOTE: Could time-varying coefficients be the problem?? Sure would require more allocations?
+        # TODO: If that is the case, we could store x(t) in a static array to avoid re-allocations?
+        function f!(res, dz, z, θ, t)
+            # Completely unreadabe but most efficient version (still not a huge improvement)
+            res[1]  = dz[1] - 2*dx(t,6)*z[1] + dx(t,3)*z[3] - 2*x(t,1)*z[5] - x(t,4)*z[6] - (x(t,2)*z[7])/(L^2)
+            res[2]  = dz[2] - 2*dx(t,6)*z[2] + dx(t,3)*z[4] - 2*x(t,2)*z[5] - x(t,5)*z[6] + (x(t,1)*z[7])/(L^2)
+            res[3]  = -x(t,1)*dz[3] - x(t,2)*dz[4] - dx(t,1)*z[3] - dx(t,2)*z[4]
+            res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t,4))*z[3] - x(t,1)*z[6]
+            res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t,5))*z[4] - x(t,2)*z[6]
+            res[6]  = 2*x(t,1)*dz[1] + 2*x(t,2)*dz[2] + 2*dx(t,1)*z[1] + 2*dx(t,2)*z[2]
+            res[7]  = (2*(x2(t,7) - first(y(t))))/T - z[7]
+
+            # Beta-equation # Okay I thought it should be minus here, but + works instead....
+            res[8] = dz[8] + first(2z[3]*w(t)[1]*(C*xw_full(t)[3:4]))   # TODO: Maybe rewrite this so no need for first(), just using scalar operations?
+            nothing
+        end
+        
+        z0  = vcat(λT[:], zeros(np))
+        dz0 = vcat(dλT[:], 2z0[3]*w(T)[1]*(C*xw_full(T)[3:4]))
+
+        if N_trans > 0
+            @warn "The returned function get_Gp() doesn't fully support N_trans > 0, as sensitivity of internal variables not known at any other time than t=0. A non-rigorous approximation is used instead."
+        end
+        # Function returning Gp given adjoint solution
+        function get_Gp(adj_sol::DAESolution)
+            # There are nx variables before the β-variable
+            Gp = adj_sol.u[end-N_trans][nx+1] + (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)[1]     # This is the same as in original adjoint system just because disturbance model has zero initial conditions, independent of parameters
+        end
+
+        function get_Gp_debug(adj_sol::DAESolution)
+            integral = adj_sol.u[end][nx+1]
+            term = (((adj_sol.u[end][1:nx]')*Fdx(0.0))*xp0)
+            Gp = integral .+ term
+            return Gp, integral, term
+        end
+
+        function get_term_debug(adj_sol::DAESolution, xps::Matrix{Float64}, times::AbstractVector{Float64})
+            term = zeros(length(adj_sol.u))
+            for ind=eachindex(adj_sol.u)
+                term[ind] = ((adj_sol.u[end+1-ind][1:nx]')*Fdx(times[ind]))*xps[:,ind]
+            end
+            return term
+        end
+
+        dvars = vcat(fill(true, 4), fill(false, 3), fill(true, np))
+        # dvars = vcat(fill(true, 4), fill(false, 3))
+
+        r0 = zeros(length(z0))
+        f!(r0, dz0, z0, [], 0.0)
+        # @info "r0 is: $r0 here, λ0: $λ0, dλ0: $dλ0"
+
+        debugs = (get_Gp_debug, get_term_debug)
 
         # t -> 0.0 is just a dummy function, not to be used
         return Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp, debugs
@@ -9042,13 +9149,11 @@ function pendulum_adj_stepbystep_NEW(Φ::Float64, u::Function, w::Function, θ::
     end
 end
 
-function pendulum_adj_stepbystep_dist(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, y::Function, dy::Function, x_func::Function, dx_func::Function, λ::Function, dλ::Function, Fp::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, T::Float64)::Model
+function pendulum_adj_stepbystep_dist_new(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, y::func_type, dy::func_type, x_func::func_type, dx_func::func_type, λ::Function, dλ::Function, Fp::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, T::Float64)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         np = 1
-        nw = length(w(0.0))÷(np+1)
         nxw = length(xw(0.0))÷(np+1)
-        nx = 7
 
         # Pendulum original matrices
         Fx = (x, dx) -> [2dx[6]        0               0   -1                  0           0   0
@@ -9071,77 +9176,38 @@ function pendulum_adj_stepbystep_dist(u::Function, w::Function, xw::Function, v:
 
         Fw = (wt) -> [0.0; 0.0; -2*wt; 0.0; 0.0; 0.0; 0.0]
 
-        # NOTE: A LITTLE HARD-CODED FOR NOW, NOT REALLY GENERALIZED FOR OTHER DISTURBANCE MODELS
-        # Creating some of the needed disturbance from η. ASSUMING ONLY FREE DISTURBANCE PARAMETERS ARE a1
-        A = [-η[1]  -η[2]; 1.0   0.0]
-        C = [η[3]   η[4]]
-        Aθ = [-1.0  0.0; 0.0    0.0;]
-        Cθ = zeros(1,nxw) # Only depends on C-parameters, and we only compute sensitivities wrt to a-parameters. We have 1 disturbance parameter, thus 1 row
-
-        # Matrices extended to include disturbance model
-        Fz = (x, dx, wt) -> [Fx(x,dx)      zeros(nx, nxw)   Fw(wt)
-                            zeros(nxw,nx)   -A         zeros(nxw, nw)
-                            zeros(1,nx)     -C              1.0]
-
-        Fdz = (x, dx) -> [Fdx(x,dx)   zeros(nx,nxw)   zeros(nx,nw)
-                         zeros(nxw,nx)  [1.0 0.0; 0.0 1.0]   zeros(nxw,nw)
-                         zeros(1,nx+nxw+nw)]
-
-        Fddz = (x, dx) -> [Fddx(x,dx)   zeros(nx,nxw)   zeros(nx,nw)
-                          zeros(nxw,nx) zeros(nxw,nxw) zeros(nxw, nw)
-                          zeros(1,nx+nxw+nw)]
-
-        gz = (x, dx, t) -> [gₓ(x,dx,t); zeros(nxw+nw,1)]
-
-        F̃p = (x, dx, xwt, vt) -> [Fp(x,dx)
-                                -Aθ*xwt - B̃θ*vt
-                                -Cθ*xwt]
-
         # the residual function
         function f!(res, dz, z, θ, t)
             wt = w(t)
-            # ut = u(t)
-            xt = x_func(t)
-            dxt = dx_func(t)
-            xwt = xw(t)
-            vt = v(t)
-            x = xt[1:7]
-            dx = dxt[1:7]
-            xθ = xt[8:end]
-            dxθ = dxt[8:end]
-            zθ = vcat(xθ, xwt[3:4], wt[2:2])    # If disturbance model includes forward sensitivities, the sensitivities are the second half of the state variables (3:4) and of the output (2:2). This is hard-coded for pendulum disturbance model
-            dzθ = vcat(dxθ, Aθ*xwt[1:2] + A*xwt[3:4] + B̃θ*vt, C*(Aθ*xwt[1:2] + A*xwt[3:4] + B̃θ*vt))
+            ut = u(t)
+            x = x_func(t,1:7)
+            dx = dx_func(t,1:7)
+            xθ = x_func(t,8:14)
+            dxθ = dx_func(t,8:14)
 
-            res[1] = dz[1] - first((gz(x,dx,t)')*zθ)
-            res[2] = dz[2] - first( (gz(x,dx,t)')*zθ - (λ(t)')*(F̃p(x,dx,xwt[1:2],vt) + Fz(x,dx,wt[1])*zθ + Fdz(x,dx)*dzθ) )
-            res[3] = dz[3] - first( -(λ(t)')*F̃p(x,dx,xwt[1:2],vt) - ( -gz(x,dx,t)' + (λ(t)')*(Fz(x,dx,wt[1])-Fddz(x,dx)) - (dλ(t)')*Fdz(x,dx) )*zθ )
-            res[4] = dz[4] - first(( -(λ(t)')*F̃p(x,dx,xwt[1:2],vt) ))
+            res[1] = dz[1] - (gₓ(x,dx,t)')*xθ
+            res[2] = dz[2] - ( (gₓ(x,dx,t)')*xθ - first((λ(t)')*(Fp(x,dx) + Fx(x,dx)*xθ + Fdx(x,dx)*dxθ)) )
+            res[3] = dz[3] - ( -first((λ(t)')*Fp(x,dx)) - ( -gₓ(x,dx,t)' + (λ(t)')*(Fx(x,dx)-Fddx(x,dx)) - (dλ(t)')*Fdx(x,dx) )*xθ )
+            res[4] = dz[4] - first(( -(λ(t)')*Fp(x,dx) ))
             # SOME BONUS DEBUG TERMS
             res[5] = dz[5] - ((x[7]-first(y(t)))^2)/T   # Simply computing integral cost
-            res[6] = dz[6] + first((λ(t)')*(F̃p(x,dx,xwt[1:2],vt) + Fz(x,dx,wt[1])*zθ + Fdz(x,dx)*dzθ))    # This should be approximately zero, otherwise forward solution isn't right
+            res[6] = dz[6] + first((λ(t)')*(Fp(x,dx) + Fx(x,dx)*xθ + Fdx(x,dx)*dxθ))    # This should be approximately zero, otherwise forward solution isn't right
 
             nothing
         end
 
         # Finding consistent initial conditions
-        x_func0 = x_func(0.)
-        dx_func0 = dx_func(0.)
-        x0 = x_func0[1:7]
-        dx0 = dx_func0[1:7]
-        xθ0 = x_func0[8:end]
-        dxθ0 = dx_func0[8:end]
-        xw0 = xw(0.0)
-        w0 = w(0.0)
-        zθ0 = vcat(xθ0, xw0[3:4], w0[2:2])
-        dzθ0 = vcat(dxθ0, A*xw0[1:2] + B̃*v(0.0), C*(A*xw0[1:2] + B̃*v(0.0)))
-        v0 = v(0.)
+        x0 = x_func(0.,1:7)
+        dx0 = dx_func(0.,1:7)
+        xθ0 = x_func(0.,8:14)
+        dxθ0 = dx_func(0.,8:14)
 
-        dz10 = first((gz(x0,dx0,0.)')*zθ0)
-        dz20 = first( (gz(x0,dx0,0.)')*zθ0 - (λ(0.)')*(F̃p(x0,dx0,xw0[1:2],v0) + Fz(x0,dx0,w0[1])*zθ0 + Fdz(x0,dx0)*dzθ0))
-        dz30 = -first((λ(0.)')*F̃p(x0,dx0,xw0[1:2],v0) - ( -gz(x0,dx0,0.)' + (λ(0.)')*(Fz(x0,dx0,w0[1])-Fddz(x0,dx0)) - (dλ(0.)')*Fdz(x0,dx0) )*zθ0)
-        dz40 = -first((λ(0.)')*F̃p(x0,dx0,xw0[1:2],v0))
+        dz10 = (gₓ(x0,dx0,0.)')*xθ0
+        dz20 = (gₓ(x0,dx0,0.)')*xθ0 - first((λ(0.)')*(Fp(x0,dx0) + Fx(x0,dx0)*xθ0 + Fdx(x0,dx0)*dxθ0))
+        dz30 = -first((λ(0.)')*Fp(x0,dx0)) - ( -gₓ(x0,dx0,0.)' + (λ(0.)')*(Fx(x0,dx0)-Fddx(x0,dx0)) - (dλ(0.)')*Fdx(x0,dx0) )*xθ0
+        dz40 = -first((λ(0.)')*Fp(x0,dx0))
         dz50 = ((x0[7]-first(y(0.)))^2)/T
-        dz60 = -first((λ(0.)')*(F̃p(x0,dx0,xw0[1:2],v0) + Fz(x0,dx0,w0[1])*zθ0 + Fdz(x0,dx0)*dzθ0))
+        dz60 = -first((λ(0.)')*(Fp(x0,dx0) + Fx(x0,dx0)*xθ0 + Fdx(x0,dx0)*dxθ0))
 
         z0   = zeros(6)
         dz0  = [dz10, dz20, dz30, dz40, dz50, dz60]
