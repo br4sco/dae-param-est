@@ -197,20 +197,21 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [γ] # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = Array{Float64}(undef, 0)#[γ] # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     use_adjoint = true
-    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     dyn_par_bounds = [0.01 1e4]#Array{Float64}(undef, 0, 2)
     # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
-    const_learning_rate = [0.2]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
-    model_sens_to_use = delta_robot_gc_γsens#allparsens
+    const_learning_rate = [0.1]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
+    model_sens_to_use = delta_robot_gc_dist_sens_1#allparsens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_adjoint_γonly_new
+    model_adj_to_use = delta_robot_gc_foradj_a1only#delta_robot_gc_adjoint_γonly_new
+    model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_a1only   # ACTUALLY SHOULD NOT BE foradj, BUT NON-FORADJ NOT CREATED!
     sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
     model_stepbystep = delta_adj_stepbystep_NEW
@@ -2531,10 +2532,10 @@ function adjoint_dist_debug_new(expid::String)
 
     # Creates functions for output, states, and their derivatives using interpolation.
     # y_func  = linear_interpolation_multivar(Y[:,1], Ts, y_len)
-    y_func = extrapolate(scale(interpolate(Y[:,1], BSpline(interp_type)), 0.0:Ts:N*Ts), Line())
+    y_func = extrapolate(scale(interpolate(transpose(reshape(Y[:,1], y_len, N+1)), (BSpline(interp_type), NoInterp())), 0.0:Ts:N*Ts, 1:y_len), Line())
     dy_est  = (Y[y_len+1:end,1]-Y[1:end-y_len,1])/Ts
     # dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
-    dy_func = extrapolate(scale(interpolate(dy_est, BSpline(interp_type)), 0.0:Ts:(N-1)*Ts), Line())
+    dy_func = extrapolate(scale(interpolate(transpose(reshape(dy_est, y_len, N)), (BSpline(interp_type), NoInterp())), 0.0:Ts:(N-1)*Ts, 1:y_len), Line())
     # x_func  = get_mvar_cubic(ts_exact, xvec1)
     x_func = extrapolate(scale(interpolate(xvec1, (BSpline(interp_type), NoInterp())), ts_exact, 1:size(xvec1,2)), Line())
     # der_est  = get_der_est(ts_exact, x_func)
