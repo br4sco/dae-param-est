@@ -150,11 +150,12 @@ if model_id == PENDULUM
     const num_dyn_vars = 7
     const num_dyn_vars_adj = 7 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state. Though outputs are already baked in for pendulum
     use_adjoint = true
+    use_new_adj = false
     get_all_θs(pars::Vector{Float64}) = [m, L, g, k]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [1.0]#[0.1, 1.0, 0.1]
+    const_learning_rate = [0.1]#[0.1, 1.0, 0.1]
     model_sens_to_use = pendulum_dist_sens_1#_with_dist_sens_1#_sans_g_with_dist_sens_1#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly_new
@@ -201,8 +202,9 @@ elseif model_id == DELTA
     const num_dyn_vars = 30
     const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     use_adjoint = true
+    use_new_adj = true
     get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    dyn_par_bounds = [0.01 1e4]#Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.01 1e4]#Array{Float64}(undef, 0, 2)
     # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
@@ -211,7 +213,7 @@ elseif model_id == DELTA
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_foradj_a1only#delta_robot_gc_adjoint_γonly_new
-    model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_a1only   # ACTUALLY SHOULD NOT BE foradj, BUT NON-FORADJ NOT CREATED!
+    model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_a1only 
     sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
     model_stepbystep = delta_adj_stepbystep_NEW
@@ -524,16 +526,6 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     end
 
     function compute_Gp_adj(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m)
-        # --------------------- Old way, using my custom-made interpolation -------------------------
-        # # NOTE: m shouldn't be larger than M÷2
-        # x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
-        # x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
-        # der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
-        # der_est2 = get_der_est(0.0:Tsλ:N*Ts, x2_func)
-        # # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
-        # dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
-        # dx2 = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est2)
-        # ------------------ New way, using built-in more powerful interpolation functions ----------------------------
         x_func  = extrapolate(scale(interpolate(xvec1, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec1,2)), Line())
         x2_func = extrapolate(scale(interpolate(xvec2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec2,2)), Line())
         der_est  = get_der_est2(0.0:Tsλ:N*Ts, x_func, size(xvec1,2))
@@ -560,24 +552,48 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         # ndist should be the number of free disturbance parameters
         # na should be the number of the free disturbance parameters that correspond to the A-matrix
         # NOTE: m shouldn't be larger than M÷2
-        x_func  = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec1)
-        x2_func = get_mvar_cubic(0.0:Tsλ:N*Ts, xvec2)
-        der_est  = get_der_est(0.0:Tsλ:N*Ts, x_func)
-        der_est2 = get_der_est(0.0:Tsλ:N*Ts, x2_func)
+        x_func  = extrapolate(scale(interpolate(xvec1, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec1,2)), Line())
+        x2_func = extrapolate(scale(interpolate(xvec2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec2,2)), Line())
+        der_est  = get_der_est2(0.0:Tsλ:N*Ts, x_func, size(xvec1,2))
+        der_est2 = get_der_est2(0.0:Tsλ:N*Ts, x2_func, size(xvec1,2))
         # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
-        dx = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est)
-        dx2 = get_mvar_cubic(0.0:Tsλ:N*Ts-Tsλ/2, der_est2)
+        dx = extrapolate(scale(interpolate(der_est, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts-Tsλ/2, 1:size(xvec1,2)), Line())
+        dx2 = extrapolate(scale(interpolate(der_est2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts-Tsλ/2, 1:size(xvec2,2)), Line())
 
         # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
         # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
-        mdl_sens = model_sens_to_use(φ0, u, t->vcat(wmm_m(t), zeros(ndist,1)), get_all_θs(free_pars))   # The model expects w plus its sensitivities, which we haven't computed since we don't need them for xp0. So we just pad the wmm_m function
-        xp0 = reshape(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)), num_dyn_vars, length(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)))÷num_dyn_vars)
+        mdl_sens = model_sens_to_use(φ0, u, t->vcat(wmm_m(t), zeros(ndist*length(wmm_m(t)),1)), get_all_θs(free_pars))   # The model expects w plus its sensitivities, which we haven't computed since we don't need them for xp0. So we just pad the wmm_m function
+        xp0 = reshape(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)), num_dyn_vars_adj, length(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)))÷num_dyn_vars_adj)
 
         # u, w, xw, v, θ, T, x, x2, y, dy, xp0, dx, dx2, B̃, B̃θ, η, N_trans
         # TODO: Define vmm somewhere and apss it here!
 
         # ----------------- Actually solving adjoint system ------------------------
         mdl_adj, get_Gp = model_adj_to_use_dist_sens(u, wmm_m, xwmm_m, vmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, B̃, B̃ηa, η, na)
+        adj_prob = problem_reverse(mdl_adj, N, Ts)
+        adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-Tso/2), abstol =  abstol, reltol = reltol,
+            maxiters = maxiters)
+
+        return get_Gp(adj_sol)
+    end
+
+    function compute_Gp_adj_dist_sens_new(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m, xwmm_m, η, na)
+        x_func  = extrapolate(scale(interpolate(xvec1, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec1,2)), Line())
+        x2_func = extrapolate(scale(interpolate(xvec2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec2,2)), Line())
+        der_est  = get_der_est2(0.0:Tsλ:N*Ts, x_func, size(xvec1,2))
+        der_est2 = get_der_est2(0.0:Tsλ:N*Ts, x2_func, size(xvec1,2))
+        # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+        dx = extrapolate(scale(interpolate(der_est, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts-Tsλ/2, 1:size(xvec1,2)), Line())
+        dx2 = extrapolate(scale(interpolate(der_est2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts-Tsλ/2, 1:size(xvec2,2)), Line())
+
+        # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
+        # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
+        mdl_sens = model_sens_to_use(φ0, u, wmm_m, get_all_θs(free_pars))
+        xp0 = reshape(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)), num_dyn_vars_adj, length(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)))÷num_dyn_vars_adj)
+
+        # ----------------- Actually solving adjoint system ------------------------
+        # mdl_adj, get_Gp = model_adj_to_use(u, wmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
+        mdl_adj, get_Gp = model_adj_to_use_dist_sens_new(u, wmm_m, xwmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, η, na)
         adj_prob = problem_reverse(mdl_adj, N, Ts)
         adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-Tso/2), abstol =  abstol, reltol = reltol,
             maxiters = maxiters)
@@ -629,9 +645,11 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         xwmm(m::Int) = mk_xw_interp(dmdl.Cd, XWm, m, δ)
 
         # NOTE: No optoin of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
-        y_func  = linear_interpolation_multivar(y[:,1], Ts, y_len)
+        # y_func  = linear_interpolation_multivar(y[:,1], Ts, y_len)        # Old, custom interpolation
+        y_func  = extrapolate(scale(interpolate(transpose(reshape(y[:,1], y_len, :)), (BSpline(interp_type), NoInterp())), 0.0:Ts:N*Ts, 1:y_len), Line())   # New, better interpolation
         dy_est  = (y[y_len+1:end,1]-y[1:end-y_len,1])/Ts
-        dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)
+        # dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)        # Old, custom interpolation
+        dy_func = extrapolate(scale(interpolate(transpose(reshape(dy_est, y_len, :)), (BSpline(interp_type), NoInterp())), 0.0:Ts:(N-1)*Ts, 1:y_len), Line())   # New, better interpolation
         sampling_ratio = Int(Ts/Tsλ)
         solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> sol -> h_debug(sol,get_all_θs(free_pars))
         Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)    # NOTE: Have to make sure not to solve problem with forward sensitivities, that might not work and also just defeats purpose of adjoint method
@@ -640,6 +658,34 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         na = length(findall(W_meta.free_par_inds .<= nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
         # mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:M_mean), dims=2)[:]
         mean(solve_adj_in_parallel2(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:M_mean, length(free_pars)), dims=2)[:]
+    end
+
+    function get_gradient_adjoint_distsens_new(y, free_pars, compute_Gp, M_mean::Int=1)
+        Zm = [randn(Nw, n_tot) for m = 1:2M_mean]
+        W_meta = exp_data.W_meta
+        nx = W_meta.nx
+        n_out = W_meta.n_out
+        N = size(exp_data.Y, 1)÷y_len-1
+
+        η = exp_data.get_all_ηs(free_pars)
+
+        dmdl = discretize_ct_noise_model_with_sensitivities_alt(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
+        # # NOTE: OPTION 1: Use the rows below here for linear interpolation
+        XWm = simulate_noise_process_mangled(dmdl, Zm)
+        wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
+        xwmm(m::Int) = mk_xw_interp(dmdl.Cd, XWm, m, δ)
+
+        # NOTE: No option of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
+        # y_func  = linear_interpolation_multivar(y[:,1], Ts, y_len)        # Old, custom interpolation
+        y_func  = extrapolate(scale(interpolate(transpose(reshape(y[:,1], y_len, :)), (BSpline(interp_type), NoInterp())), 0.0:Ts:N*Ts, 1:y_len), Line())   # New, better interpolation
+        dy_est  = (y[y_len+1:end,1]-y[1:end-y_len,1])/Ts
+        # dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)        # Old, custom interpolation
+        dy_func = extrapolate(scale(interpolate(transpose(reshape(dy_est, y_len, :)), (BSpline(interp_type), NoInterp())), 0.0:Ts:(N-1)*Ts, 1:y_len), Line())   # New, better interpolation
+        sampling_ratio = Int(Ts/Tsλ)
+        solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> sol -> h_debug(sol,get_all_θs(free_pars))
+        Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)
+        na = length(findall(W_meta.free_par_inds .<= nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
+        mean(solve_adj_in_parallel2(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), η, na), 1:M_mean, length(free_pars)), dims=2)[:]
     end
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
@@ -651,7 +697,11 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     # Picking correct way of computing gradients
     if use_adjoint
         if length(dist_par_inds) > 0
-            get_gradient_estimate_p = (free_pars, M_mean, e) -> get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean*num_stacks)
+            if use_new_adj
+                get_gradient_estimate_p = (free_pars, M_mean, e) -> get_gradient_adjoint_distsens_new(Y[:,e], free_pars, compute_Gp_adj_dist_sens_new, M_mean*num_stacks)
+            else
+                get_gradient_estimate_p = (free_pars, M_mean, e) -> get_gradient_adjoint_distsens(Y[:,e], free_pars, compute_Gp_adj_dist_sens, M_mean*num_stacks)
+            end
         else
             get_gradient_estimate_p = (free_pars, M_mean, e) -> get_gradient_adjoint(Y[:,e], free_pars, compute_Gp_adj, M_mean*num_stacks)
         end

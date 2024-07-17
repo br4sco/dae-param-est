@@ -3950,6 +3950,8 @@ function delta_robot_gc_adjoint_deb1only(u::Function, w::Function, θ::Vector{Fl
     end
 end
 
+# DIST FORWARD SENS MODEL! I need it, right??? Yeah I think so. But maybe not, let's try without!
+
 ################################ DELTA ROBOT INITIALIZATIONS ################################
 
 function get_delta_initial_L0sensonly(θ, z, dz, H, m1, m2, m3, HinvM, cgBu)
@@ -8516,8 +8518,8 @@ function my_pendulum_adjoint_distsensa1_new(u::Function, w::Function, xw::Functi
                             0   0  -dx(t,1)    0   0   0            0
                             0   0  -dx(t,2)    0   0   0            0], zeros(3,7))
         # Fp = t -> [.0; .0; abs(x(t,4))*x(t,4); abs(x(t,5))*x(t,5); .0; .0; .0]
-        gₓ  = t -> [0    0    0    0    0    0    2(x2(t,7)-first(y(t)))/T]
-        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t,7)-first(dy(t)))/T]
+        gₓ  = t -> [0    0    0    0    0    0    2(x2(t,7)-y(t,1))/T]
+        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t,7)-dy(t,1))/T]
 
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
@@ -8560,7 +8562,7 @@ function my_pendulum_adjoint_distsensa1_new(u::Function, w::Function, xw::Functi
             res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t,4))*z[3] - x(t,1)*z[6]
             res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t,5))*z[4] - x(t,2)*z[6]
             res[6]  = 2*x(t,1)*dz[1] + 2*x(t,2)*dz[2] + 2*dx(t,1)*z[1] + 2*dx(t,2)*z[2]
-            res[7]  = (2*(x2(t,7) - first(y(t))))/T - z[7]
+            res[7]  = (2*(x2(t,7) - y(t,1)))/T - z[7]
 
             # NOTE: η here then has to contain free_parameters and true values for the non-free ones
             res[8]  = dz[8] + z[9] - η[1]*z[8] + η[3]*z[10]
