@@ -49,7 +49,7 @@ const MOH_MDL  = 2
 const DELTA    = 3
 
 # Selects which model to adapt code to
-model_id = PENDULUM     # Remember that δ and T_s might depend on the model, I used different ones for Pendulum and for Delta robot
+model_id = DELTA     # Remember that δ and T_s might depend on the model, I used different ones for Pendulum and for Delta robot
 
 # ==================
 # === PARAMETERS ===
@@ -58,10 +58,10 @@ model_id = PENDULUM     # Remember that δ and T_s might depend on the model, I 
 # === TIME ===
 # The relationship between number of data samples N and number of noise samples
 # Nw is given by Nw >= (Ts/δ)*N
-const δ = 0.01#2e-5                  # noise sampling time
-const Ts = 0.1#2e-4                  # step-size
-const Tsλ = 0.01#2e-5
-const Tso = 0.01#2e-5
+const δ = 2e-5#0.01                  # noise sampling time
+const Ts = 2e-4#0.1                  # step-size
+const Tsλ = 2e-5#0.01
+const Tso = 2e-5#0.01
 # const δ = 0.001                  # noise sampling time
 # const Ts = 0.001                  # step-size
 const M = Threads.nthreads()÷2#4#00       # Number of monte-carlo simulations used for estimating mean
@@ -150,7 +150,7 @@ if model_id == PENDULUM
     const num_dyn_vars = 7
     const num_dyn_vars_adj = 7 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state. Though outputs are already baked in for pendulum
     use_adjoint = true
-    use_new_adj = false
+    use_new_adj = true
     get_all_θs(pars::Vector{Float64}) = [m, L, g, k]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
     dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
@@ -198,21 +198,21 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = Array{Float64}(undef, 0)#[γ] # TODO: Change dyn_par_bounds if changing parameter
-    const num_dyn_vars = 30
-    const num_dyn_vars_adj = 33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
+    const free_dyn_pars_true = [γ]# Array{Float64}(undef, 0) # TODO: Change dyn_par_bounds if changing parameter
+    const num_dyn_vars = 30#24#30
+    const num_dyn_vars_adj = 33#27#33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     use_adjoint = true
     use_new_adj = true
-    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.01 1e4]#Array{Float64}(undef, 0, 2)
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    dyn_par_bounds = [0.01 1e4]#Array{Float64}(undef, 0, 2)
     # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
     const_learning_rate = [0.1]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
-    model_sens_to_use = delta_robot_gc_dist_sens_1#allparsens
+    model_sens_to_use = delta_robot_gc_γsens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_foradj_a1only#delta_robot_gc_adjoint_γonly_new
+    model_adj_to_use = delta_robot_gc_adjoint_γonly_new
     model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_a1only 
     sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
@@ -285,7 +285,7 @@ elseif model_id == DELTA
     # f_sens(x::Vector{Float64}, θ::Vector{Float64}) = x[1:48]
     # Since none of the state variables are the outputs, we add output sensitivites at the end. Those three extra states are e.g. needed for adjoint method.
     f_sens_deb(x::Vector{Float64}, θ::Vector{Float64}) = inject_adj_sens(x, f_sens(x, θ))
-    f_debug(x::Vector{Float64}, θ::Vector{Float64}) = vcat(x[1:30], f(x, θ))
+    f_debug(x::Vector{Float64}, θ::Vector{Float64}) = vcat(x[1:num_dyn_vars], f(x, θ))
 end
 
 y_len = length(f(ones(num_dyn_vars), get_all_θs(free_dyn_pars_true)))
@@ -760,6 +760,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, trace_step, durations
 end
 
+# It's quite a lot depracated actually, maybe worth getting rid of now that we have simulate_system()?
 # NOTE: This function is a little depracated now that we have introduced num_stacks into the other functions
 function get_outputs(expid::String, pars0::Vector{Float64})
     exp_data, isws = get_experiment_data(expid)
@@ -856,14 +857,14 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
-    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter?
+    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
+    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter? ANS: (ONLY PENDULUM!) Fixing first c=0 guarantees once differentiable disturbance
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
     # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
     # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown (which is zero, I never ID it)
     # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # Second element of c-vector unknown (all exccept first element of c-vector actually)
-    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
+    # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
@@ -1146,6 +1147,7 @@ function simulate_system(
 
     calc_mean_y_N(N::Int, free_pars::Vector{Float64}, m::Int) =
         solvew(exp_data.u, t -> wmm(m)(t), free_pars, N) |> sol -> h(sol,get_all_θs(free_pars))
+        # solvew(exp_data.u, t -> wmm(m)(t), free_pars, N) |> sol -> h_debug(sol,get_all_θs(free_pars)) # DEBUG, for getting entire state instead of only measured output
     calc_mean_y(free_pars::Vector{Float64}, m::Int) = calc_mean_y_N(N, free_pars, m)
     return solve_in_parallel(m -> calc_mean_y(free_pars, m), collect(1:M))   # Returns Ym
 end
@@ -1254,6 +1256,51 @@ function inject_adj_sens(x::Vector{Float64}, adj_sens::Matrix{Float64})
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
+# ONLY NOMINAL ALGEBRAIC CONSTRAINTS
+function delta_constraint_residual(Xmat)
+    N = size(Xmat,1)÷num_dyn_vars_adj
+    residuals = zeros(6,N)
+    residual_norms = zeros(N)
+
+    for ind=1:N
+        z = Xmat[(ind-1)*num_dyn_vars_adj+1:ind*num_dyn_vars_adj]
+        residuals[1,ind] = (sqrt(3)*(L0-L3+L1*cos(z[4])+L2*cos(z[5])))*0.5+L2*sin(z[2])*sin(z[3])+(L2*sin(z[5])*sin(z[6]))*0.5
+        residuals[2,ind] = (3*L0)*0.5-(3*L3)*0.5+L1*cos(z[1])+L2*cos(z[2])+(L1*cos(z[4]))*0.5+(L2*cos(z[5]))*0.5-(sqrt(3)*L2*sin(z[5])*sin(z[6]))*0.5
+        residuals[3,ind] = L1*sin(z[1])-L1*sin(z[4])+L2*cos(z[3])*sin(z[2])-L2*cos(z[6])*sin(z[5])
+        residuals[4,ind] = L2*sin(z[2])*sin(z[3])-(sqrt(3)*(L0-L3+L1*cos(z[7])+L2*cos(z[8])))*0.5+(L2*sin(z[8])*sin(z[9]))*0.5
+        residuals[5,ind] = (3*L0)*0.5-(3*L3)*0.5+L1*cos(z[1])+L2*cos(z[2])+(L1*cos(z[7]))*0.5+(L2*cos(z[8]))*0.5+(sqrt(3)*L2*sin(z[8])*sin(z[9]))*0.5
+        residuals[6,ind] = L1*sin(z[1])-L1*sin(z[7])+L2*cos(z[3])*sin(z[2])-L2*cos(z[9])*sin(z[8])
+        residual_norms[ind] = norm(residuals[:,ind])
+    end
+    return residuals, residual_norms
+end
+
+# ALL ALGEBRAIC CONSTRAINTS
+function delta_constraint_residual2(Xmat)
+    N = size(Xmat,1)÷num_dyn_vars_adj
+    residuals = zeros(12,N)
+    residual_norms = zeros(N)
+
+    for ind=1:N
+        z = Xmat[(ind-1)*num_dyn_vars_adj+1:ind*num_dyn_vars_adj]
+
+        residuals[1,ind] = (sqrt(3)*(L0-L3+L1*cos(z[4])+L2*cos(z[5])))*0.5+L2*sin(z[2])*sin(z[3])+(L2*sin(z[5])*sin(z[6]))*0.5
+        residuals[2,ind] = (3*L0)*0.5-(3*L3)*0.5+L1*cos(z[1])+L2*cos(z[2])+(L1*cos(z[4]))*0.5+(L2*cos(z[5]))*0.5-(sqrt(3)*L2*sin(z[5])*sin(z[6]))*0.5
+        residuals[3,ind] = L1*sin(z[1])-L1*sin(z[4])+L2*cos(z[3])*sin(z[2])-L2*cos(z[6])*sin(z[5])
+        residuals[4,ind] = L2*sin(z[2])*sin(z[3])-(sqrt(3)*(L0-L3+L1*cos(z[7])+L2*cos(z[8])))*0.5+(L2*sin(z[8])*sin(z[9]))*0.5
+        residuals[5,ind] = (3*L0)*0.5-(3*L3)*0.5+L1*cos(z[1])+L2*cos(z[2])+(L1*cos(z[7]))*0.5+(L2*cos(z[8]))*0.5+(sqrt(3)*L2*sin(z[8])*sin(z[9]))*0.5
+        residuals[6,ind] = L1*sin(z[1])-L1*sin(z[7])+L2*cos(z[3])*sin(z[2])-L2*cos(z[9])*sin(z[8])
+        residuals[7,ind] = L2*cos(z[2])*sin(z[3])*z[11]-(sqrt(3)*(L1*sin(z[4])*z[13]+L2*sin(z[5])*z[14]))*0.5+L2*cos(z[3])*sin(z[2])*z[12]+(L2*cos(z[5])*sin(z[6])*z[14])*0.5+(L2*cos(z[6])*sin(z[5])*z[15])*0.5
+        residuals[8,ind] = -L1*sin(z[1])*z[10]-L2*sin(z[2])*z[11]-(L1*sin(z[4])*z[13])*0.5-(L2*sin(z[5])*z[14])*0.5-(sqrt(3)*L2*cos(z[5])*sin(z[6])*z[14])*0.5-(sqrt(3)*L2*cos(z[6])*sin(z[5])*z[15])*0.5
+        residuals[9,ind] = L1*cos(z[1])*z[10]-L1*cos(z[4])*z[13]+L2*cos(z[2])*cos(z[3])*z[11]-L2*cos(z[5])*cos(z[6])*z[14]-L2*sin(z[2])*sin(z[3])*z[12]+L2*sin(z[5])*sin(z[6])*z[15]
+        residuals[10,ind] = (sqrt(3)*(L1*sin(z[7])*z[16]+L2*sin(z[8])*z[17]))*0.5+L2*cos(z[2])*sin(z[3])*z[11]+L2*cos(z[3])*sin(z[2])*z[12]+(L2*cos(z[8])*sin(z[9])*z[17])*0.5+(L2*cos(z[9])*sin(z[8])*z[18])*0.5
+        residuals[11,ind] = (sqrt(3)*L2*cos(z[8])*sin(z[9])*z[17])*0.5-L2*sin(z[2])*z[11]-(L1*sin(z[7])*z[16])*0.5-(L2*sin(z[8])*z[17])*0.5-L1*sin(z[1])*z[10]+(sqrt(3)*L2*cos(z[9])*sin(z[8])*z[18])*0.5
+        residuals[12,ind] = L1*cos(z[1])*z[10]-L1*cos(z[7])*z[16]+L2*cos(z[2])*cos(z[3])*z[11]-L2*cos(z[8])*cos(z[9])*z[17]-L2*sin(z[2])*sin(z[3])*z[12]+L2*sin(z[8])*sin(z[9])*z[18]
+        residual_norms[ind] = norm(residuals[:,ind])
+    end
+    return residuals, residual_norms
+end
+
 function solve_accurate_adjoint(N::Int, Ts::Float64, x::Function, dx::Function, x2::Function, y_func::Function, my_ind::Int)
     l2(x,dx,z,t) = (-x(t)[1]/x(t)[2])*z[1]
     l4(x,dx,z,t) = (-x(t)[1]/x(t)[2])*z[2]
@@ -1471,12 +1518,34 @@ function read_from_backup(dir::String, E::Int)
     avg_pars_proposed = zeros(k, E)
     trace_proposed = [zeros(its, k) for e=1:E]
     for e=1:E
-        opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
+        # opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
         opt_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_proposed_e$e.csv"), ',')
         avg_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_average_e$e.csv"), ',')
         trace_proposed[e] = readdlm(joinpath(dir, "backup_trace_e$e.csv"), ',')
     end
     return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_proposed
+end
+
+function extract_part_results_from_trace(dir::String, E::Int, checkpoint::Int)
+    sample = readdlm(joinpath(dir, "backup_trace_e1.csv"), ',')
+    (its,k) = size(sample)
+    # trace_proposed = [zeros(its, k) for e=1:E]
+    check_val = zeros(k,E)
+    end_val = zeros(k,E)
+    for e=1:E
+        trace_proposed = readdlm(joinpath(dir, "backup_trace_e$e.csv"), ',')
+        check_val[:,e] = trace_proposed[checkpoint,:]
+        end_val[:,e] = trace_proposed[end,:]
+    end
+    return check_val, end_val
+end
+
+function parameter_separated_results(opt_pars::Matrix{Float64}, names::Vector{String}, dir::String)
+    for parind=eachindex(opt_pars[:,1])
+        # writedlm(joinpath(dir, "$(names[parind])_base.csv"), opt_pars[parind,1:end .!= 28], ",")   # Getting rid of an index that baseline happened to fail for
+        # writedlm(joinpath(dir, "$(names[parind])_vals2.csv"), opt_pars[parind,:], ",")
+        writedlm(joinpath(dir, "$(names[parind])_vals3.csv"), hcat(opt_pars[parind,:],opt_pars[parind,:],opt_pars[parind,:],opt_pars[parind,:]), ",")
+    end
 end
 
 function gridsearch_delta_wrapper(expid::String, savedir::String)
