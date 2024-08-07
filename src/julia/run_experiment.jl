@@ -198,22 +198,23 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [γ]# Array{Float64}(undef, 0) # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = Array{Float64}(undef, 0) # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30#24#30
     const num_dyn_vars_adj = 33#27#33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     use_adjoint = true
     use_new_adj = true
-    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    dyn_par_bounds = [0.01 1e4]#Array{Float64}(undef, 0, 2)
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    dyn_par_bounds = Array{Float64}(undef, 0, 2)
     # dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
-    const_learning_rate = [0.1]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
-    model_sens_to_use = delta_robot_gc_γsens
+    # const_learning_rate = [0.1]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
+    const_learning_rate = [0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # For disturbance model
+    model_sens_to_use = delta_robot_gc_dist_sens_all_FAKE#delta_robot_gc_γsens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_adjoint_γonly_new
-    model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_a1only 
+    model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_alldist
     sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
     model_stepbystep = delta_adj_stepbystep_NEW
@@ -252,8 +253,8 @@ elseif model_id == DELTA
     # # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_L1(x)
 
-    # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
-    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
+    # # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
 
     # # Sensitivity wrt to [L1, M1, J1]
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_L1(x)+f_sens_base(x,θ,1), f_sens_other(x)+f_sens_base(x,θ,2), f_sens_other(x)+f_sens_base(x,θ,3))
@@ -279,6 +280,12 @@ elseif model_id == DELTA
     #     f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
     #     f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
     #     f_sens_base(x, θ, 12)+f_sens_other(x))
+
+    # Sensitivity wrt to all disturbance parameters
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_other(x), f_sens_base(x, θ, 2)+f_sens_other(x), f_sens_base(x, θ, 3)+f_sens_other(x), 
+        f_sens_base(x, θ, 4)+f_sens_other(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
+        f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
+        f_sens_base(x, θ, 12)+f_sens_other(x))
 
     # # Just getting all states
     # f(x::Vector{Float64}) = x[1:24]
@@ -577,7 +584,31 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         return get_Gp(adj_sol)
     end
 
-    function compute_Gp_adj_dist_sens_new(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m, xwmm_m, η, na)
+    # function compute_Gp_adj_dist_sens_new(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m, xwmm_m, η, na)
+    #     x_func  = extrapolate(scale(interpolate(xvec1, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec1,2)), Line())
+    #     x2_func = extrapolate(scale(interpolate(xvec2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec2,2)), Line())
+    #     der_est  = get_der_est2(0.0:Tsλ:N*Ts, x_func, size(xvec1,2))
+    #     der_est2 = get_der_est2(0.0:Tsλ:N*Ts, x2_func, size(xvec1,2))
+    #     # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+    #     dx = extrapolate(scale(interpolate(der_est, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts-Tsλ/2, 1:size(xvec1,2)), Line())
+    #     dx2 = extrapolate(scale(interpolate(der_est2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts-Tsλ/2, 1:size(xvec2,2)), Line())
+
+    #     # NOTE: In case initial conditions are independent of m (independent of wmm in this case), we could do this outside
+    #     # ---------------- Computing xp0, initial conditions of derivative of x wrt to p ----------------------
+    #     mdl_sens = model_sens_to_use(φ0, u, wmm_m, get_all_θs(free_pars))
+    #     xp0 = reshape(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)), num_dyn_vars_adj, length(f_sens_deb(mdl_sens.x0,get_all_θs(free_pars)))÷num_dyn_vars_adj)
+
+    #     # ----------------- Actually solving adjoint system ------------------------
+    #     # mdl_adj, get_Gp = model_adj_to_use(u, wmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
+    #     mdl_adj, get_Gp = model_adj_to_use_dist_sens_new(u, wmm_m, xwmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, η, na)
+    #     adj_prob = problem_reverse(mdl_adj, N, Ts)
+    #     adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-Tso/2), abstol =  abstol, reltol = reltol,
+    #         maxiters = maxiters)
+
+    #     return get_Gp(adj_sol)
+    # end
+
+    function compute_Gp_adj_dist_sens_new(y_func, dy_func, xvec1, xvec2, free_pars, wmm_m)
         x_func  = extrapolate(scale(interpolate(xvec1, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec1,2)), Line())
         x2_func = extrapolate(scale(interpolate(xvec2, (BSpline(interp_type), NoInterp())), 0.0:Tsλ:N*Ts, 1:size(xvec2,2)), Line())
         der_est  = get_der_est2(0.0:Tsλ:N*Ts, x_func, size(xvec1,2))
@@ -593,7 +624,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
 
         # ----------------- Actually solving adjoint system ------------------------
         # mdl_adj, get_Gp = model_adj_to_use(u, wmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
-        mdl_adj, get_Gp = model_adj_to_use_dist_sens_new(u, wmm_m, xwmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, η, na)
+        mdl_adj, get_Gp = model_adj_to_use_dist_sens_new(u, wmm_m, get_all_θs(free_pars), N*Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
         adj_prob = problem_reverse(mdl_adj, N, Ts)
         adj_sol = solve(adj_prob, saveat = 0:Tso:(N*Ts-Tso/2), abstol =  abstol, reltol = reltol,
             maxiters = maxiters)
@@ -673,7 +704,6 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         # # NOTE: OPTION 1: Use the rows below here for linear interpolation
         XWm = simulate_noise_process_mangled(dmdl, Zm)
         wmm(m::Int) = mk_noise_interp(dmdl.Cd, XWm, m, δ)
-        xwmm(m::Int) = mk_xw_interp(dmdl.Cd, XWm, m, δ)
 
         # NOTE: No option of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
         # y_func  = linear_interpolation_multivar(y[:,1], Ts, y_len)        # Old, custom interpolation
@@ -684,8 +714,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         sampling_ratio = Int(Ts/Tsλ)
         solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> sol -> h_debug(sol,get_all_θs(free_pars))
         Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)
-        na = length(findall(W_meta.free_par_inds .<= nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
-        mean(solve_adj_in_parallel2(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), η, na), 1:M_mean, length(free_pars)), dims=2)[:]
+        mean(solve_adj_in_parallel2(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean, length(free_pars)), dims=2)[:]
     end
 
     # -------------------------------- end of adjoint sensitivity specifics ----------------------------------------
@@ -857,20 +886,16 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    free_dist_pars = fill(false, size(η_true))                                         # Known disturbance model
-    # free_dist_pars = vcat(fill(true, nx), false, fill(true, n_tot*n_out-1))            # Whole a-vector and all but first element of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS) # TODO: Why not one more C-parameter? ANS: (ONLY PENDULUM!) Fixing first c=0 guarantees once differentiable disturbance
-    # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # All but first element (last elements?) of c-vector unknown
-    # free_dist_pars = vcat(true, fill(false, nx-1), false, fill(true, n_tot*n_out-1))   # First element of a-vector and all but first (usually just one) element of c-vector unknown
-    # free_dist_pars = vcat(fill(true, nx), false, fill(false, n_tot*n_out-1))           # Whole a-vector unknown
-    # free_dist_pars = vcat(fill(false, nx), true, fill(false, n_tot*n_out-1))           # First parameter of c-vector unknown (which is zero, I never ID it)
-    # free_dist_pars = vcat(fill(false, nx), false, fill(true, n_tot*n_out-1))           # Second element of c-vector unknown (all exccept first element of c-vector actually)
+    # free_dist_pars = fill(false, size(η_true))                                                  # Known disturbance model
+    # free_dist_pars = vcat(fill(true, nx), fill(false, n_out), fill(true, (n_tot-1)*n_out))    # Whole a-vector and all but first n_out elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY)
+    free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY)
+    # free_dist_pars = vcat(fill(true, nx), fill(false, n_tot*n_out))                    # Whole a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
-    # free_dist_pars = vcat(true, fill(false, nx-1), true, fill(false, n_tot*n_out-1))   # First parameter of a-vector and first parameter of c-vector unknown
     free_par_inds = findall(free_dist_pars)          # Indices of free variables in η. Assumed to be sorted in ascending order.
     # Array of tuples containing lower and upper bound for each free disturbance parameter
     # dist_par_bounds = Array{Float64}(undef, 0, 2)
-    dist_par_bounds = [-Inf Inf; -Inf Inf; -Inf Inf]#[0 Inf; 0 Inf; -Inf Inf]
+    dist_par_bounds = [-Inf Inf; -Inf Inf; -Inf Inf; -Inf Inf; -Inf Inf; -Inf Inf; -Inf Inf; -Inf Inf; -Inf Inf; -Inf Inf; -Inf Inf; -Inf Inf]#[0 Inf; 0 Inf; -Inf Inf]
     function get_all_ηs(free_pars::Vector{Float64})
         # If copy() is not used here, some funky stuff that I don't fully understand happens.
         # I think essentially η_true stops being defined after function returns, so
