@@ -2343,11 +2343,10 @@ function delta_adj_stepbystep_NEW(Φ::Float64, u::Function, w::Function, θ::Vec
 end
 
 # NOTE: Made using slightly sub-optimal version of new adjoint method for disturbance, resulting in extra messy implementation
-function delta_robot_gc_foradj_a1only(u::Function, w::Function, xw_full::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type,  η::Vector{Float64}, na::Int)#::Tuple{Model, Function, Function}
+function delta_robot_gc_foradj_a1only(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
-        nw = length(xw_full(0.0))÷(np+1)
         # np = size(xp0,2)
         @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter a1, make sure to pass correct xp0"
         # nx = size(xp0,1)
@@ -2463,7 +2462,6 @@ function delta_robot_gc_foradj_a1only(u::Function, w::Function, xw_full::Functio
         # NOTE: Convention is used that derivatives wrt to θ stack by adding new cols
         # while derivatives wrt to x stack by adding new rows
 
-        C = [η[4]   η[5]   η[6]; η[7]   η[8]   η[9]; η[10]   η[11]   η[12]]
 
         ###################### INITIALIZING ADJOINT SYSTEM ####################
         # Indices 1-18 are differential (d), while 19-33 are algebraic (a)
@@ -2520,13 +2518,14 @@ function delta_robot_gc_foradj_a1only(u::Function, w::Function, xw_full::Functio
             res[31] = -z[31]-(2*yt[1]-2*xt[31])/T
             res[32] = -z[32]-(2*yt[2]-2*xt[32])/T
             res[33] = -z[33]-(2*yt[3]-2*xt[33])/T
-            res[34] = dz[34] + (2z[10]*η[4]*w(t)[1]*xw_full(t)[nw+1] + 2z[13]*η[8]*w(t)[2]*xw_full(t)[nw+2] + 2z[16]*η[12]*w(t)[3]*xw_full(t)[nw+3])
+            res[34] = dz[34] + (2z[10]*w(t)[1]*w(t)[4] + 2z[13]*w(t)[2]*w(t)[5] + 2z[16]*w(t)[3]*w(t)[6])
 
             nothing
         end
 
         z0  = vcat(λT[:], zeros(np))
-        dz0 = vcat(dλT[:], (2z0[10]*η[4]*w(T)[1]*xw_full(T)[nw+1] + 2z0[13]*η[8]*w(T)[2]*xw_full(T)[nw+2] + 2z0[16]*η[12]*w(T)[3]*xw_full(T)[nw+3]))
+        dz0 = vcat(dλT[:], -(2z0[10]*w(T)[1]*w(T)[4] + 2z0[13]*w(T)[2]*w(T)[5] + 2z0[16]*w(T)[3]*w(T)[6]))
+
 
         # Function returning Gp given adjoint solution
         function get_Gp(adj_sol::DAESolution)
@@ -9367,12 +9366,11 @@ function my_pendulum_adjoint_distsensa2(u::Function, w::Function, xw::Function, 
     end
 end
 
-function my_pendulum_foradj_distsensa1(u::Function, w::Function, xw_full::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type, η::Vector{Float64}, na::Int, N_trans::Int=0)
+function my_pendulum_foradj_distsensa1(u::Function, w::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type, N_trans::Int=0)
     # na should be the number of disturbance parameters corresponding to the a parameters. In this case, it should really just be 1, so it's actually only an input argument to fit the signature of the other adjoint models
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
         nx = size(xp0,1)
-        nw = length(xw_full(0.0))÷(np+1)    # xw_full has not only the disturbance state (of dimension nw), but also its sensitivity wrt to the np parameters
         @assert (np == 1) "my_pendulum_adjoint_konly_with_distsensa is hard-coded to only handle parameter a1. Make sure to pass correct xp0"   # NOTE: Maybe this one is more general than a1 specifically? Can handle either a-paramter mayhbe??
 
         Fx = t -> [2dx(t,6)        0               0   -1                  0           0   0
@@ -9397,9 +9395,6 @@ function my_pendulum_foradj_distsensa1(u::Function, w::Function, xw_full::Functi
 
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
-
-        # Creating some of the needed disturbance from η. ASSUMING ONLY FREE DISTURBANCE PARAMETERS ARE a1
-        C = [η[3]   η[4]]
 
         ###################### INITIALIZING ADJOINT SYSTEM ####################
         # Indices 1-4 are differential (d), while 5-7 are algebraic (a)
@@ -9428,12 +9423,12 @@ function my_pendulum_foradj_distsensa1(u::Function, w::Function, xw_full::Functi
             res[6]  = 2*x(t,1)*dz[1] + 2*x(t,2)*dz[2] + 2*dx(t,1)*z[1] + 2*dx(t,2)*z[2]
             res[7]  = (2*(x2(t,7) - y(t,1)))/T - z[7]
 
-            res[8] = dz[8] + first(2z[3]*w(t)[1]*(C*xw_full(t)[3:4]))   # TODO: Maybe rewrite this so no need for first(), just using scalar operations?
+            res[8] = dz[8] + first(2z[3]*w(t)[1]*w(t)[2])   # TODO: Maybe rewrite this so no need for first(), just using scalar operations?
             nothing
         end
         
         z0  = vcat(λT[:], zeros(np))
-        dz0 = vcat(dλT[:], 2z0[3]*w(T)[1]*(C*xw_full(T)[3:4]))
+        dz0 = vcat(dλT[:], -2z0[3]*w(T)[1]*w(T)[2])
 
         if N_trans > 0
             @warn "The returned function get_Gp() doesn't fully support N_trans > 0, as sensitivity of internal variables not known at any other time than t=0. A non-rigorous approximation is used instead."
