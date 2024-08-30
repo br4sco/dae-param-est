@@ -213,7 +213,8 @@ elseif model_id == DELTA
     model_sens_to_use = delta_robot_gc_allpar_alldist_FAKE#delta_robot_gc_γsens
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_adjoint_γonly_new
+    model_adj_to_use = delta_robot_gc_adjoint_allpar_new
+    model_adj_to_use_dist_sens = delta_robot_gc_adjoint_allpar_alldist  # Old adjoint approach, i.e. not using foradj
     model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_allpar_alldist
     sgd_version_to_use = perform_SGD_adam_new_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
@@ -259,7 +260,7 @@ elseif model_id == DELTA
     # # Sensitivity wrt to [L1, M1, J1]
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_L1(x)+f_sens_base(x,θ,1), f_sens_other(x)+f_sens_base(x,θ,2), f_sens_other(x)+f_sens_base(x,θ,3))
 
-    # Sensitivity wrt to γ and one disturbance parameter
+    # # Sensitivity wrt to γ and one disturbance parameter
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [f_sens_base(x, θ, 1)+f_sens_other(x)    f_sens_base(x, θ, 2)+f_sens_other(x)]
 
     # Sensitivity wrt to debug2-case parameters
@@ -1146,6 +1147,10 @@ function get_fit_sens(Ye, pars, model, jacobian_model, lb, ub)
     fit_result = curve_fit(model, jacobian_model, Float64[], Ye, pars, lower=lb, upper=ub, show_trace=true, inplace=false, x_tol=1e-8)    # Default: inplace = false, x_tol = 1e-8
     # return fit_result, trace
 end
+
+######################################################
+############# TODO: WHY DO WE PASS dist_sens_inds IF THEY ALREADY ARE IN WMETA???????????????
+######################################################
 
 # Simulates system with specified white noise
 function simulate_system(

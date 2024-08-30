@@ -43,7 +43,8 @@ end
 
 function apply_outputfun(h, sol)
     if sol.retcode != :Success
-        throw(ErrorException("Solution retcode: $(sol.retcode)"))   # Can change this into a print() instead of a throw() to only print error message without crashing
+        throw(ErrorException("Solution retcode: $(sol.retcode)"))   # Can change this into a println() instead of a throw() to only print error message without crashing
+        # println(ErrorException("Solution retcode: $(sol.retcode)"))
     end
     # NOTE: There are alternative, more recommended, ways of accessing solution
     # than through sol.u: https://diffeq.sciml.ai/stable/basics/solution/

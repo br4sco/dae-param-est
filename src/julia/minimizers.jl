@@ -21,7 +21,9 @@ function perform_SGD_adam(
     trace = [pars]
     grad_trace = []
     while t <= maxiters
+        before = now()
         grad_est = get_grad_estimate(pars, M_rate(t))
+        after = now()
 
         s = betas[1]*s + (1-betas[1])*grad_est
         r = betas[2]*r + (1-betas[2])*(grad_est.^2)
@@ -31,7 +33,7 @@ function perform_SGD_adam(
         # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         # running_criterion(grad_est) || break
         if verbose
-            println("Iteration $t, average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
+            println("Iteration $t, duration $(after-before), average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
         end
         running_criterion() || break
         pars = pars + step
@@ -90,7 +92,9 @@ function perform_SGD_adam_new(
         #     throw(ErrorException("Failed all $maxtries attempts to obtain gradient estimate for parameter values $(pars)"))
         # end
         # Original way of doing it
+        before = now()
         grad_est = get_grad_estimate(pars, M_rate(t))   # TODO: THIS USES GLOBAL FUNCTION M_rate(t), ISN'T THAT A WEIRD CHOICE?
+        after = now()
 
         beta1t = betas[1]*(λ^(t-1))
         s = beta1t*s + (1-beta1t)*grad_est
@@ -103,7 +107,7 @@ function perform_SGD_adam_new(
         # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         # running_criterion(grad_est) || break
         if verbose
-            println("Iteration $t, average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
+            println("Iteration $t, duration $(after-before), average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
         end
         running_criterion() || break
         pars = pars + step
@@ -163,7 +167,9 @@ function perform_SGD_adam_new_deltaversion(
         #     throw(ErrorException("Failed all $maxtries attempts to obtain gradient estimate for parameter values $(pars)"))
         # end
         # Original way of doing it
+        before = now()
         grad_est = get_grad_estimate(pars, M_rate(t))
+        after = now()
 
         beta1t = betas[1]*(λ^(t-1))
         s = beta1t*s + (1-beta1t)*grad_est
@@ -176,7 +182,7 @@ function perform_SGD_adam_new_deltaversion(
         # println("Iteration $t, gradient norm $(norm(grad_est)) and step sign $(sign(-first(grad_est))) with parameter estimate $pars")
         # running_criterion(grad_est) || break
         if verbose
-            println("Iteration $t, average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
+            println("Iteration $t, duration $(after-before), average gradient norm $(mean(last_q_norms)), -gradient $(-grad_est) and step $(step) with parameter estimate $pars")
         end
         running_criterion() || break
         pars = pars + step
