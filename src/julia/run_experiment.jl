@@ -491,8 +491,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
     # @warn "Not running baseline identification now"
-    @warn "Starting from e=5"
-    for e=5:E
+    for e=1:E
         time_start = now()
         use_sgd_instead = false
         if use_sgd_instead
