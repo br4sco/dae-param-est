@@ -209,8 +209,8 @@ elseif model_id == DELTA
     dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
     # const_learning_rate = [0.1]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
-    const_learning_rate = [0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2, 0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] #[0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # For disturbance model
-    model_sens_to_use = delta_robot_gc_allpar_alldist_FAKE#delta_robot_gc_γsens
+    const_learning_rate = [0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]#, 0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] #[0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # For disturbance model
+    model_sens_to_use = delta_robot_gc_allparsens#_alldist_FAKE#delta_robot_gc_γsens    # Ah, when using _FAKE version, baseline fails because of computation of Jacobian
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
     model_adj_to_use = delta_robot_gc_adjoint_allpar_new
@@ -276,11 +276,11 @@ elseif model_id == DELTA
     # # Sensitivity wrt to one disturbance parameter
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
 
-    # # Sensitivity wrt to all parameters
-    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
-    #     f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
-    #     f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
-    #     f_sens_base(x, θ, 12)+f_sens_other(x))
+    # Sensitivity wrt to all parameters
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
+        f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
+        f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
+        f_sens_base(x, θ, 12)+f_sens_other(x))
 
     # # Sensitivity wrt to all disturbance parameters
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_other(x), f_sens_base(x, θ, 2)+f_sens_other(x), f_sens_base(x, θ, 3)+f_sens_other(x), 
@@ -288,14 +288,26 @@ elseif model_id == DELTA
     #     f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
     #     f_sens_base(x, θ, 12)+f_sens_other(x))
 
-    # Sensitivity wrt to all dynamical parameters AND all disturbance parameters
-    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
-        f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
-        f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
-        f_sens_base(x, θ, 12)+f_sens_other(x), f_sens_base(x, θ, 13)+f_sens_other(x), f_sens_base(x, θ, 14)+f_sens_other(x), f_sens_base(x, θ, 15)+f_sens_other(x), 
-        f_sens_base(x, θ, 16)+f_sens_other(x), f_sens_base(x, θ, 17)+f_sens_other(x), f_sens_base(x, θ, 18)+f_sens_other(x), f_sens_base(x, θ, 19)+f_sens_other(x),
-        f_sens_base(x, θ, 20)+f_sens_other(x), f_sens_base(x, θ, 21)+f_sens_other(x), f_sens_base(x, θ, 22)+f_sens_other(x), f_sens_base(x, θ, 23)+f_sens_other(x),
-        f_sens_base(x, θ, 24)+f_sens_other(x))
+    # # Sensitivity wrt to all dynamical parameters AND all disturbance parameters
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
+    #     f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
+    #     f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
+    #     f_sens_base(x, θ, 12)+f_sens_other(x), f_sens_base(x, θ, 13)+f_sens_other(x), f_sens_base(x, θ, 14)+f_sens_other(x), f_sens_base(x, θ, 15)+f_sens_other(x), 
+    #     f_sens_base(x, θ, 16)+f_sens_other(x), f_sens_base(x, θ, 17)+f_sens_other(x), f_sens_base(x, θ, 18)+f_sens_other(x), f_sens_base(x, θ, 19)+f_sens_other(x),
+    #     f_sens_base(x, θ, 20)+f_sens_other(x), f_sens_base(x, θ, 21)+f_sens_other(x), f_sens_base(x, θ, 22)+f_sens_other(x), f_sens_base(x, θ, 23)+f_sens_other(x),
+    #     f_sens_base(x, θ, 24)+f_sens_other(x))
+
+    # BASELINE: SHOULD NOT INCLUDE DISTURBANCE PARAMETERS, SINCE BASELINE METHOD CANNOT IDENTIFY THEM ANYWAY
+    # Sensitivity wrt to all dynamical parameters
+    f_sens_baseline(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
+    f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
+    f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
+    f_sens_base(x, θ, 12)+f_sens_other(x))
+    # # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
+    # f_sens_baseline(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
+    # # Sensitivity wrt whichever parameters I felt like while debugging (γ)
+    # f_sens_baseline(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_other(x))
+
 
     # # Just getting all states
     # f(x::Vector{Float64}) = x[1:24]
@@ -309,6 +321,8 @@ y_len = length(f(ones(num_dyn_vars), get_all_θs(free_dyn_pars_true)))
 h(sol,θ) = apply_outputfun(x->f(x,θ), sol)                            # for our model
 h_comp(sol,θ) = apply_two_outputfun(x->f(x,θ), x->f_sens(x,θ), sol)           # for complete model with dynamics sensitivity
 h_sens(sol,θ) = apply_outputfun(x->f_sens(x,θ), sol)                  # for only returning sensitivity 
+h_sens_base(sol,θ) = apply_outputfun(x->f_sens_baseline(x,θ), sol)                  # for only sensitivity, minus sens of disturbance parameters which baseline doesn't use 
+h_comp_base(sol,θ) = apply_two_outputfun(x->f(x,θ), x->f_sens_baseline(x,θ), sol)
 h_debug(sol,θ) = apply_outputfun(x->f_debug(x,θ), sol)
 h_debug_with_sens(sol,θ) = apply_outputfun(x->vcat(f_debug(x,θ), f_sens_deb(x,θ)), sol)
 h_sens_deb(sol,θ) = apply_two_outputfun(x->f_debug(x,θ), x->f_sens_deb(x,θ), sol)
@@ -409,7 +423,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     end
 
     function jacobian_model_b(dummy_input, free_pars)
-        jac = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> sol -> h_sens(sol,get_all_θs(free_pars))
+        jac = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> sol -> h_sens_base(sol,get_all_θs(free_pars))
         return vcat(jac[N_trans+1:end, :]...)
     end
 
@@ -429,7 +443,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     end
 
     function jacobian_model_b_stacked(dummy_input, free_pars)
-        jac_deep = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> sol -> h_sens(sol,get_all_θs(free_pars))
+        jac_deep = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> sol -> h_sens_base(sol,get_all_θs(free_pars))
         jac_flat = vcat(jac_deep[N_trans+1:end, :]...)
         len = size(jac_flat, 1)
         jac_stacked = zeros(num_stacks*size(jac_flat,1), size(jac_flat,2))
@@ -439,40 +453,91 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
         return jac_stacked
     end
 
+    # Returns estimate of gradient of cost function
+    # M_mean specifies over how many realizations the gradient estimate is computed
+    function get_gradient_base(y, free_pars, isws)
+        Yb, jacYb = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> sol -> h_comp_base(sol,get_all_θs(free_pars))
+        return get_cost_gradient(y, vcat(Yb...)[:,1:1], [vcat(jacYb...)], N_trans)
+    end
+
+    # So this is for also using SGD for baseline, since LM didn't work
+    # NOTE: THIS FUNCTION HAS NOT BEEN TESTED, I GAVE IT A THOUGHT BUT DIDN'T TRY IT
+    function get_gradient_base_stacked(ystacked, free_pars, isws, num_stacks::Int=1)
+        # Ym, jacsYm = simulate_system_sens(exp_data, free_pars, 2M_mean*num_stacks, dist_par_inds, isws)
+        Yb, jacYb = solvew_sens(u, t -> zeros(n_out+length(dist_par_inds)*n_out), free_pars, N) |> sol -> h_comp_base(sol,get_all_θs(free_pars))
+        if num_stacks > 1
+            len = size(Yb,1)
+            Ybstacked = zeros(num_stacks*len)
+            jacstacked = [zeros(num_stacks*len, length(free_pars))]
+            for ind2=1:num_stacks
+                Ybstacked[(ind2-1)*len+1:ind2*len] = vcat(Yb...)
+                jacstacked[1][(ind2-1)*len+1:ind2*len,:] = vcat(jacYb...)
+            end
+            # NOTE: Non-zero N_trans not supported!!
+            return get_cost_gradient(ystacked, Ybstacked[:,1:M_mean], jacstacked[M_mean+1:end])
+        end
+        # Uses different noise realizations for estimate of output and estiamte of jacobian
+        return get_cost_gradient(ystacked, Yb, jacsYm, N_trans)
+    end
+
     # E = size(Y, 2)
     # DEBUG
     E = 100
     @warn "Using E = $E instead of default"
-    opt_pars_baseline = zeros(length(pars0), E)
+    opt_pars_baseline = zeros(length(free_dyn_pars_true), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
     # corresponding to dataset e
     trace_base = [[pars0] for e=1:E]
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
-    @warn "Not running baseline identification now"
-    for e=[]#1:E
+    # @warn "Not running baseline identification now"
+    @warn "Starting from e=5"
+    for e=5:E
         time_start = now()
-        # HACK: Uses trace returned due to hacked LsqFit package
-        if num_stacks > 1
-            Y_true_stacked = vcat([Y[N_trans+1:end,(ind-1)*E+e] for ind=1:num_stacks]...)
-            baseline_result = get_fit_sens(Y_true_stacked, pars0,
-                baseline_model_parametrized_stacked, jacobian_model_b_stacked,
-                par_bounds[:,1], par_bounds[:,2])
+        use_sgd_instead = false
+        if use_sgd_instead
+            # Since baseline doesn't identify disturbace parameters, it only needs the learning rate corresponding to the dynamical parameters
+            base_lr = (t, gn) -> learning_rate_vec_red(t, gn)[1:length(free_dyn_pars_true)]
+            # ------------------------------------------------>
+            if num_stacks > 1
+                # Y_true_stacked = vcat([Y[N_trans+1:end,(ind-1)*E+e] for ind=1:num_stacks]...)
+                # baseline_result = get_fit_sens(Y_true_stacked, pars0,
+                #     baseline_model_parametrized_stacked, jacobian_model_b_stacked,
+                #     par_bounds[:,1], par_bounds[:,2])
+                Y_true_stacked = vcat([Y[N_trans+1:end,(ind-1)*E+e] for ind=1:num_stacks]...)
+                opt_pars_baseline[:, e], trace_base[e], _ = sgd_version_to_use((free_pars, M_mean)->get_gradient_base_stacked(Y_true_stacked, free_pars, isws, num_stacks), pars0[1:length(free_dyn_pars_true)], dyn_par_bounds, base_lr, maxiters=100, verbose=true, tol=1e-8)
+            else
+                # baseline_result = get_fit_sens(Y[N_trans+1:end,e], pars0,
+                #     baseline_model_parametrized, jacobian_model_b,
+                #     par_bounds[:,1], par_bounds[:,2])
+                opt_pars_baseline[:, e], trace_base[e], _ = sgd_version_to_use((free_pars, M_mean)->get_gradient_base(Y[:,e], free_pars, isws), pars0[1:length(free_dyn_pars_true)], dyn_par_bounds, base_lr, maxiters=100, verbose=true, tol=1e-8)
+            end    
+            println("Completed for dataset $e for parameters $(opt_pars_baseline[:,e])")
+            # <---------------------------------------------------
         else
-            baseline_result = get_fit_sens(Y[N_trans+1:end,e], pars0,
-                baseline_model_parametrized, jacobian_model_b,
-                par_bounds[:,1], par_bounds[:,2])
-        end
-        opt_pars_baseline[:, e] = coef(baseline_result)
-
-        println("Completed for dataset $e for parameters $(opt_pars_baseline[:,e])")
-
-        # Sometimes (the first returned value I think) the baseline_trace
-        # has no elements, and therefore doesn't contain the metadata x
-        if length(baseline_result.trace) > 1
-            for j=2:length(baseline_result.trace)
-                push!(trace_base[e], trace_base[e][end]+baseline_result.trace[j].metadata["dx"])
+            # ------------------------------------------------>
+            if num_stacks > 1
+                Y_true_stacked = vcat([Y[N_trans+1:end,(ind-1)*E+e] for ind=1:num_stacks]...)
+                baseline_result = get_fit_sens(Y_true_stacked, pars0,
+                    baseline_model_parametrized_stacked, jacobian_model_b_stacked,
+                    par_bounds[:,1], par_bounds[:,2])
+            else
+                baseline_result = get_fit_sens(Y[N_trans+1:end,e], pars0,
+                    baseline_model_parametrized, jacobian_model_b,
+                    par_bounds[:,1], par_bounds[:,2])
             end
+            opt_pars_baseline[:, e] = coef(baseline_result)
+    
+            println("Completed for dataset $e for parameters $(opt_pars_baseline[:,e])")
+    
+            # Sometimes (the first returned value I think) the baseline_trace
+            # has no elements, and therefore doesn't contain the metadata x
+            if length(baseline_result.trace) > 1
+                for j=2:length(baseline_result.trace)
+                    push!(trace_base[e], trace_base[e][end]+baseline_result.trace[j].metadata["dx"])
+                end
+            end
+            # <---------------------------------------------------
         end
         writedlm(joinpath(data_dir, "tmp/backup_baseline_e$e.csv"), opt_pars_baseline[:,e], ',')
         writedlm(joinpath(data_dir, "tmp/backup_baseline_trace_e$e.csv"), trace_base[e], ',')
@@ -768,8 +833,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     #     end
     # end
 
-    # @warn "Not running proposed identification now"
-    for e=1:E
+    @warn "Not running proposed identification now"
+    for e=[]#1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"
@@ -896,9 +961,9 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    # free_dist_pars = fill(false, size(η_true))                                                  # Known disturbance model
+    free_dist_pars = fill(false, size(η_true))                                                  # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_out), fill(true, (n_tot-1)*n_out))    # Whole a-vector and all but first n_out elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY)
-    free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY)
+    # free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY)
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_tot*n_out))                    # Whole a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
@@ -1295,6 +1360,101 @@ function inject_adj_sens(x::Vector{Float64}, adj_sens::Matrix{Float64})
 end
 
 # ======================= DEBUGGING FUNCTIONS ========================
+
+# -------------- Some visualisation for delta robot ----------------------
+function animate_delta_gif(outmat::Matrix{Float64}, file_name::String)
+    l = @layout [a b c]
+    # L0 = θ[1]
+    # L1 = θ[2]
+    # L2 = θ[3]
+    # L3 = θ[4]
+
+    # other xlim actually, oddly enough, L1+L2+L0-L3 in magnitude, which seems weird...
+    # but ylim should be L1 + L2
+    p1 = scatter(-outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2-L3,-0.5*L1-0.5*L3), legend=false)
+    p2 = scatter(outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2-L3,-0.5*L1-0.5*L3), legend=false)
+    p3 = scatter(outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2,L2), legend=false)
+    plot(p1, p2, p3, layout=l)
+
+    anim = @animate for i = eachindex(outmat[1,:])
+        p1 = scatter(-outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2-L3,-0.5*L1-0.5*L3), legend=false)
+        p2 = scatter(outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2-L3,-0.5*L1-0.5*L3), legend=false)
+        p3 = scatter(outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue, xlims=(-L2,L2), ylims=(-L2,L2), legend=false)
+        plot!(p1, -outmat[2,1:i], -outmat[3,1:i])
+        plot!(p2, outmat[1,1:i], -outmat[3,1:i])
+        plot!(p3, outmat[1,1:i], outmat[2,1:i])
+        plot(p1, p2, p3, layout=l)
+    end
+    # gif(anim, file_name, fps = 15)
+    gif(anim, file_name, fps = 30)
+end
+
+function solve_delta(N::Int)
+    θ = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 9.81, 1.0]
+    # θ[10] = 1.0210850451039977
+    # L0 = θ[1]
+    # L1 = θ[2]
+    # L2 = θ[3]
+    # L3 = θ[4]
+    
+    mdl_to_use = delta_robot_gc_J1sens#delta_robot_gc_stab #delta_robot_gc_L1sens
+
+    # # du0 = [2.0; 2*cos(2*π/3); 2*cos(-2*π/3)]   # TODO: Replace cos-values by known root-expressions
+    # delta_mdl = mdl_to_use(0.0, t->[sin(2*t); sin(2*(t+0.2*π/3)); sin(2*(t-0.2*π/3))], t->zeros(3), du0, θ) #t->5*[sin(10*t); sin(10*(t+0.2*π/3)); sin(10*(t-0.2*π/3))]
+    # ------------- Two different input alternatives -------------
+    # input  = readdlm("data/experiments/100_delta/U.csv", ',')
+    # u_tmp(t::Float64) = interpw(input, 1, 1)(t)
+    # u(t::Float64) = 5*u_tmp(t)[1]*[1.;1.;1.]
+    
+    # exp_data, _ = get_experiment_data("delta_crazy_2k_100")
+    # u = exp_data.u
+    u = t->[sin(2*t); sin(2*(t+0.2*π/3)); sin(2*(t-0.2*π/3))]
+    delta_mdl = mdl_to_use(0.0, u, t->zeros(3), θ)
+
+    delta_prob = problem(delta_mdl, N, Ts)
+    sol = solve(delta_prob, saveat = 0:Ts:(N*Ts), abstol = abstol, reltol = reltol, maxiters = maxiters)
+    outmat = get_delta_output(sol, θ)
+
+    # DEBUG, to return entire state trajectory
+    debug_outmat = zeros(60, size(outmat, 2))
+    for (i,x) = enumerate(sol.u)
+        debug_outmat[:,i] = x
+    end
+
+    # p1 = plot(-outmat[2,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
+    # p2 = plot(outmat[1,:], -outmat[3,:], xlims=(-L2,L2), ylims=(-L1-L3,-0.5*L1-0.5*L3), color=:blue, legend=false)
+    # p3 = plot(outmat[1,:], outmat[2,:], xlims=(-L2,L2), ylims=(-L2,L2), color=:blue, legend=false)
+    # scatter!(p1, -outmat[2,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
+    # scatter!(p2, outmat[1,1:1], -outmat[3,1:1], shape=:star8, color=:blue)
+    # scatter!(p3, outmat[1,1:1], outmat[2,1:1], shape=:star8, color=:blue)
+    # l = @layout [a b c]
+    # plot(p1, p2, p3, layout=l)
+    
+    # animate_delta_gif(outmat, θ, "data/results/delta_gif.gif")
+    animate_delta_gif(outmat, "data/results/delta_gif.gif")
+    return outmat, debug_outmat
+end
+
+function get_delta_output(sol, θ)
+    T = length(sol)
+    outmat = zeros(3,T)
+    # TODO: sol.u is not the recommended way to access the solution
+    for (i,x) = enumerate(sol.u)
+        # out = 
+        # [L2*sin(ϕ2)*sin(ϕ3)
+        #  L1*cos(ϕ1) + L2*cos(ϕ2) + L0 - L3
+        #  L1*sin(ϕ1) + L2*sin(ϕ2)*cos(ϕ3)]
+        # where
+        # L0 = θ[1], L1 = θ[2], L2 = θ[3], L4 = θ[4]
+        outmat[:,i] = [θ[3]*sin(x[2])*sin(x[3])
+                       θ[2]*cos(x[1]) + θ[3]*cos(x[2]) + θ[1] - θ[4]
+                       θ[2]*sin(x[1]) + θ[3]*sin(x[2])*cos(x[3])]
+    end
+    return outmat
+end
+
+# ----------------- End of above mentioned visualisation of delta robot -------------------
+
 # ONLY NOMINAL ALGEBRAIC CONSTRAINTS
 function delta_constraint_residual(Xmat)
     N = size(Xmat,1)÷num_dyn_vars_adj
@@ -1548,21 +1708,36 @@ function simulate_experiment(expid::String, pars::Vector{Float64})
 end
 
 function read_from_backup(dir::String, E::Int)
-    # sample = readdlm(joinpath(dir, "backup_baseline_e1.csv"), ',')
-    # sample = readdlm(joinpath(dir, "backup_proposed_e1.csv"), ',')
     sample = readdlm(joinpath(dir, "backup_trace_e1.csv"), ',')
     (its,k) = size(sample)
-    opt_pars_baseline = zeros(k, E)
     opt_pars_proposed = zeros(k, E)
     avg_pars_proposed = zeros(k, E)
     trace_proposed = [zeros(its, k) for e=1:E]
     for e=1:E
-        # opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
         opt_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_proposed_e$e.csv"), ',')
         avg_pars_proposed[:,e] = readdlm(joinpath(dir, "backup_average_e$e.csv"), ',')
         trace_proposed[e] = readdlm(joinpath(dir, "backup_trace_e$e.csv"), ',')
     end
-    return opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_proposed
+    return opt_pars_proposed, avg_pars_proposed, trace_proposed
+end
+
+# NOTE: Only works for baeline using SGD, otherwise its is not constant over the different experiments
+function read_baseline_from_backup(dir::String, E::Int)
+    sample = readdlm(joinpath(dir, "backup_baseline_trace_e1.csv"), ',')
+    # sample = readdlm(joinpath(dir, "backup_proposed_e1.csv"), ',')
+    # sample = readdlm(joinpath(dir, "backup_trace_e1.csv"), ',')
+    (its,k) = size(sample)
+    # its = 1
+    # k = length(sample)
+    opt_pars_baseline = zeros(k, E)
+    # opt_pars_proposed = zeros(k, E)
+    # avg_pars_proposed = zeros(k, E)
+    trace_baseline = [zeros(its, k) for e=1:E]
+    for e=1:E
+        opt_pars_baseline[:,e] = readdlm(joinpath(dir, "backup_baseline_e$e.csv"), ',')
+        trace_baseline[e] = readdlm(joinpath(dir, "backup_baseline_trace_e$e.csv"), ',')
+    end
+    return opt_pars_baseline, trace_baseline
 end
 
 function extract_part_results_from_trace(dir::String, E::Int, checkpoint::Int)
@@ -1656,20 +1831,22 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     # Total data-set will be of length K*N, so K number of smaller data-sets will be used to compute cost
     # E = size(Y, 2)
     # DEBUG
-    E = 10
-    myM = 100#8
+    E = 3
+    myM = 24#100#8
     Zm = [randn(Nw, n_tot) for m = 1:myM*K]
     # myZeros = [zeros(Nw, n_tot) for k=1:K]
     # Zm = myZeros
     # @warn "USING ZERO DISTURBANCE! And thus M=1 instead of M=100"
 
-    ref = 0.0#free_dyn_pars_true[1]
-    myδ = 0.1
-    # # vals = ref-10myδ:myδ:ref+10myδ
-    # vals = 0.5:0.1:1.6
-    # # # vals = ref-myδ:myδ:ref+myδ
-    # vals = 0.5:0.25:1.5
-    vals = 6.25-2*1.0:1.0:6.25+2*1.0
+    # ref = 0.0#free_dyn_pars_true[1]
+    # myδ = 0.1
+    # # # vals = ref-10myδ:myδ:ref+10myδ
+    # # vals = 0.5:0.1:1.6
+    # # # # vals = ref-myδ:myδ:ref+myδ
+    # # vals = 0.5:0.25:1.5
+    # vals = 6.25-2*1.0:1.0:6.25+2*1.0
+    # vals = 0.9:0.5:10.0
+    vals = 0.5:0.2:5.0
 
     cost_vals = [zeros(length(vals)) for e=1:E]
     cost_base = [zeros(length(vals)) for e=1:E]
@@ -1679,9 +1856,11 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
     time_start = now()
     # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
     for (ind, my_par) in enumerate(vals)
-        for e = 1:E
+        # for e = 1:E
+            e=3
             @info "Computing cost for p=$my_par, or after clamping, p=$(clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2]))"
-            pars = [clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2])]
+            # pars = [clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2])]
+            pars = [my_par]
 
             all_pars[:,ind] = pars
             Ysim = simulate_system(exp_data, pars, myM*K, dist_sens_inds, isws, Zm)
@@ -1701,7 +1880,7 @@ function gridsearch_delta(expid::String, K::Int = 1, N_trans::Int = 0)
             # Ymsens, jacsYm = simulate_system_sens(exp_data, pars, 1, dist_sens_inds, isws)
             # grad_vals[e][ind] = first(get_cost_gradient(Y[N_trans+1:end, e], Ymsens[:,1:1], jacsYm[1:1], N_trans))
             @info "Completed computing cost for e = $e out of $E, ind =  $ind out of $(length(vals))"
-        end
+        # end
         writedlm("data/experiments/tmp/backup_cost_vals_par$ind.csv", [cost_vals[e][ind] for e=1:E], ',')
     end
     duration = now()-time_start
@@ -1726,14 +1905,14 @@ function gridsearch_baseline(expid::String, N_trans::Int = 0)
 
     get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
 
-    E = 25
+    E = 3
 
     ref = 0.0#free_dyn_pars_true[1]
     myδ = 0.1
     # vals = ref-10myδ:myδ:ref+10myδ
     # vals = 0.5:0.05:3.5 # RAN ALREADY
     # vals = 3.6:0.05:10.0
-    vals = 0.5:0.5:12.0
+    vals = 0.5:0.2:5.0
     # # vals = ref-myδ:myδ:ref+myδ
 
     # cost_vals = [zeros(length(vals)) for e=1:E]
@@ -1743,7 +1922,8 @@ function gridsearch_baseline(expid::String, N_trans::Int = 0)
     time_start = now()
     # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
     for (ind, my_par) in enumerate(vals)
-        for e = 1:E
+        # for e = 1:E
+            e=3
             @info "Computing cost for p=$my_par, or after clamping, p=$(clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2]))"
             pars = [clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2])]
 
@@ -1758,12 +1938,104 @@ function gridsearch_baseline(expid::String, N_trans::Int = 0)
             # Ymsens, jacsYm = simulate_system_sens(exp_data, pars, 1, dist_sens_inds, isws)
             # grad_vals[e][ind] = first(get_cost_gradient(Y[N_trans+1:end, e], Ymsens[:,1:1], jacsYm[1:1], N_trans))
             @info "Completed computing cost for e = $e out of $E, ind =  $ind out of $(length(vals))"
-        end
+        # end
         writedlm("data/experiments/tmp/backup_cost_base_par$ind.csv", [cost_base[e][ind] for e=1:E], ',')
     end
     duration = now()-time_start
 
     return all_pars, cost_base, duration#, grad_vals
+end
+
+function delta_traj_debug(expid::String, pars::Vector{Float64})
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+
+    Ybase = solvew(u, t -> zeros(3), pars, N) |> sol -> vcat(h(sol,get_all_θs(pars))...)
+    myM = 1
+    Zm = [randn(Nw, n_tot) for m = 1:myM]
+    Ysim = simulate_system(exp_data, pars, myM, dist_sens_inds, isws, Zm)
+
+    return Ybase, Ysim
+end
+
+function gridsearch_2d_baseline(expid::String, N_trans::Int = 0)
+    exp_data, isws = get_experiment_data(expid)
+    W_meta = exp_data.W_meta
+    Y = exp_data.Y
+    N = size(Y,1)÷y_len-1
+    Nw = exp_data.Nw
+    nx = W_meta.nx
+    n_in = W_meta.n_in
+    n_out = W_meta.n_out
+    n_tot = nx*n_in
+    dη = length(W_meta.η)
+    u = exp_data.u
+    par_bounds = vcat(dyn_par_bounds, exp_data.dist_par_bounds)
+    dist_sens_inds = W_meta.free_par_inds
+
+    get_all_parameters(pars::Vector{Float64}) = vcat(get_all_θs(pars), exp_data.get_all_ηs(pars))
+
+    # E = 25
+
+    vals1 = 0.9:0.01:1.1
+    # vals2 = 0.9:0.05:2.0
+    vals2 = 2.05:0.05:5.0
+
+    cost_base = zeros(length(vals2), length(vals1))
+
+    e = 3
+    for (ind1, p1) in enumerate(vals1)
+        for (ind2, p2) in enumerate(vals2)
+            pars = [p1, p2]
+            Ybase = solvew(exp_data.u, t -> zeros(3), pars, N) |> sol -> vcat(h(sol,get_all_θs(pars))...)
+            cost_base[ind2, ind1] += mean((Y[N_trans+1:end, e].-Ybase[N_trans+1:end]).^2)
+            @info "Completed computing cost for ind1=$ind1/$(length(vals1)), ind2=$ind2/$(length(vals2))"
+        end
+    end
+    return vals1, vals2, cost_base
+
+    # # cost_vals = [zeros(length(vals)) for e=1:E]
+    # cost_base = [zeros(length(vals)) for e=1:E]
+    # # grad_vals = [zeros(length(vals)) for e=1:E]
+    # all_pars = zeros(length(free_dyn_pars_true), length(vals))
+    # time_start = now()
+    # # TODO: YOUR N_TRANS IMPLEMENTATION EVERYWHERE DOESN'T WORK FOR ny > 1!!!!!!!!! YOU NEED TO FIX THAT, OR REMOVE IT!
+    # for (ind, my_par) in enumerate(vals)
+    #     for e = 1:E
+    #         @info "Computing cost for p=$my_par, or after clamping, p=$(clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2]))"
+    #         pars = [clamp(my_par, dyn_par_bounds[1], dyn_par_bounds[2])]
+
+    #         all_pars[:,ind] = pars
+    #         Ybase = solvew(exp_data.u, t -> zeros(3), pars, N) |> sol -> vcat(h(sol,get_all_θs(pars))...)
+    #         cost_base[e][ind] += mean((Y[N_trans+1:end, e].-Ybase[N_trans+1:end]).^2)
+            
+    #         # cost_base[e][ind] = cost_base[e][ind]/K
+    #         # Ym = mean(simulate_system(exp_data, pars, myM, dist_sens_inds, isws, Zm), dims=2)
+
+    #         # # BONUS: Computing cost function gradient
+    #         # Ymsens, jacsYm = simulate_system_sens(exp_data, pars, 1, dist_sens_inds, isws)
+    #         # grad_vals[e][ind] = first(get_cost_gradient(Y[N_trans+1:end, e], Ymsens[:,1:1], jacsYm[1:1], N_trans))
+    #         @info "Completed computing cost for e = $e out of $E, ind =  $ind out of $(length(vals))"
+    #     end
+    #     writedlm("data/experiments/tmp/backup_cost_base_par$ind.csv", [cost_base[e][ind] for e=1:E], ',')
+    # end
+    # duration = now()-time_start
+
+    # return all_pars, cost_base, duration#, grad_vals
 end
 
 function gridsearch_baseline_with_traj(expid::String, N_trans::Int = 0)
