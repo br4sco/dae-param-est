@@ -146,17 +146,17 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = Array{Float64}(undef, 0)#[k]# True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = [m]#Array{Float64}(undef, 0)#[k]# True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
     const num_dyn_vars_adj = 7 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state. Though outputs are already baked in for pendulum
-    use_adjoint = true
+    use_adjoint = false
     use_new_adj = true
-    get_all_θs(pars::Vector{Float64}) = [m, L, g, k]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Vector{Float64}) = [pars[1], L, g, k]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = Array{Float64}(undef, 0, 2)#[0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = [0.01 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
     const_learning_rate = [0.1]#[0.1, 1.0, 0.1]
-    model_sens_to_use = pendulum_dist_sens_1#_with_dist_sens_1#_sans_g_with_dist_sens_1#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    model_sens_to_use = pendulum_sensitivity_m#_with_dist_sens_1#_sans_g_with_dist_sens_1#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly_new
     model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa1_new#_with_dist_sens_3
@@ -177,6 +177,8 @@ if model_id == PENDULUM
     # f_sens(x::Vector{Float64}, θ::Vector{Float64}) = [x[14], x[21], x[28]]                                                                                           #tuesday debug starting here
     f_sens_deb(x::Vector{Float64}, θ::Vector{Float64}) = x[8:end]
     f_debug(x::Vector{Float64}, θ::Vector{Float64}) = x[1:7]
+    # The purpose of a separate baseline function is only relevant for delta robot, because of parameter-dependent output function
+    f_sens_baseline(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens(x::Vector{Float64}, θ::Vector{Float64})
 elseif model_id == MOH_MDL
     # For Mohamed's model:
     const free_dyn_pars_true = [0.8]
@@ -961,8 +963,8 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
     free_dist_pars = fill(false, size(η_true))                                                  # Known disturbance model
-    # free_dist_pars = vcat(fill(true, nx), fill(false, n_out), fill(true, (n_tot-1)*n_out))    # Whole a-vector and all but first n_out elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY)
-    # free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY)
+    # free_dist_pars = vcat(fill(true, nx), fill(false, n_out), fill(true, (n_tot-1)*n_out))    # Whole a-vector and all but first n_out elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY (PENDULUM))
+    # free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_tot*n_out))                    # Whole a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
