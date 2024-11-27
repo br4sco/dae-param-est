@@ -49,7 +49,7 @@ const MOH_MDL  = 2
 const DELTA    = 3
 
 # Selects which model to adapt code to
-model_id = DELTA     # Remember that δ and T_s might depend on the model, I used different ones for Pendulum and for Delta robot
+model_id = PENDULUM     # Remember that δ and T_s might depend on the model, I used different ones for Pendulum and for Delta robot
 
 # ==================
 # === PARAMETERS ===
@@ -58,10 +58,10 @@ model_id = DELTA     # Remember that δ and T_s might depend on the model, I use
 # === TIME ===
 # The relationship between number of data samples N and number of noise samples
 # Nw is given by Nw >= (Ts/δ)*N
-const δ = 2e-5#0.01                  # noise sampling time
-const Ts = 2e-4#0.1                  # step-size
-const Tsλ = 2e-5#0.01
-const Tso = 2e-5#0.01
+const δ = 0.01#2e-5#0.01                  # noise sampling time
+const Ts = 0.1#2e-4#0.1                  # step-size
+const Tsλ = 0.01#2e-5#0.01
+const Tso = 0.01#2e-5#0.01
 # const δ = 0.001                  # noise sampling time
 # const Ts = 0.001                  # step-size
 const M = Threads.nthreads()÷2#4#00       # Number of monte-carlo simulations used for estimating mean
@@ -146,17 +146,17 @@ data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 # const free_dyn_pars_true = [m, L, g, k]                    # true value of all free parameters
 
 if model_id == PENDULUM
-    const free_dyn_pars_true = [m]#Array{Float64}(undef, 0)#[k]# True values of free parameters #Array{Float64}(undef, 0)
+    const free_dyn_pars_true = [k]#Array{Float64}(undef, 0)#[k]# True values of free parameters #Array{Float64}(undef, 0)
     const num_dyn_vars = 7
     const num_dyn_vars_adj = 7 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state. Though outputs are already baked in for pendulum
     use_adjoint = false
     use_new_adj = true
-    get_all_θs(pars::Vector{Float64}) = [pars[1], L, g, k]#[pars[1], L, pars[2], k]
+    get_all_θs(pars::Vector{Float64}) = [m, L, g, pars[1]]#[pars[1], L, pars[2], k]
     # Each row corresponds to lower and upper bounds of a free dynamic parameter.
-    dyn_par_bounds = [0.01 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     @warn "The learning rate dimensiond doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded"
-    const_learning_rate = [0.1]#[0.1, 1.0, 0.1]
-    model_sens_to_use = pendulum_sensitivity_m#_with_dist_sens_1#_sans_g_with_dist_sens_1#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
+    const_learning_rate = [1.0]#[0.1, 1.0, 0.1]
+    model_sens_to_use = pendulum_sensitivity_k#_with_dist_sens_1#_sans_g_with_dist_sens_1#_with_dist_sens_3#pendulum_sensitivity_k_with_dist_sens_1#pendulum_sensitivity_sans_g#_full
     model_to_use = pendulum_new
     model_adj_to_use = my_pendulum_adjoint_konly_new
     model_adj_to_use_dist_sens = my_pendulum_adjoint_distsensa1_new#_with_dist_sens_3
@@ -484,7 +484,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
 
     # E = size(Y, 2)
     # DEBUG
-    E = 100
+    E = 1
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(free_dyn_pars_true), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -834,8 +834,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     #     end
     # end
 
-    @warn "Not running proposed identification now"
-    for e=[]#1:E
+    # @warn "Not running proposed identification now"
+    for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"
