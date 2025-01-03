@@ -4,7 +4,7 @@ module NoiseGeneration
 import Random
 # import Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra, Random
 
-export DisturbanceMetaData
+export DisturbanceMetaData, demangle_XW
 
 seed = 54321    # Important that random samples generated here are independent of those generated in run_experiment.jl
 Random.seed!(seed)
@@ -49,6 +49,8 @@ struct DisturbanceMetaData
 end
 
 # =================== Helper Functions ==========================
+
+demangle_XW(XW::AbstractMatrix{Float64}, n_tot::Int) = [XW[(i-1)*n_tot+1:i*n_tot, m] for i=1:(size(XW,1)÷n_tot), m=1:size(XW,2)]
 
 function Φ(mat_in::Array{Float64,2})
     nx = minimum(size(mat_in))

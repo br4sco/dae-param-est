@@ -1,13 +1,13 @@
 include("noise_generation.jl")
 include("noise_interpolation_multivar.jl")
 include("simulation.jl")
-using .NoiseGeneration: DisturbanceMetaData
-using .NoiseInterpolation: InterSampleWindow, initialize_isw, noise_inter
+using .NoiseGeneration: DisturbanceMetaData, demangle_XW
+using .NoiseInterpolation: InterSampleWindow, initialize_isw, noise_inter, mk_newer_noise_interp, mk_noise_interp, linear_interpolation_multivar
 # import .NoiseGeneration, .NoiseInterpolation
 using DelimitedFiles: readdlm, writedlm
 import CSV
 
-# === USER SETTINGS AND RELATED ===
+# === DATA TYPES AND CONSTANTS ===
 const PENDULUM = 1
 const MOH_MDL  = 2
 const DELTA    = 3
@@ -22,44 +22,19 @@ struct ExperimentData
     W_meta::DisturbanceMetaData
 end
 
-# --------------- To be changed by user --------------------        # THESE COMMENTS ARE ODD AND UGLY, FIX THAT!
+# ===================================================================================================
+# ============================== Values that can be set by user =====================================
+# ===================================================================================================
 # Selects which model to use/simulate
-model_id = PENDULUM
-const M = Threads.nthreads()÷2          # Number of monte-carlo simulations used for estimating mean
+model_id::Int = PENDULUM
+# Number of monte-carlo simulations used for estimation, e.g. samples of the gradient used to estimate the gradient
+# Note that, when two independent estimates are needed, a total of 2M samples is generated, M for each estimate
+const M = Threads.nthreads()÷2
 
-# SOME OPTIONS, MAYBE MOVE TO BETTER PLACE???
+# Settings for the InterSampleWindow, only relevant when user_exact_interp in get_experiment_data() is set to true
 const W = 100           # Number of intervals for which isw stores data
 const Q = 1000          # Number of conditional samples stored per interval
-# ----------------------------------------------------------
 
-if model_id == PENDULUM
-    include("model_metadata/pendulum.jl")
-    mdl = pend_model
-end
-
-h_data(sol,θ) = apply_outputfun(x -> mdl.f(x,θ) .+ mdl.σ * randn(size(mdl.f(x,θ))), sol)
-
-demangle_XW(XW::AbstractMatrix{Float64}, n_tot::Int) = [XW[(i-1)*n_tot+1:i*n_tot, m] for i=1:(size(XW,1)÷n_tot), m=1:size(XW,2)]
-
-# === SOLVER PARAMETERS ===
-const abstol = 1e-8#1e-9
-const reltol = 1e-5#1e-6
-const maxiters = Int64(1e8)
-
-# === HELPER FUNCTIONS TO READ AND WRITE DATA ===
-const data_dir = joinpath("../data", "experiments")
-exp_path(expid) = joinpath(data_dir, expid)
-data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
-
-function linear_interpolation_multivar(y::AbstractVector, Ts::Float64, ny::Int)
-    max_n = length(y)÷ny-2
-    function y_func(t::Float64)
-        n = min(Int(t÷Ts), max_n)
-        return ( ((n+1)*Ts-t)*y[n*ny+1:(n+1)*ny] .+ (t-n*Ts)*y[(n+1)*ny+1:(n+2)*ny])./Ts
-    end
-end
-
-# TO BE EDITED BY USER
 function get_disturbance_free_pars(η_true::Vector{Float64}, nx::Int, n_out::Int, n_tot::Int)::Vector{Bool}
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
@@ -71,6 +46,29 @@ function get_disturbance_free_pars(η_true::Vector{Float64}, nx::Int, n_out::Int
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
 end
+# ===================================================================================================
+# ========================= End of values that should be set by user ================================
+# ===================================================================================================
+
+# === LOADING MODEL AND GENERATING RELATED FUNCTIONS ===
+if model_id == PENDULUM
+    include("model_metadata/pendulum.jl")
+    mdl = pend_model
+end
+
+h_data(sol,θ) = apply_outputfun(x -> mdl.f(x,θ) .+ mdl.σ * randn(size(mdl.f(x,θ))), sol)
+
+# === SOLVER PARAMETERS ===
+const abstol = 1e-8#1e-9
+const reltol = 1e-5#1e-6
+const maxiters = Int64(1e8)
+
+# === HELPER FUNCTIONS TO READ AND WRITE DATA ===
+const data_dir = joinpath("../data", "experiments")
+exp_path(expid) = joinpath(data_dir, expid)
+data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
+
+# ====================== MAIN FUNCTIONS ======================
 
 # NOTE: It is this call to DifferentialEquations.solve() that causes the performance warning 
 # "Using arrays or dicts to store parameters of different types can hurt performance. │ Consider using tuples instead."
@@ -91,51 +89,6 @@ solve_wrapper(mdl_func::Function, u::Function, w::Function, pars::Vector{Float64
     maxiters = maxiters;
     kwargs...,
 )
-
-# Function for using conditional interpolation
-function mk_newer_noise_interp(a_vec::AbstractVector{Float64},
-                                C::Matrix{Float64},
-                                XW::Matrix{Vector{Float64}},
-                                m::Int,
-                                n_in::Int,
-                                δ::Float64,
-                                isws::Array{InterSampleWindow, 1})
-    # Conditional sampling depends on noise model, which is why a value of
-    # a_vec has to be passed. a_vec contains parameters corresponding to the
-    # A-matric of the noise model
-    let
-        function w(t::Float64)
-            xw_temp = noise_inter(t, δ, a_vec, n_in, view(XW, :, m), isws[m])
-            return C*xw_temp
-        end
-    end
-end
-
-function mk_noise_interp(C::Matrix{Float64},
-    XW::AbstractMatrix{Float64},
-    m::Int,
-    δ::Float64)
-    let
-        n_tot = size(C, 2)
-        n_max = size(XW,1)÷n_tot-1
-        function xw(t::Float64)
-            # n*δ <= t <= (n+1)*δ
-            n = Int(t÷δ)
-            if n >= n_max
-                # The disturbance only has samples from t=0.0 to t=N*Ts-δ. 
-                # The requested t was large enough to t=N*Ts that we must return last sample of disturbance instead of interpolating
-                return C*XW[end-n_tot+1:end, m]
-            else
-                # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
-                k = n * n_tot + 1
-
-                xl = XW[k:(k + n_tot - 1), m]
-                xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
-                return C*(xl + (t-n*δ)*(xu-xl)/δ)
-            end
-        end
-    end
-end
 
 function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_gen::Integer = 100)::Tuple{ExperimentData, Array{InterSampleWindow, 1}}
 

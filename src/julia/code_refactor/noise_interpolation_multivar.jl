@@ -2,7 +2,7 @@ module NoiseInterpolation
 
 import Random, LinearAlgebra, Future
 
-export InterSampleWindow, initialize_isw, noise_inter
+export InterSampleWindow, initialize_isw, noise_inter, mk_newer_noise_interp, mk_newer_noise_interp, linear_interpolation_multivar
 
 mutable struct InterSampleWindow
     containers::Array{Array{Float64,2},1}
@@ -310,6 +310,59 @@ function noise_inter(t::Float64,
     # num_times_visited[5] += 1
     return x_new
 
+end
+
+# Function for using conditional interpolation
+function mk_newer_noise_interp(a_vec::AbstractVector{Float64},
+                                C::Matrix{Float64},
+                                XW::Matrix{Vector{Float64}},
+                                m::Int,
+                                n_in::Int,
+                                δ::Float64,
+                                isws::Array{InterSampleWindow, 1})
+    # Conditional sampling depends on noise model, which is why a value of
+    # a_vec has to be passed. a_vec contains parameters corresponding to the
+    # A-matric of the noise model
+    let
+        function w(t::Float64)
+            xw_temp = noise_inter(t, δ, a_vec, n_in, view(XW, :, m), isws[m])
+            return C*xw_temp
+        end
+    end
+end
+
+function mk_noise_interp(C::Matrix{Float64},
+                        XW::AbstractMatrix{Float64},
+                        m::Int,
+                        δ::Float64)
+    let
+        n_tot = size(C, 2)
+        n_max = size(XW,1)÷n_tot-1
+        function xw(t::Float64)
+            # n*δ <= t <= (n+1)*δ
+            n = Int(t÷δ)
+            if n >= n_max
+                # The disturbance only has samples from t=0.0 to t=N*Ts-δ. 
+                # The requested t was large enough to t=N*Ts that we must return last sample of disturbance instead of interpolating
+                return C*XW[end-n_tot+1:end, m]
+            else
+                # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
+                k = n * n_tot + 1
+
+                xl = XW[k:(k + n_tot - 1), m]
+                xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+                return C*(xl + (t-n*δ)*(xu-xl)/δ)
+            end
+        end
+    end
+end
+
+function linear_interpolation_multivar(y::AbstractVector, Ts::Float64, ny::Int)
+    max_n = length(y)÷ny-2
+    function y_func(t::Float64)
+        n = min(Int(t÷Ts), max_n)
+        return ( ((n+1)*Ts-t)*y[n*ny+1:(n+1)*ny] .+ (t-n*Ts)*y[(n+1)*ny+1:(n+2)*ny])./Ts
+    end
 end
 
 end
