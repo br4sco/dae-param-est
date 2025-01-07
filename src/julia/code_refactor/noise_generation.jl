@@ -2,9 +2,12 @@ module NoiseGeneration
 
 # To test which of these are necessary, consider replacing "using" with "import", then one has to write e.g. Random.seed!() to call seed!()
 import Random
+using DataFrames: DataFrame
+using LinearAlgebra: Diagonal, diagm, Hermitian, cholesky
+using ControlSystems: ss, lsim
 # import Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra, Random
 
-export DisturbanceMetaData, demangle_XW
+export DisturbanceMetaData, demangle_XW, get_filtered_noise, disturbance_model_1, disturbance_model_2, disturbance_model_3
 
 seed = 54321    # Important that random samples generated here are independent of those generated in run_experiment.jl
 Random.seed!(seed)
@@ -590,11 +593,10 @@ function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     nx = 2        # model order
     n_out = 1     # number of outputs
     n_in = 1      # number of inputs
-    w_scale = scale*ones(n_out)             # noise scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [2*ω*ζ, ω^2]
-    c_vec = Diagonal(w_scale)*[0, 1]
+    c_vec = [0, scale]
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
     mdl =
@@ -631,12 +633,11 @@ function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     bias::Float64=0.0, scale::Float64=1.0)::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
 
     mdl, meta_raw, η0 = gen(Ts, scale=scale)
-    metadata = DataFrame(nx = meta_raw[1], n_in = meta_raw[2], n_out = meta_raw[3], η = η0, bias=bias, num_rel = M)
+    metadata = DataFrame(nx = meta_raw[1], n_in = meta_raw[2], n_out = meta_raw[3], η = η0, bias=bias, num_rel = M, Nw=Nw)
     n_tot = size(mdl.Cd,2)
 
-    # We used to have Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}, i.e. a total of N_w+1 samples, 
-    # but I think I changed the meaning of N_w, so just N_w is what it should be now
-    ZS = [randn(Nw, n_tot) for m = 1:M]
+    # We use Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}, i.e. a total of N_w+1 samples, 
+    ZS = [randn(Nw+1, n_tot) for m = 1:M]
     XW = simulate_noise_process_mangled(mdl, ZS)
     XW, get_system_output_mangled(mdl, XW).+ bias, metadata
 end

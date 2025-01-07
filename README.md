@@ -42,15 +42,17 @@ The parameter `Nw` defines the number of steps of the noise sequence, and which 
 To use the same disturbance model as described in the paper, in a julia repl in [src/julia](src/julia) run:
 
 ```{julia}
-using DelimitedFiles, CSV
+using DelimitedFiles, CSV, DataFrames
 include("noise_generation.jl")
 
 XW, W, meta_W = get_filtered_noise(disturbance_model_3, δ, E, Nw, scale=0.6)  # Generated process disturbance and meta-data
 XU, U, meta_U = get_filtered_noise(disturbance_model_3, δ, 1, Nw, scale=0.2)  # Generates control input and meta-data
-writedlm("data/experiments/expid/XW.csv", XW, ',')
+meta_Y = DataFrame(Ts=0.1, N=500)	# It is convenient to also generate metadata for system output
+writedlm("data/experiments/expid/XW_T.csv", transpose(XW), ',')
 writedlm("data/experiments/expid/U.csv", U, ',')
 CSV.write("data/experiments/expid/meta_W.csv", meta_W)
 CSV.write("data/experiments/expid/meta_U.csv", meta_U)
+CSV.write("data/experiments/expid/meta_Y.csv", meta_Y)
 ```
 This stores the necessary files in ```src/julia/experiments/expid```. For the experiments in the paper `δ = 0.01`, `E=100`, and `Nw=10*N` was used.
 

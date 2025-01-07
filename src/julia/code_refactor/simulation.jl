@@ -62,6 +62,7 @@ function apply_two_outputfun(h1, h2, sol)
     map(h1, sol.u), map(h2, sol.u)
 end
 
+# This one I use for sure, I'm not so sure about the others
 function solve_in_parallel(solve_func, is)
     M = length(is)
     p = ProgressMeter.Progress(M, 1, "Running $(M) simulations...", 50)
@@ -73,7 +74,7 @@ function solve_in_parallel(solve_func, is)
     Threads.@threads for m = 2:M
         y = solve_func(is[m])
         Y[:, m] += vcat(y...)
-        next!(p)
+        ProgressMeter.next!(p)
     end
     Y
 end

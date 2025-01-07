@@ -108,11 +108,16 @@ function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_ge
     δ = 0.1Ts
     N = Int(Y_meta_raw[1,2])
     W_meta_raw, W_meta_names =
-        readdlm(joinpath(data_dir, expid*"/meta_W_new.csv"), ',', header=true)
+        readdlm(joinpath(data_dir, expid*"/meta_W.csv"), ',', header=true)  # Used to open meta_W_new.csv, but it's time for new to become the default
     W_meta = get_disturbance_metadata(W_meta_raw)
 
+    # Makes sure there is a tmp-directory, for future use
+    if !isdir(joinpath(data_dir, "tmp/"))
+        mkdir(joinpath(data_dir, "tmp/"))
+    end
+
     isws::Vector{InterSampleWindow} = if use_exact_interp
-        [initialize_isw(Q, W, W_meta.nx*W_meta.n_in, true) for e=1:M]       # TODO: Does M still make sense? I think so right? Or should this be 2M???
+        [initialize_isw(Q, W, W_meta.nx*W_meta.n_in, true) for e=1:max(M,E_gen)]       # TODO: Does M still make sense? I think so right? Or should this be 2M???
     else
         Array{InterSampleWindow}(undef, 0)
     end
