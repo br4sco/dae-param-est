@@ -47,7 +47,7 @@ include("noise_generation.jl")
 
 XW, W, meta_W = get_filtered_noise(disturbance_model_3, δ, E, Nw, scale=0.6)  # Generated process disturbance and meta-data
 XU, U, meta_U = get_filtered_noise(disturbance_model_3, δ, 1, Nw, scale=0.2)  # Generates control input and meta-data
-meta_Y = DataFrame(Ts=0.1, N=500)	# It is convenient to also generate metadata for system output
+meta_Y = DataFrame(Ts=10δ, N=Nw÷10)	# It is convenient to also generate metadata for system output
 writedlm("data/experiments/expid/XW_T.csv", transpose(XW), ',')
 writedlm("data/experiments/expid/U.csv", U, ',')
 CSV.write("data/experiments/expid/meta_W.csv", meta_W)
