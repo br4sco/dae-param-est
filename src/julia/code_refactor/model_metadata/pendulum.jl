@@ -11,12 +11,17 @@ pend_model = let
     # ------- The following fields are part of the informal interface for model metadata -------
     get_all_θs(pars::Vector{Float64}) = [pars[1], L, g, k]  # [m, L, g, k]
     free_dyn_pars_true = [m]#Array{Float64}(undef, 0)#[k]# True values of free parameters
+    # Left column contains lower bound for parameters, right column contains upper bound
+    par_bounds = [0.01 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     model_nominal = pendulum_new
     model_sens = pendulum_sensitivity_m
     σ_tmp = 0.002                                               # measurement noise variance
     f(x::Vector{Float64}, θ::Vector{Float64}) = x[7]        # Output function, returns the output given the state vector x
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[14];;]# x[21] x[28] x[35]]# x[42] x[49]]# x[28]]##[x[14] x[21] x[28] x[35] x[42]]   # Returns sensitivities of the output
+    dθ = length(free_dyn_pars_true)
 
-    (σ = σ_tmp, m = m, L = L, g = g, k = k, φ0 = 0, get_all_θs = get_all_θs, free_dyn_pars_true = free_dyn_pars_true, model_nominal = model_nominal, model_sens = model_sens, f=f)
+    # TODO: Is f_sens_base really not relevant for pendulum? Shouldn't it become relevant when we do ID of forward sens?????
+    (σ = σ_tmp, m = m, L = L, g = g, k = k, φ0 = 0, get_all_θs = get_all_θs, free_dyn_pars_true = free_dyn_pars_true, par_bounds = par_bounds, model_nominal = model_nominal, model_sens = model_sens, f=f, f_sens=f_sens, f_sens_baseline=f_sens, dθ = dθ)
 end
 
 # model_to_use = pendulum_new
