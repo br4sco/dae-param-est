@@ -3,15 +3,15 @@ module NoiseGeneration
 # To test which of these are necessary, consider replacing "using" with "import", then one has to write e.g. Random.seed!() to call seed!()
 import Random
 using DataFrames: DataFrame
-using LinearAlgebra: Diagonal, diagm, Hermitian, cholesky
+using LinearAlgebra: Diagonal, diagm, Hermitian, cholesky, I
 using ControlSystems: ss, lsim
 # import Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra, Random
 
-export DisturbanceMetaData, demangle_XW, get_filtered_noise, disturbance_model_1, disturbance_model_2, disturbance_model_3
+export DisturbanceMetaData, demangle_XW, get_filtered_noise, disturbance_model_1, disturbance_model_2, disturbance_model_3, get_ct_disturbance_model
+export discretize_ct_noise_model_with_sensitivities, simulate_noise_process_mangled
 
 seed = 54321    # Important that random samples generated here are independent of those generated in run_experiment.jl
 Random.seed!(seed)
-
 struct CT_SS_Model
     # Continuous-time state-space model on the form
     # dx/dt = A*x + B*u
@@ -49,6 +49,7 @@ struct DisturbanceMetaData
     get_all_ηs::Function
     num_rels::Int
     Nw::Int
+    δ::Float64
 end
 
 # =================== Helper Functions ==========================
@@ -118,80 +119,81 @@ function discretize_ct_noise_model(mdl::CT_SS_Model, Ts::Float64)::DT_SS_Model
     return DT_SS_Model(AdTs, BdTs, mdl.C, mdl.x0, Ts)
 end
 
+# function discretize_ct_noise_model_with_sensitivities(
+#     mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
+#     # sens_inds: indices of parameter with respect to which we compute the
+#     # sensitivity of disturbance output w
+
+#     nx = size(mdl.A,1)
+#     n_out = size(mdl.C, 1)
+#     n_in  = size(mdl.C, 2)÷nx
+#     function get_k_j_i(zeta::Int64)::Tuple{Int64, Int64, Int64}
+#         k = rem( (zeta-1), nx ) + 1
+#         j = rem( (zeta - k - nx), nx*n_in)÷nx + 1
+#         i = (zeta - j*nx - k)÷(nx*n_in) + 1
+#         return k, j, i
+#     end
+
+#     # Indices of free parameters corresponding to "a-vector" in disturbance model
+#     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
+#     nη   = length(sens_inds)
+#     na = length(sens_inds_a)
+#     nx_sens = (1+na)*nx
+
+#     Aηa = zeros(na*nx, nx)
+#     for i = 1:na
+#         Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
+#     end
+
+#     M = [mdl.A             zeros(nx, na*nx)                mdl.B*(mdl.B');
+#          Aηa         kron(Matrix(1.0I, na, na), mdl.A)   zeros(nx*na, nx);
+#          zeros(nx, nx)     zeros(nx, nx*na)                -mdl.A' ]
+#     Mexp = exp(M*Ts)
+#     Ad   = Mexp[1:nx, 1:nx]
+#     Dd   = Hermitian(Mexp[1:nx, (na+1)*nx+1:(na+2)*nx]*(Ad'))
+#     Bd   = cholesky(Dd).L
+#     Adηa = Mexp[nx+1:(na+1)*nx, 1:nx]
+#     # temp = Mexp[nx+1:(nθ+1)*nx, (nθ+1)*nx+1:(nθ+2)*nx]*(Ad')
+#     Ddηa = Mexp[nx+1:(na+1)*nx, (na+1)*nx+1:(na+2)*nx]*(Ad')
+#     for i = 1:na
+#         Ddηa[(i-1)*nx+1:i*nx, :] += (Ddηa[(i-1)*nx+1:i*nx, :])'
+#     end
+#     Φ_arg = ((kron(Matrix(I, na, na), Bd)) \ Ddηa ) / (Bd')
+#     Bdηa = kron(Matrix(I, na, na), Bd)*Φ( Φ_arg )
+
+#     A_mat = [Ad zeros(nx,na*nx); Adηa kron(Matrix(I,na,na), Ad)]
+#     B_mat = [Bd; Bdηa]
+#     C_mat = zeros((nη+1)n_out, nx_sens*n_in)
+#     for row_block = 1:nη+1
+#         if row_block == 1
+#             for col_block = 1:n_in
+#                 C_mat[(row_block-1)*n_out+1:row_block*n_out,
+#                     (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
+#                     mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+#                 # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
+#                 # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
+#             end
+#         elseif row_block <= na+1
+#             ind = row_block-1
+#             for col_block = 1:n_in
+#                 C_mat[(row_block-1)*n_out+1:row_block*n_out,
+#                     ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
+#                     mdl.C[:,(col_block-1)*nx+1:col_block*nx]
+#             end
+#         else
+#             k, j, i = get_k_j_i(sens_inds[row_block-1])
+#             C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
+#         end
+#     end
+
+#     return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
+# end
+
+# NOTE: Used to have _alt at the end, but then I removed the non-alt version and renamed this one
+# # Analytically equivalent to non-alt version, but should be numerically more efficient.
+# # Instead of computing huge matrices that are then inverted, it inverts several small matrices,
+# # which are blocks in the huge matrix.
 function discretize_ct_noise_model_with_sensitivities(
-    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
-    # sens_inds: indices of parameter with respect to which we compute the
-    # sensitivity of disturbance output w
-
-    nx = size(mdl.A,1)
-    n_out = size(mdl.C, 1)
-    n_in  = size(mdl.C, 2)÷nx
-    function get_k_j_i(zeta::Int64)::Tuple{Int64, Int64, Int64}
-        k = rem( (zeta-1), nx ) + 1
-        j = rem( (zeta - k - nx), nx*n_in)÷nx + 1
-        i = (zeta - j*nx - k)÷(nx*n_in) + 1
-        return k, j, i
-    end
-
-    # Indices of free parameters corresponding to "a-vector" in disturbance model
-    sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
-    nη   = length(sens_inds)
-    na = length(sens_inds_a)
-    nx_sens = (1+na)*nx
-
-    Aηa = zeros(na*nx, nx)
-    for i = 1:na
-        Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
-    end
-
-    M = [mdl.A             zeros(nx, na*nx)                mdl.B*(mdl.B');
-         Aηa         kron(Matrix(1.0I, na, na), mdl.A)   zeros(nx*na, nx);
-         zeros(nx, nx)     zeros(nx, nx*na)                -mdl.A' ]
-    Mexp = exp(M*Ts)
-    Ad   = Mexp[1:nx, 1:nx]
-    Dd   = Hermitian(Mexp[1:nx, (na+1)*nx+1:(na+2)*nx]*(Ad'))
-    Bd   = cholesky(Dd).L
-    Adηa = Mexp[nx+1:(na+1)*nx, 1:nx]
-    # temp = Mexp[nx+1:(nθ+1)*nx, (nθ+1)*nx+1:(nθ+2)*nx]*(Ad')
-    Ddηa = Mexp[nx+1:(na+1)*nx, (na+1)*nx+1:(na+2)*nx]*(Ad')
-    for i = 1:na
-        Ddηa[(i-1)*nx+1:i*nx, :] += (Ddηa[(i-1)*nx+1:i*nx, :])'
-    end
-    Φ_arg = ((kron(Matrix(I, na, na), Bd)) \ Ddηa ) / (Bd')
-    Bdηa = kron(Matrix(I, na, na), Bd)*Φ( Φ_arg )
-
-    A_mat = [Ad zeros(nx,na*nx); Adηa kron(Matrix(I,na,na), Ad)]
-    B_mat = [Bd; Bdηa]
-    C_mat = zeros((nη+1)n_out, nx_sens*n_in)
-    for row_block = 1:nη+1
-        if row_block == 1
-            for col_block = 1:n_in
-                C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
-                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-                # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
-                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
-            end
-        elseif row_block <= na+1
-            ind = row_block-1
-            for col_block = 1:n_in
-                C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
-                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-            end
-        else
-            k, j, i = get_k_j_i(sens_inds[row_block-1])
-            C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
-        end
-    end
-
-    return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
-end
-
-# Analytically equivalent to non-alt version, but should be numerically more efficient.
-# Instead of computing huge matrices that are then inverted, it inverts several small matrices,
-# which are blocks in the huge matrix.
-function discretize_ct_noise_model_with_sensitivities_alt(
     mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
@@ -460,17 +462,14 @@ end
 
 # ================= Functions simulating disturbance =======================
 
-# NOTE: I don't think this function is used anywhere, and it seems to have
-# something funky going on with dimensions and shapes
-function simulate_noise_process(
-    mdl::DT_SS_Model,
-    data::Vector{Matrix{Float64}}
-)
+function simulate_noise_process(mdl::DT_SS_Model, data::Vector{Matrix{Float64}})::Matrix{Vector{Float64}}
     # data[m][i, k*nx + j] should be the j:th component of the noise
     # corresponding to input k at time i of realization m
     M = length(data)
     N = size(data[1], 1)-1
     nx = size(mdl.Ad, 1)
+    # When sensitivities are included in disturbance model, nv != nx
+    nv = size(mdl.Bd, 2)
     n_in = size(mdl.Cd, 2)÷nx
     # We only care about the state, not the output, so we ignore the C-matrix
     C_placeholder = zeros(1, nx)
@@ -481,9 +480,9 @@ function simulate_noise_process(
     x_process = [ fill(NaN, (nx*n_in,)) for i=1:N+1, m=1:M]
     for ind = 1:n_in
         for m=1:M
-            y, t, x = lsim(sys, data[m][:, (ind-1)*nx+1:ind*nx], t, x0=mdl.x0)
+            _, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv]', t, x0=mdl.x0)
             for i=1:N+1
-                x_process[i,m][(ind-1)*nx+1:ind*nx] = x[i,:]
+                x_process[i,m][(ind-1)*nx+1:ind*nx] = x[:,i]
             end
         end
     end
@@ -493,10 +492,7 @@ function simulate_noise_process(
     return x_process
 end
 
-function simulate_noise_process_mangled(
-    mdl::DT_SS_Model,
-    data::Array{Array{Float64,2}, 1},
-)
+function simulate_noise_process_mangled(mdl::DT_SS_Model, data::Vector{Matrix{Float64}})::Matrix{Float64}
     # data[m][i, k*nx + j] should be the j:th component of the noise
     # corresponding to input k at time i of realization m
     M = length(data)
@@ -515,17 +511,9 @@ function simulate_noise_process_mangled(
     for ind = 1:n_in
         for m=1:M
             # x[i, j] is the j:th element of the state at sample i
-            y, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv]', t, x0=mdl.x0)
-            # # NOTE: VERSION: The line above here used to be:
-            # y, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv], t, x0=mdl.x0)    # Input signal wasn't transposed
-            # # Changed on 09-08-2022 after it not being used for a long time,
-            # # because suddenly transpose was needed. Not sure why (edit: because new version of Julia, but don't know more)
+            _, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv]', t, x0=mdl.x0)
             for i=1:N+1
                 x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[:,i]
-                # # NOTE: VERSION: The line above here used to be:
-                # x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[i,:]     # Elements of x changed around
-                # # Changed on 09-08-2022 after it not being used for a long time,
-                # # because suddently transpose was needed. Not sure why (edit: because new version of Julia, but don't know more)
             end
         end
     end
@@ -633,7 +621,7 @@ function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     bias::Float64=0.0, scale::Float64=1.0)::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
 
     mdl, meta_raw, η0 = gen(Ts, scale=scale)
-    metadata = DataFrame(nx = meta_raw[1], n_in = meta_raw[2], n_out = meta_raw[3], η = η0, bias=bias, num_rel = M, Nw=Nw)
+    metadata = DataFrame(nx = meta_raw[1], n_in = meta_raw[2], n_out = meta_raw[3], η = η0, bias=bias, num_rel = M, Nw=Nw, δ = Ts)
     n_tot = size(mdl.Cd,2)
 
     # We use Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}, i.e. a total of N_w+1 samples, 

@@ -1,12 +1,13 @@
 include("noise_generation.jl")
 include("noise_interpolation_multivar.jl")
 include("simulation.jl")
-using .NoiseGeneration: DisturbanceMetaData, demangle_XW
-using .NoiseInterpolation: InterSampleWindow, initialize_isw, noise_inter, mk_newer_noise_interp, mk_noise_interp, linear_interpolation_multivar
+include("minimizers.jl")
+using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_with_sensitivities, simulate_noise_process, simulate_noise_process_mangled
+using .NoiseInterpolation: InterSampleWindow, initialize_isw, reset_isws!, noise_inter, mk_newer_noise_interp, mk_noise_interp, linear_interpolation_multivar
 # import .NoiseGeneration, .NoiseInterpolation
 using DelimitedFiles: readdlm, writedlm
 using LsqFit: curve_fit, coef
-import CSV
+import CSV, Statistics
 
 # === DATA TYPES AND CONSTANTS ===
 const PENDULUM = 1
@@ -61,12 +62,14 @@ end
 
 h_data(sol,θ) = apply_outputfun(x -> mdl.f(x,θ) .+ mdl.σ * randn(size(mdl.f(x,θ))), sol) # Output of "true" system, including measurement noise
 h(sol,θ) = apply_outputfun(x->mdl.f(x,θ), sol)                                               # Output of model, no measurement noise 
+h_comp(sol,θ) = apply_two_outputfun(x->mdl.f(x,θ), x->mdl.f_sens(x,θ), sol)           # for complete model with dynamics sensitivity
 h_sens_base(sol,θ) = apply_outputfun(x->mdl.f_sens_baseline(x,θ), sol)
 
 # === SOLVER PARAMETERS ===
 const abstol = 1e-8#1e-9
 const reltol = 1e-5#1e-6
-const maxiters = Int64(1e8)
+const maxiters_sol = Int64(1e8)
+const maxiters_opt = 100
 
 # === HELPER FUNCTIONS TO READ AND WRITE DATA ===
 const data_dir = joinpath("../data", "experiments")
@@ -91,7 +94,7 @@ solve_wrapper(mdl_func::Function, u::Function, w::Function, pars::Vector{Float64
     saveat = 0:Ts:N*Ts,
     abstol = abstol,
     reltol = reltol,
-    maxiters = maxiters;
+    maxiters = maxiters_sol;
     kwargs...,
 )
 
@@ -103,13 +106,13 @@ function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_ge
     Y_meta_raw, Y_meta_names =
         readdlm(joinpath(data_dir, expid*"/meta_Y.csv"), ',', header=true)
     n_u_out = Int(U_meta_raw[1,3])
-    u(t::Float64) = linear_interpolation_multivar(input, δ, n_u_out)(t)             # GOTTA GET δ FROM SOMEWHERE, PROBABLY READ IT FROM FILE!!!!!
     Ts = Y_meta_raw[1,1]
-    δ = 0.1Ts
     N = Int(Y_meta_raw[1,2])
     W_meta_raw, W_meta_names =
         readdlm(joinpath(data_dir, expid*"/meta_W.csv"), ',', header=true)  # Used to open meta_W_new.csv, but it's time for new to become the default
     W_meta = get_disturbance_metadata(W_meta_raw)
+
+    u(t::Float64) = linear_interpolation_multivar(input, W_meta.δ, n_u_out)(t)
 
     # Makes sure there is a tmp-directory, for future use
     if !isdir(joinpath(data_dir, "tmp/"))
@@ -117,7 +120,7 @@ function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_ge
     end
 
     isws::Vector{InterSampleWindow} = if use_exact_interp
-        [initialize_isw(Q, W, W_meta.nx*W_meta.n_in, true) for e=1:max(M,E_gen)]       # TODO: Does M still make sense? I think so right? Or should this be 2M???
+        [initialize_isw(Q, W, W_meta.nx*W_meta.n_in, true) for _=1:max(2M,E_gen)]
     else
         Array{InterSampleWindow}(undef, 0)
     end
@@ -125,19 +128,21 @@ function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_ge
     # We only want to load the disturbance corresponding to the currently simulated realization of Y,
     # because loading all disturbance data in one go uses needlessly much memory. Therefore, we create
     # a wrapper for loading the needed disturbances and simulating the corresponding Y
-    function sim_Y_wrapper(e::Int)::Vector{Float64}                 # TODO: Add let-statement for nice readability!let nx and so on
-        XW = transpose(CSV.read(exp_path(expid)*"/XW_T.csv", CSV.Tables.matrix; header=false, skipto=e, limit=1))
-        C_true = reshape(W_meta.η[W_meta.nx+1:end], (W_meta.n_out, W_meta.nx*W_meta.n_in))
-        w = if use_exact_interp
-            a_vec = W_meta.η[1:W_meta.nx]
-            mk_newer_noise_interp(a_vec, C_true, demangle_XW(XW, W_meta.nx*W_meta.n_in), 1, W_meta.n_in, δ, isws[e:e])
-        else
-            mk_noise_interp(C_true, XW, 1, δ)
+    function sim_Y_wrapper(e::Int)::Vector{Float64}
+        let nx = W_meta.nx, n_out = W_meta.n_out, n_in = W_meta.n_in, δ = W_meta.δ
+            XW = transpose(CSV.read(exp_path(expid)*"/XW_T.csv", CSV.Tables.matrix; header=false, skipto=e, limit=1))
+            C_true = reshape(W_meta.η[nx+1:end], (n_out, nx*n_in))
+            w = if use_exact_interp
+                a_vec = W_meta.η[1:nx]
+                mk_newer_noise_interp(a_vec, C_true, demangle_XW(XW, nx*W.n_in), 1, n_in, δ, isws[e:e])
+            else
+                mk_noise_interp(C_true, XW, 1, δ)
+            end
+            # This function call returns an Array of Arrays, outer index is sample index, and each sample is also an array, since the output can be multidimensional
+            nested_y = solve_wrapper(mdl.model_nominal, u, w, mdl.free_dyn_pars_true, N, Ts) |> sol -> h_data(sol,mdl.get_all_θs(mdl.free_dyn_pars_true))
+            # The output is collapsed into a single long Array before returning
+            return vcat(nested_y...)
         end
-        # This function call returns an Array of Arrays, outer index is sample index, and each sample is also an array, since the output can be multidimensional
-        nested_y = solve_wrapper(mdl.model_nominal, u, w, mdl.free_dyn_pars_true, N, Ts) |> sol -> h_data(sol,mdl.get_all_θs(mdl.free_dyn_pars_true))
-        # The output is collapsed into a single long Array before returning
-        return vcat(nested_y...)
     end
 
     # ------------- Loading/generate "true" system output ---------------
@@ -161,6 +166,7 @@ function get_disturbance_metadata(W_meta_raw::Matrix{Float64})::DisturbanceMetaD
     η_true = W_meta_raw[:,4]
     num_rel = Int(W_meta_raw[1,6])
     Nw = Int(W_meta_raw[1,7])
+    δ = Float64(W_meta_raw[1,8])
     n_tot = nx*n_in
 
     free_dist_pars = get_disturbance_free_pars(η_true, nx, n_out, n_tot)
@@ -168,25 +174,25 @@ function get_disturbance_metadata(W_meta_raw::Matrix{Float64})::DisturbanceMetaD
     # Array of tuples containing lower and upper bound for each free disturbance parameter
     # dist_par_bounds = hcat(fill(-Inf, nx+n_tot*n_out, 1), fill(Inf, nx+n_tot*n_out, 1))
     free_par_bounds = hcat(fill(-Inf, length(free_par_inds), 1), fill(Inf, length(free_par_inds), 1))
-    function get_all_ηs(free_pars::Vector{Float64})
+    function get_all_ηs(free_dist_pars::Vector{Float64})
         # If copy() is not used here, some funky stuff that I don't fully understand happens.
         # I think essentially η_true stops being defined after function returns, so
         # setting all_η to its value doesn't behave quite as I expected
         all_η = copy(η_true)
         # Fetches user-provided values for free disturbance parameters only
-        all_η[free_par_inds] = free_pars[num_dyn_pars+1:end]
+        all_η[free_par_inds] = free_dist_pars
         return all_η
     end
 
-    DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds, free_par_bounds, get_all_ηs, num_rel, Nw)
+    DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds, free_par_bounds, get_all_ηs, num_rel, Nw, δ)
 end
 
-function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData)
+function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData; verbose::Bool = true)
 
     let N = size(exp_data.Y, 1)-1, E = size(exp_data.Y, 2), dη = length(exp_data.W_meta.η), W_meta = exp_data.W_meta
 
         opt_pars_baseline = zeros(mdl.dθ, E)
-        baseline_trace = [[pars0] for e=1:E]
+        trace_baseline = [[pars0] for e=1:E]
 
         for e=1:E
 
@@ -205,11 +211,7 @@ function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 return vcat(jac...)
             end
 
-            # # === Computing result ===
-            # baseline_result = get_fit_sens(exp_data.Y[:,e], pars0,
-            #             get_baseline_output, get_baseline_sens,
-            #             mdl.par_bounds[:,1], mdl.par_bounds[:,2])
-
+            # === Computing result ===
             baseline_result = curve_fit(
                 get_baseline_output, 
                 get_baseline_sens, 
@@ -218,27 +220,92 @@ function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 pars0, 
                 lower=mdl.par_bounds[:,1], 
                 upper=mdl.par_bounds[:,2], 
-                show_trace=true, 
+                show_trace=verbose, 
                 inplace=false, 
                 x_tol=1e-8)    # Default: inplace = false, x_tol = 1e-8
 
             # === Saving result and trace ===
             opt_pars_baseline[:, e] = coef(baseline_result)
 
-            # Sometimes (the first returned value I think) the baseline_trace has no elements, and therefore doesn't contain the metadata dx
+            # Sometimes (the first returned value I think) the trace_baseline has no elements, and therefore doesn't contain the metadata dx
             if length(baseline_result.trace) > 1
                 for j=2:length(baseline_result.trace)
-                    push!(baseline_trace[e], baseline_trace[e][end]+baseline_result.trace[j].metadata["dx"])
+                    push!(trace_baseline[e], trace_baseline[e][end]+baseline_result.trace[j].metadata["dx"])
                 end
             end
 
             println("Completed for dataset $e for parameters $(opt_pars_baseline[:,e])")
 
             writedlm(joinpath(data_dir, "tmp/backup_baseline_e$e.csv"), opt_pars_baseline[:,e], ',')
-            writedlm(joinpath(data_dir, "tmp/backup_baseline_trace_e$e.csv"), baseline_trace[e], ',')
+            writedlm(joinpath(data_dir, "tmp/backup_trace_baseline_e$e.csv"), trace_baseline[e], ',')
 
         end
 
-        return opt_pars_baseline, baseline_trace
+        return opt_pars_baseline, trace_baseline
     end
 end
+
+function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData, isws::Vector{InterSampleWindow}; use_exact_interp::Bool = false, maxiters::Int64 = maxiters_opt, verbose::Bool = true, E_in::Int64=typemax(Int64))
+    
+    let N = size(exp_data.Y, 1)-1, E = min(size(exp_data.Y, 2), E_in), W_meta = exp_data.W_meta, δ = W_meta.δ
+
+        # Generates white noise that will be used for generating disturbances
+        Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M]
+
+        # Helper function to improve readability. Instead of calling solve_wrapper with lots of arguments and then transforming
+        # the solution to samples of the output, this function can be called instead
+        function solve_with_sens_func(w_func::Function, pars::Vector{Float64})
+            sol = solve_wrapper(mdl.model_sens, exp_data.u, w_func, pars, N, exp_data.Ts)
+            h_comp(sol, mdl.get_all_θs(pars))
+        end
+
+        # Returns estimate of gradient of cost function
+        # M_mean specifies over how many realizations the gradient estimate is computed
+        function get_gradient_estimate(y, free_pars, isws, M_mean::Int=1)
+            # --- Generates disturbance signal for the provided parameters ---
+            # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
+            η = W_meta.get_all_ηs(free_pars[mdl.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
+            dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
+            wmm(m::Int) = if use_exact_interp
+                    reset_isws!(isws)
+                    XWm = simulate_noise_process(dmdl, Zm)
+                    mk_newer_noise_interp(view(η, 1:W_meta.nx), dmdl.Cd, XWm, m, W_meta.n_in, δ, isws)
+                else
+                    XWm = simulate_noise_process_mangled(dmdl, Zm)
+                    mk_noise_interp(dmdl.Cd, XWm, m, δ)
+                end
+
+            # 2M_mean solutions computed because the used realizations of Ym and jacsYm have to be independent
+            # (For computing the Ym, a smaller DAE could be solved instead, but this is not currently implemented)
+            Ym, jacsYm = solve_in_parallel_sens(m->solve_with_sens_func(wmm(m),free_pars), 1:2M_mean)
+
+            # --- Computes cost function gradient ---
+            # Y.-Ym is a matrix with as many columns as Ym, where column i contains Y-Ym[:,i]
+            # Taking the mean of that gives us the average error as a function of time over all realizations contained in Ym.
+            # mean(-jacsYm) is the average (over all m) jacobian of Ym.
+            # Different rows correspond to different t, while different columns correspond to different parameters
+            (2/N) * (transpose(Statistics.mean(-jacsYm))*Statistics.mean(y.-Ym, dims=2))[:]
+        end
+
+        opt_pars_proposed = zeros(mdl.dθ, E)
+        trace_proposed = [ [Float64[]] for _=1:E]
+        trace_gradient = [ [Float64[]] for _=1:E]
+
+        for e=1:E
+            opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
+                mdl.minimizer(
+                    (free_pars, M_mean) -> get_gradient_estimate(exp_data.Y[:,e], free_pars, isws, M_mean),
+                    (t,_)->mdl.init_learning_rate./sqrt(t),
+                    t->M,
+                    pars0,
+                    mdl.par_bounds;
+                    maxiters=maxiters,
+                    verbose=verbose)
+            println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
+        end
+
+        opt_pars_proposed, trace_proposed, trace_gradient
+    end
+end
+
+

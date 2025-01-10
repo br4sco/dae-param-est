@@ -190,7 +190,6 @@ function noise_inter(t::Float64,
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
     # num_sampled_per_interval[n+1] += 1
-    δ = t - n*Ts
     nx = length(a_vec)
     n_out = Int(length(x[1])÷nx)
     Q = isw.Q
@@ -200,7 +199,7 @@ function noise_inter(t::Float64,
     use_interpolation = isw.use_interpolation
 
     # TODO: Update to more efficient use of matrices. Pass C for returning stuff?
-    xl = x[n+1]     # x[1] == x0
+    xl = x[n+1]     # x[1] == x0 --> x[n+1] == x(t_0+n*Ts)
     xu = x[n+2]
     tl = n*Ts
     tu = (n+1)*Ts

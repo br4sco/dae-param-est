@@ -1,3 +1,9 @@
+module Minimizers
+
+using LinearAlgebra: norm
+
+export perform_ADAM
+
 function perform_ADAM(
     get_grad_estimate::Function,
     learning_rate::Function,
@@ -10,6 +16,10 @@ function perform_ADAM(
     λ = 1-1e-4)   # betas are the decay parameters of moment estimates
 
     let t=1, pars=pars0, trace=[pars0], grad_trace=[]
+
+        s = zeros(size(pars0)) # First moment estimate
+        r = zeros(size(pars0)) # Second moment estimate
+
         while t <= maxiters
             grad_est = get_grad_estimate(pars, M_rate(t))
 
@@ -206,3 +216,4 @@ end
 #     vec[high_inds] = bounds[high_inds, 2]
 #     nothing
 # end
+end

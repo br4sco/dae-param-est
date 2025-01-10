@@ -134,19 +134,19 @@ end
 # Handles multivariate outputs by flattening the output
 function solve_in_parallel_sens(solve_func, is)
     M = length(is)
-    p = Progress(M, 1, "Running $(M) simulations...", 50)
+    p = ProgressMeter.Progress(M, 1, "Running $(M) simulations...", 50)
     y1, sens1 = solve_func(is[1])
     ny = length(y1[1])
     Ysens = [Matrix{Float64}(undef, ny*length(sens1), length(sens1[1])÷ny) for m=1:M]
     Y = zeros(ny*length(y1), M)
     Y[:,1] += vcat(y1...)   # Flattens the array
     Ysens[1] = vcat(sens1...)
-    next!(p)
+    ProgressMeter.next!(p)
     Threads.@threads for m = 2:M
         y, sens = solve_func(is[m])
         Y[:,m] += vcat(y...)   # Flattens the array
         Ysens[m] = vcat(sens...)
-        next!(p)
+        ProgressMeter.next!(p)
     end
     Y, Ysens
 end
