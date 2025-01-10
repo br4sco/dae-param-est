@@ -30,7 +30,7 @@ end
 # ============================== Values that can be set by user =====================================
 # ===================================================================================================
 # Selects which model to use/simulate
-model_id::Int = PENDULUM
+model_id::Int = DELTA
 # Number of monte-carlo simulations used for estimation, e.g. samples of the gradient used to estimate the gradient
 # Note that, when two independent estimates are needed, a total of 2M samples is generated, M for each estimate
 const M = Threads.nthreads()÷2
@@ -58,6 +58,9 @@ end
 if model_id == PENDULUM
     include("model_metadata/pendulum.jl")
     mdl = pend_model
+elseif model_id == DELTA
+    include("model_metadata/delta_robot.jl")
+    mdl = delta_mdl
 end
 
 h_data(sol,θ) = apply_outputfun(x -> mdl.f(x,θ) .+ mdl.σ * randn(size(mdl.f(x,θ))), sol) # Output of "true" system, including measurement noise
@@ -187,9 +190,9 @@ function get_disturbance_metadata(W_meta_raw::Matrix{Float64})::DisturbanceMetaD
     DisturbanceMetaData(nx, n_in, n_out, η_true, free_par_inds, free_par_bounds, get_all_ηs, num_rel, Nw, δ)
 end
 
-function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData; verbose::Bool = true)
+function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData; verbose::Bool = true, E_in::Int64=typemax(Int64))
 
-    let N = size(exp_data.Y, 1)-1, E = size(exp_data.Y, 2), dη = length(exp_data.W_meta.η), W_meta = exp_data.W_meta
+    let N = size(exp_data.Y, 1)÷mdl.ny-1, E = min(size(exp_data.Y, 2), E_in), dη = length(exp_data.W_meta.η), W_meta = exp_data.W_meta
 
         opt_pars_baseline = zeros(mdl.dθ, E)
         trace_baseline = [[pars0] for e=1:E]
@@ -247,7 +250,7 @@ end
 
 function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData, isws::Vector{InterSampleWindow}; use_exact_interp::Bool = false, maxiters::Int64 = maxiters_opt, verbose::Bool = true, E_in::Int64=typemax(Int64))
     
-    let N = size(exp_data.Y, 1)-1, E = min(size(exp_data.Y, 2), E_in), W_meta = exp_data.W_meta, δ = W_meta.δ
+    let N = size(exp_data.Y, 1)÷mdl.ny-1, E = min(size(exp_data.Y, 2), E_in), W_meta = exp_data.W_meta, δ = W_meta.δ
 
         # Generates white noise that will be used for generating disturbances
         Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M]
