@@ -37,16 +37,17 @@ save four files in total:
 4. Meta-data corresponding to the above noise matrix
 
 
-The parameter `Nw` defines the number of steps of the noise sequence, and which has to be long enough for running the simulation.  Specifically, `Nw*δ > N*Ts` must hold, where `δ` is the sampling time of the noise generation, `N` and `Ts` is the number of steps and sampling time of the simulation, respectively.
+The parameter `Nw` defines the number of steps of the noise sequence, and which has to be long enough for running the simulation.  Specifically, `Nw*δ >= N*Ts` must hold, where `δ` is the sampling time of the noise generation, `N` and `Ts` is the number of steps and sampling time of the simulation, respectively.
 
 To use the same disturbance model as described in the paper, in a julia repl in [src/julia](src/julia) run:
 
 ```{julia}
 using DelimitedFiles, CSV, DataFrames
 include("noise_generation.jl")
+using .NoiseGeneration: get_filtered_noise, disturbance_model_4
 
-XW, W, meta_W = get_filtered_noise(disturbance_model_3, δ, E, Nw, scale=0.6)  # Generated process disturbance and meta-data
-XU, U, meta_U = get_filtered_noise(disturbance_model_3, δ, 1, Nw, scale=0.2)  # Generates control input and meta-data
+XW, W, meta_W = get_filtered_noise(disturbance_model_4, δ, E, Nw, scale=0.6)  # Generated process disturbance and meta-data
+XU, U, meta_U = get_filtered_noise(disturbance_model_4, δ, 1, Nw, scale=0.2)  # Generates control input and meta-data
 meta_Y = DataFrame(Ts=10δ, N=Nw÷10)	# It is convenient to also generate metadata for system output
 writedlm("data/experiments/expid/XW_T.csv", transpose(XW), ',')
 writedlm("data/experiments/expid/U.csv", U, ',')

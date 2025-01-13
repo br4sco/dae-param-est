@@ -137,7 +137,7 @@ function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_ge
             C_true = reshape(W_meta.η[nx+1:end], (n_out, nx*n_in))
             w = if use_exact_interp
                 a_vec = W_meta.η[1:nx]
-                mk_newer_noise_interp(a_vec, C_true, demangle_XW(XW, nx*W.n_in), 1, n_in, δ, isws[e:e])
+                mk_newer_noise_interp(a_vec, C_true, demangle_XW(XW, nx*n_in), 1, n_in, δ, isws[e:e])
             else
                 mk_noise_interp(C_true, XW, 1, δ)
             end
