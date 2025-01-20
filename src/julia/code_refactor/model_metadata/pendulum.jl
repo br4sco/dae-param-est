@@ -1,15 +1,17 @@
 include("../models.jl")
 include("../minimizers.jl")
-using .DynamicalModels: pendulum_new, pendulum_sensitivity_m
+using .DynamicalModels: pendulum_new, pendulum_sensitivity_m, get_pendulum_initial, get_pendulum_initial_msensonly, my_pendulum_adjoint_monly
 using .Minimizers: perform_ADAM
 
-pend_model = let
+pend_model_data = let
     m = 0.3                   # [kg]
     L = 6.25                  # [m], gives period T = 5s (T ≅ 2√L) not accounting for friction.
     g = 9.81                  # [m/s^2]
     k = 6.25                  # [1/s^2]
     φ0 = 0.0                  # Initial angle of pendulum from negative y-axis
     
+    num_dyn_vars = 7   # Number of variables in the nominal model
+
     # ------- The following fields are part of the informal interface for model metadata -------
     get_all_θs(pars::Vector{Float64}) = [pars[1], L, g, k]  # [m, L, g, k]
     free_dyn_pars_true = [m]#Array{Float64}(undef, 0)#[k]# True values of free parameters
@@ -18,9 +20,22 @@ pend_model = let
     par_bounds = [0.01 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     model_nominal = pendulum_new
     model_sens = pendulum_sensitivity_m
+    model_adjdae_fordist = my_pendulum_adjoint_monly
     σ = 0.002                                               # measurement noise variance
+
+    # Should return the initial sensitivity of all state variables, given parameters and initial input and disturbance
+    function get_sens_init(θ::Vector{Float64}, u0::Vector{Float64}, w0::Vector{Float64})::Matrix{Float64}
+        pend0, dpend0 = get_pendulum_initial(θ, u0[1], w0[1], φ0)
+        sm, _=  get_pendulum_initial_msensonly(θ, u0[1], w0[1], φ0, pend0, dpend0)
+        # The return value should be a matrix with state-component along the rows and parameter index along the columns
+        reshape(sm, :, 1)
+    end
+
     f(x::Vector{Float64}, θ::Vector{Float64}) = x[7]        # Output function, returns the output given the state vector x
     f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[14];;]# x[21] x[28] x[35]]# x[42] x[49]]# x[28]]##[x[14] x[21] x[28] x[35] x[42]]   # Returns sensitivities of the output
+    # THERE MUST BE BETTER WAY OF DOING THIS!!!
+    # f_all_sens(x::Vector{Float64}, θ::Vector{Float64}) = x[8:end]            # Returns the sensitivity of all states, but only the sensitivities
+    f_all_adj(x::Vector{Float64}, θ::Vector{Float64}) = x[1:num_dyn_vars]    # Returns all nominal states, including the model output
     dθ = length(free_dyn_pars_true)
     ny = length(f(ones(7), get_all_θs(free_dyn_pars_true)))
     # E.g. the Delta robot needs a slightly different implementation of ADAM that was hard to generalize. 
@@ -28,7 +43,9 @@ pend_model = let
     minimizer = perform_ADAM
 
     # TODO: Is f_sens_base really not relevant for pendulum? Shouldn't it become relevant when we do ID of forward sens?????
-    (σ = σ, m = m, L = L, g = g, k = k, φ0 = 0, get_all_θs = get_all_θs, free_dyn_pars_true = free_dyn_pars_true, par_bounds = par_bounds, ny = ny, model_nominal = model_nominal, model_sens = model_sens, f=f, f_sens=f_sens, f_sens_baseline=f_sens, dθ = dθ, minimizer=minimizer, init_learning_rate=init_learning_rate)
+    (σ = σ, m = m, L = L, g = g, k = k, φ0 = 0, get_all_θs = get_all_θs, free_dyn_pars_true = free_dyn_pars_true, par_bounds = par_bounds,
+        ny = ny, model_nominal = model_nominal, model_sens = model_sens, model_adjdae_fordist = model_adjdae_fordist, f=f, f_sens=f_sens, 
+        f_sens_baseline=f_sens, f_all_adj=f_all_adj, dθ = dθ, minimizer=minimizer, init_learning_rate=init_learning_rate, get_sens_init=get_sens_init)
 end
 
 # model_to_use = pendulum_new

@@ -4,7 +4,12 @@ module DynamicalModels
 import Interpolations
 using DifferentialEquations: DAESolution
 
-export Model, Model_ode, pendulum_new, pendulum_sensitivity_m
+# TODO: Make it export everything that the user could potentially need! 
+export Model, Model_ode, pendulum_new, pendulum_sensitivity_m, delta_robot_gc, delta_robot_gc_allparsens, delta_robot_gc_foradj_allpar_alldist
+export get_delta_initial_L0sensonly, get_delta_initial_L1sensonly, get_delta_initial_L2sensonly, get_delta_initial_L3sensonly, get_delta_initial_LC1sensonly, get_delta_initial_LC2sensonly
+export get_delta_initial_M1sensonly, get_delta_initial_M2sensonly, get_delta_initial_M3sensonly, get_delta_initial_J1sensonly, get_delta_initial_J2sensonly, get_delta_initial_γsensonly
+export get_delta_initial_comp_with_mats
+export get_pendulum_initial, get_pendulum_initial_msensonly, get_pendulum_initial_Lsensonly, get_pendulum_initial_ksensonly, my_pendulum_adjoint_monly
 
 const func_type = Interpolations.Extrapolation
 
@@ -22,9 +27,11 @@ struct Model_ode
     x0::Vector{Float64}     # initial values of x
 end
 
+# TODO: Should we maybe rename all these functions to e.g. get_delta_robot_gc, since they are getter functions returning models????
+
 ################################ DELTA ROBOT MODELS ################################
 
-function delta_robot_gc(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function delta_robot_gc(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -78,7 +85,7 @@ function delta_robot_gc(u::Function, w::Function, θ::Vector{Float64}, model_tup
     end
 end
 
-function delta_robot_gc_L1sens(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_L1sens(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -191,7 +198,7 @@ function delta_robot_gc_L1sens(u::Function, w::Function, θ::Vector{Float64}, mo
     end
 end
 
-function delta_robot_gc_J1sens(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function delta_robot_gc_J1sens(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -283,7 +290,7 @@ function delta_robot_gc_J1sens(u::Function, w::Function, θ::Vector{Float64}, mo
     end
 end
 
-function delta_robot_gc_γsens(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function delta_robot_gc_γsens(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -381,7 +388,7 @@ function delta_robot_gc_γsens(u::Function, w::Function, θ::Vector{Float64}, mo
     end
 end
 
-function delta_robot_gc_M1sens(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_M1sens(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -472,7 +479,7 @@ function delta_robot_gc_M1sens(u::Function, w::Function, θ::Vector{Float64}, mo
     end
 end
 
-function delta_robot_gc_L1M1J1sens(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_L1M1J1sens(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -656,7 +663,7 @@ function delta_robot_gc_L1M1J1sens(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function delta_robot_gc_allparsens(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_allparsens(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -882,7 +889,7 @@ function delta_robot_gc_allparsens(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function delta_robot_gc_L0γsens(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_L0γsens(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -991,7 +998,7 @@ function delta_robot_gc_L0γsens(u::Function, w::Function, θ::Vector{Float64}, 
     end
 end
 
-function delta_robot_gc_L1M1J1_fordebug(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_L1M1J1_fordebug(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -1179,7 +1186,7 @@ function delta_robot_gc_L1M1J1_fordebug(u::Function, w::Function, θ::Vector{Flo
     end
 end
 
-function delta_robot_gc_γ_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function delta_robot_gc_γ_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -1314,7 +1321,7 @@ function delta_robot_gc_γ_dist_sens_1(u::Function, w::Function, θ::Vector{Floa
     end
 end
 
-function delta_robot_gc_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function delta_robot_gc_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -1408,7 +1415,7 @@ function delta_robot_gc_dist_sens_1(u::Function, w::Function, θ::Vector{Float64
 end
 
 # Not properly tested, and in fact didn't seem to work fully (didn't converge)
-function delta_robot_gc_allpar_alldist(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_allpar_alldist(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -1643,7 +1650,7 @@ function delta_robot_gc_allpar_alldist(u::Function, w::Function, θ::Vector{Floa
 end
 
 # Not actually a proper model, just created so that it returns correct initial state
-function delta_robot_gc_dist_sens_all_FAKE(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function delta_robot_gc_dist_sens_all_FAKE(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -1667,7 +1674,7 @@ function delta_robot_gc_dist_sens_all_FAKE(u::Function, w::Function, θ::Vector{
     end
 end
 
-function delta_robot_gc_allpar_alldist_FAKE(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_allpar_alldist_FAKE(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -1705,12 +1712,12 @@ end
 ################################ ADJOINT DELTA ROBOT ################################
 
 # NOTE: Use *_new version of function to be compatible with improved interpolation!
-function delta_robot_gc_adjoint_γonly(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function)#::Tuple{Model, Function, Function}
+function delta_robot_gc_adjoint_γonly(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
         # np = size(xp0,2)
-        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter γ, make sure to pass correct xp0"
+        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter γ, make sure to pass correct xp0. Currently passing $np parameters."
         # nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -1925,12 +1932,12 @@ function delta_robot_gc_adjoint_γonly(u::Function, w::Function, θ::Vector{Floa
     end
 end
 
-function delta_robot_gc_adjoint_γonly_new(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
+function delta_robot_gc_adjoint_γonly_new(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
         # np = size(xp0,2)
-        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter γ, make sure to pass correct xp0"
+        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter γ, make sure to pass correct xp0. Currently passing $np parameters."
         # nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -2145,12 +2152,12 @@ function delta_robot_gc_adjoint_γonly_new(u::Function, w::Function, θ::Vector{
     end
 end
 
-function delta_robot_gc_adjoint_L1only(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function)#::Tuple{Model, Function, Function}
+function delta_robot_gc_adjoint_L1only(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
         # np = size(xp0,2)
-        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter L1, make sure to pass correct xp0"
+        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter L1, make sure to pass correct xp0. Currently passing $np parameters."
         # nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -2400,12 +2407,12 @@ function delta_robot_gc_adjoint_L1only(u::Function, w::Function, θ::Vector{Floa
 end
 
 # TODO: Rename in the future so that it doesn't have to be called "_new"?
-function delta_robot_gc_adjoint_allpar_new(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
+function delta_robot_gc_adjoint_allpar_new(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
         # np = size(xp0,2)
-        @assert (np == 12) "delta_robot_gc_adjoint_γonly is hard-coded to only handle all (12) dynamical parameters (not g), make sure to pass correct xp0"
+        @assert (np == 12) "delta_robot_gc_adjoint_γonly is hard-coded to only handle all (12) dynamical parameters (not g), make sure to pass correct xp0. Currently passing $np parameters."
         # nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -2664,12 +2671,12 @@ function delta_robot_gc_adjoint_allpar_new(u::Function, w::Function, θ::Vector{
     end
 end
 
-function delta_robot_gc_adjoint_L0γ(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
+function delta_robot_gc_adjoint_L0γ(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
         # np = size(xp0,2)
-        @assert (np == 2) "delta_robot_gc_adjoint_γonly is hard-coded to only handle L0 and γ (i.e. 2) dynamical parameters, make sure to pass correct xp0"
+        @assert (np == 2) "delta_robot_gc_adjoint_γonly is hard-coded to only handle L0 and γ (i.e. 2) dynamical parameters, make sure to pass correct xp0. Currently passing $np parameters."
         # nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -2919,7 +2926,7 @@ function delta_robot_gc_adjoint_L0γ(u::Function, w::Function, θ::Vector{Float6
 end
 
 # gravity-compensated model
-function delta_adj_stepbystep_NEW(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, y::Function, x_func::Function, dx_func::Function, λ::Function, dλ::Function, Fp::Function, T::Float64)::Model
+function delta_adj_stepbystep_NEW(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, y::Function, x_func::Function, dx_func::Function, λ::Function, dλ::Function, Fp::Function, T::Float64)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
 
         Fx = (x,dx) -> [-L1*cos(x[1])*dx[26]-L1*cos(x[1])*dx[29]-L1*sin(x[1])*dx[27]-L1*sin(x[1])*dx[30]   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
@@ -3076,12 +3083,12 @@ function delta_adj_stepbystep_NEW(u::Function, w::Function, θ::Vector{Float64},
 end
 
 # NOTE: Made using slightly sub-optimal version of new adjoint method for disturbance, resulting in extra messy implementation
-function delta_robot_gc_foradj_a1only(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
+function delta_robot_gc_foradj_a1only(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
         # np = size(xp0,2)
-        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter a1, make sure to pass correct xp0"
+        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter a1, make sure to pass correct xp0. Currently passing $np parameters."
         # nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -3298,7 +3305,7 @@ function delta_robot_gc_foradj_a1only(u::Function, w::Function, θ::Vector{Float
     end
 end
 
-function delta_robot_gc_foradj_alldist(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
+function delta_robot_gc_foradj_alldist(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
@@ -3542,13 +3549,12 @@ function delta_robot_gc_foradj_alldist(u::Function, w::Function, θ::Vector{Floa
     end
 end
 
-# TODO: Rename in the future so that it doesn't have to be called "_new"?
-function delta_robot_gc_foradj_allpar_alldist(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
+function delta_robot_gc_foradj_allpar_alldist(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
         # np = size(xp0,2)
-        @assert (np == 24) "delta_robot_gc_adjoint_γonly is hard-coded to only handle all dynamical and disturbance parameters (12+12=24), make sure to pass correct xp0"
+        @assert (np == 24) "delta_robot_gc_foradj_allpar_alldist is hard-coded to only handle all dynamical and disturbance parameters (12+12=24), make sure to pass correct xp0. Currently passing $np parameters."
         # nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -3843,7 +3849,7 @@ function delta_robot_gc_adjoint_allpar_alldist(u::Function, w::Function, xw::Fun
         nc = 9
         nxw = length(xw(0.0))   # For pendulum, this was just called nw, because actual nw was always equal to 1
         nw = length(w(0.0))
-        @assert (np == 24) "delta_robot_gc_adjoint_γonly is hard-coded to only handle all (12) dynamical parameters (not g) and all (12) disturbance parameters, make sure to pass correct xp0"
+        @assert (np == 24) "delta_robot_gc_adjoint_γonly is hard-coded to only handle all (12) dynamical parameters (not g) and all (12) disturbance parameters, make sure to pass correct xp0. Currently passing $np parameters."
         ndist = 6   # length of x_w plus length of w (3+3)
         # nx = size(xp0,1)
         # x  = t -> sol(t)
@@ -4165,7 +4171,7 @@ end
 
 # ----------------
 
-function delta_robot_gc_debparsens(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_debparsens(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -4424,7 +4430,7 @@ function delta_robot_gc_debparsens(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function delta_robot_gc_adjoint_debpar(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function)#::Tuple{Model, Function, Function}
+function delta_robot_gc_adjoint_debpar(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
@@ -4726,7 +4732,7 @@ function delta_robot_gc_adjoint_debpar(u::Function, w::Function, θ::Vector{Floa
     end
 end
 
-function delta_robot_gc_debparsens2(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model 
+function delta_robot_gc_debparsens2(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model 
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -4971,7 +4977,7 @@ function delta_robot_gc_debparsens2(u::Function, w::Function, θ::Vector{Float64
     end
 end
 
-function delta_robot_gc_adjoint_debpar2(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function)#::Tuple{Model, Function, Function}
+function delta_robot_gc_adjoint_debpar2(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
@@ -5237,7 +5243,7 @@ function delta_robot_gc_adjoint_debpar2(u::Function, w::Function, θ::Vector{Flo
     end
 end
 
-function delta_robot_gc_deb1sens(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function delta_robot_gc_deb1sens(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         # @info "Samples: $(u(0.3)), $(u(0.46)), $(u(1.23)), $(w(0.3)), $(w(0.46)), $(w(1.23))"
         function f!(res, dz, z, _, t)
@@ -5331,12 +5337,12 @@ function delta_robot_gc_deb1sens(u::Function, w::Function, θ::Vector{Float64}, 
     end
 end
 
-function delta_robot_gc_adjoint_deb1only(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function)#::Tuple{Model, Function, Function}
+function delta_robot_gc_adjoint_deb1only(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2)#::Tuple{Model, Function, Function}
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         
         (nx, np) = size(xp0)
         # np = size(xp0,2)
-        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter L1, make sure to pass correct xp0"
+        @assert (np == 1) "delta_robot_gc_adjoint_γonly is hard-coded to only handle one parameter L1, make sure to pass correct xp0. Currently passing $np parameters."
         # nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -7051,7 +7057,7 @@ function get_delta_initial_comp_with_mats(θ, u0, w0)
 end
 
 ############################### NON-STABILIZED DELTA ROBOT ################################
-function delta_robot(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function delta_robot(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = θ[12], γ = θ[13]
         pole = 5
         α1 = 2*pole
@@ -7149,7 +7155,7 @@ function delta_robot(u::Function, w::Function, θ::Vector{Float64}, model_tuple:
     end
 end
 
-function delta_robot_gravitycomp(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function delta_robot_gravitycomp(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let L0 = θ[1], L1 = θ[2], L2 = θ[3], L3 = θ[4], LC1 = θ[5], LC2 = θ[6], M1 = θ[7], M2 = θ[8], M3 = θ[9], J1 = θ[10], J2 = θ[11], g = 0.0, γ = θ[13]
         pole = 5
         α1 = 2*pole
@@ -7353,7 +7359,7 @@ end
 
 ################################ PENDULUM MODELS ################################
 
-function pendulum_new(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_new(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -7376,10 +7382,10 @@ function pendulum_new(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::N
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
-        dx3_0 = m*g/x2_0    # This is actually hard-coded for vertical position of pendulum, i.e. pend_mdl.φ0=0, and assuming u0+w^2=0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
+        dx3_0 = m*g/x2_0    # This is actually hard-coded for vertical position of pendulum, i.e. model_data.φ0=0, and assuming u0+w^2=0
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dx0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -7394,8 +7400,10 @@ function pendulum_new(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::N
     end
 end
 
+# TODO: Make all pendulum functions use new initialization functions!!!
+
 # Sensitivity only with respect to disturbance parameter, no dynamic parameter
-function pendulum_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -7432,10 +7440,10 @@ function pendulum_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, pen
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -7458,7 +7466,7 @@ function pendulum_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, pen
 end
 
 # Sensitivity with respect to two disturbance parameters, no dynamic parameter
-function pendulum_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -7508,10 +7516,10 @@ function pendulum_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, pen
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -7534,7 +7542,7 @@ function pendulum_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, pen
 end
 
 # Sensitivity with respect to "all" disturbance parameters, no dynamic parameter
-function pendulum_dist_sens_3(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_dist_sens_3(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -7597,10 +7605,10 @@ function pendulum_dist_sens_3(u::Function, w::Function, θ::Vector{Float64}, pen
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -7622,7 +7630,7 @@ function pendulum_dist_sens_3(u::Function, w::Function, θ::Vector{Float64}, pen
     end
 end
 
-function pendulum_sensitivity_k(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_k(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -7670,10 +7678,10 @@ function pendulum_sensitivity_k(u::Function, w::Function, θ::Vector{Float64}, p
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(7))
         dx0 = vcat([0., 0., dx3_0, dx4_0], zeros(10))
@@ -7688,7 +7696,7 @@ function pendulum_sensitivity_k(u::Function, w::Function, θ::Vector{Float64}, p
     end
 end
 
-function pendulum_sensitivity_L(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_L(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -7756,18 +7764,18 @@ function pendulum_sensitivity_L(u::Function, w::Function, θ::Vector{Float64}, p
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
         # Sensitivity initialization
-        dsL3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
         # if x1_0 != 0.0
         #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
@@ -7793,7 +7801,7 @@ function pendulum_sensitivity_L(u::Function, w::Function, θ::Vector{Float64}, p
     end
 end
 
-function pendulum_sensitivity_m(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_m(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -7858,8 +7866,8 @@ function pendulum_sensitivity_m(u::Function, w::Function, θ::Vector{Float64}, p
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = (m*g*x2_0 - x1_0*(u0 + w0^2))/(L^2)
         dx4_0 = (dx3_0*x1_0 + u0 + w0^2)/m
         dx5_0 = (dx3_0*x2_0 - m*g)/m
@@ -7895,7 +7903,7 @@ function pendulum_sensitivity_m(u::Function, w::Function, θ::Vector{Float64}, p
     end
 end
 
-function pendulum_sensitivity_g(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_g(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -7930,10 +7938,10 @@ function pendulum_sensitivity_g(u::Function, w::Function, θ::Vector{Float64}, p
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -7960,7 +7968,7 @@ function pendulum_sensitivity_g(u::Function, w::Function, θ::Vector{Float64}, p
     end
 end
 
-function pendulum_sensitivity_Lk(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_Lk(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -8039,18 +8047,18 @@ function pendulum_sensitivity_Lk(u::Function, w::Function, θ::Vector{Float64}, 
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
         # Sensitivity initialization
-        ds3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        ds4_0 = (ds3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        ds5_0 = (ds3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        ds3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        ds4_0 = (ds3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        ds5_0 = (ds3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [ds3_0, ds4_0, ds5_0], zeros(2))
         sk0  = zeros(7)
         dsk0 = zeros(7)
@@ -8069,7 +8077,7 @@ function pendulum_sensitivity_Lk(u::Function, w::Function, θ::Vector{Float64}, 
     end
 end
 
-function pendulum_sensitivity_full(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_full(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -8149,10 +8157,10 @@ function pendulum_sensitivity_full(u::Function, w::Function, θ::Vector{Float64}
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -8161,10 +8169,10 @@ function pendulum_sensitivity_full(u::Function, w::Function, θ::Vector{Float64}
         dsm5_0 = -(dx3_0*x2_0 - m*g)/(m^2) + (dsm3_0*x2_0 - g)/m
         sm0  = zeros(7)
         dsm0 = vcat(zeros(2), [dsm3_0, dsm4_0, dsm5_0, 0., 0.])
-        dsL3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
         dsg3_0 = m*x2_0/(L^2)
         dsg4_0 = dsg3_0*x1_0/m
@@ -8173,7 +8181,7 @@ function pendulum_sensitivity_full(u::Function, w::Function, θ::Vector{Float64}
         dsg0 = vcat(zeros(2), [dsg3_0, dsg4_0, dsg5_0], zeros(2))
         sk0  = zeros(7)
         dsk0 = zeros(7)
-        # t0 = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        # t0 = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         # tp0 = vcat([0.,0.], [-dx3_0/L], zeros(4))
         # if x1_0 != 0.0
         #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
@@ -8199,7 +8207,7 @@ function pendulum_sensitivity_full(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function pendulum_sensitivity_sans_g(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_sans_g(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -8259,10 +8267,10 @@ function pendulum_sensitivity_sans_g(u::Function, w::Function, θ::Vector{Float6
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -8271,14 +8279,14 @@ function pendulum_sensitivity_sans_g(u::Function, w::Function, θ::Vector{Float6
         dsm5_0 = -(dx3_0*x2_0 - m*g)/(m^2) + (dsm3_0*x2_0 - g)/m
         sm0  = zeros(7)
         dsm0 = vcat(zeros(2), [dsm3_0, dsm4_0, dsm5_0, 0., 0.])
-        dsL3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
         sk0  = zeros(7)
         dsk0 = zeros(7)
-        # t0 = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        # t0 = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         # tp0 = vcat([0.,0.], [-dx3_0/L], zeros(4))
         # if x1_0 != 0.0
         #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
@@ -8303,7 +8311,7 @@ function pendulum_sensitivity_sans_g(u::Function, w::Function, θ::Vector{Float6
     end
 end
 
-function pendulum_sensitivity_sans_g_with_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_sans_g_with_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -8379,10 +8387,10 @@ function pendulum_sensitivity_sans_g_with_dist_sens_2(u::Function, w::Function, 
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -8391,16 +8399,16 @@ function pendulum_sensitivity_sans_g_with_dist_sens_2(u::Function, w::Function, 
         dsm5_0 = -(dx3_0*x2_0 - m*g)/(m^2) + (dsm3_0*x2_0 - g)/m
         sm0  = zeros(7)
         dsm0 = vcat(zeros(2), [dsm3_0, dsm4_0, dsm5_0, 0., 0.])
-        dsL3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
         sk0  = zeros(7)
         dsk0 = zeros(7)
         r0 = zeros(7)
         rp0 = zeros(7)
-        # t0 = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        # t0 = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         # tp0 = vcat([0.,0.], [-dx3_0/L], zeros(4))
         # if x1_0 != 0.0
         #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
@@ -8425,7 +8433,7 @@ function pendulum_sensitivity_sans_g_with_dist_sens_2(u::Function, w::Function, 
     end
 end
 
-function pendulum_sensitivity_sans_g_with_dist_sens_3(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_sans_g_with_dist_sens_3(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -8514,10 +8522,10 @@ function pendulum_sensitivity_sans_g_with_dist_sens_3(u::Function, w::Function, 
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -8526,16 +8534,16 @@ function pendulum_sensitivity_sans_g_with_dist_sens_3(u::Function, w::Function, 
         dsm5_0 = -(dx3_0*x2_0 - m*g)/(m^2) + (dsm3_0*x2_0 - g)/m
         sm0  = zeros(7)
         dsm0 = vcat(zeros(2), [dsm3_0, dsm4_0, dsm5_0, 0., 0.])
-        dsL3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
         sk0  = zeros(7)
         dsk0 = zeros(7)
         r0 = zeros(7)
         rp0 = zeros(7)
-        # t0 = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        # t0 = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         # tp0 = vcat([0.,0.], [-dx3_0/L], zeros(4))
         # if x1_0 != 0.0
         #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
@@ -8560,7 +8568,7 @@ function pendulum_sensitivity_sans_g_with_dist_sens_3(u::Function, w::Function, 
     end
 end
 
-function pendulum_sensitivity_sans_g_with_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_sans_g_with_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -8623,10 +8631,10 @@ function pendulum_sensitivity_sans_g_with_dist_sens_1(u::Function, w::Function, 
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -8635,16 +8643,16 @@ function pendulum_sensitivity_sans_g_with_dist_sens_1(u::Function, w::Function, 
         dsm5_0 = -(dx3_0*x2_0 - m*g)/(m^2) + (dsm3_0*x2_0 - g)/m
         sm0  = zeros(7)
         dsm0 = vcat(zeros(2), [dsm3_0, dsm4_0, dsm5_0, 0., 0.])
-        dsL3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
         sk0  = zeros(7)
         dsk0 = zeros(7)
         r0 = zeros(7)
         rp0 = zeros(7)
-        # t0 = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        # t0 = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         # tp0 = vcat([0.,0.], [-dx3_0/L], zeros(4))
         # if x1_0 != 0.0
         #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
@@ -8669,7 +8677,7 @@ function pendulum_sensitivity_sans_g_with_dist_sens_1(u::Function, w::Function, 
     end
 end
 
-function pendulum_sensitivity_full_with_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_full_with_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -8777,10 +8785,10 @@ function pendulum_sensitivity_full_with_dist_sens_2(u::Function, w::Function, θ
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -8789,10 +8797,10 @@ function pendulum_sensitivity_full_with_dist_sens_2(u::Function, w::Function, θ
         dsm5_0 = -(dx3_0*x2_0 - m*g)/(m^2) + (dsm3_0*x2_0 - g)/m
         sm0  = zeros(7)
         dsm0 = vcat(zeros(2), [dsm3_0, dsm4_0, dsm5_0, 0., 0.])
-        dsL3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
         dsg3_0 = m*x2_0/(L^2)
         dsg4_0 = dsg3_0*x1_0/m
@@ -8801,7 +8809,7 @@ function pendulum_sensitivity_full_with_dist_sens_2(u::Function, w::Function, θ
         dsg0 = vcat(zeros(2), [dsg3_0, dsg4_0, dsg5_0], zeros(2))
         sk0  = zeros(7)
         dsk0 = zeros(7)
-        # t0 = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        # t0 = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         # tp0 = vcat([0.,0.], [-dx3_0/L], zeros(4))
         # if x1_0 != 0.0
         #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
@@ -8827,7 +8835,7 @@ function pendulum_sensitivity_full_with_dist_sens_2(u::Function, w::Function, θ
     end
 end
 
-function pendulum_sensitivity_Lk_with_dist_sens_1(u::Function, w_comp::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_Lk_with_dist_sens_1(u::Function, w_comp::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         # NOTE: In this function w_comp is edxected to have two elements: the
         # first should just be the disturbance w, and the second the sensitivity
@@ -8890,18 +8898,18 @@ function pendulum_sensitivity_Lk_with_dist_sens_1(u::Function, w_comp::Function,
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w_comp(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
         # pend_dvar = vcat(fill(true, 6))
-        dsL3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
         sk0  = zeros(7)
         dsk0 = zeros(7)
@@ -8930,7 +8938,7 @@ function pendulum_sensitivity_Lk_with_dist_sens_1(u::Function, w_comp::Function,
     end
 end
 
-function pendulum_sensitivity_Lk_with_dist_sens_2(u::Function, w_comp::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_Lk_with_dist_sens_2(u::Function, w_comp::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         # NOTE: In this function w_comp is edxected to have two elements: the
         # first should just be the disturbance w, and the second the sensitivity
@@ -9006,18 +9014,18 @@ function pendulum_sensitivity_Lk_with_dist_sens_2(u::Function, w_comp::Function,
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w_comp(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
         # pend_dvar = vcat(fill(true, 6))
-        dsL3_0 = (-m*g*cos(pend_mdl.φ0) - sin(pend_mdl.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
-        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(pend_mdl.φ0))/m
-        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(pend_mdl.φ0))/m
-        sL0  = vcat([sin(pend_mdl.φ0), -cos(pend_mdl.φ0)], zeros(5))
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
         dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
         sk0  = zeros(7)
         dsk0 = zeros(7)
@@ -9046,7 +9054,7 @@ function pendulum_sensitivity_Lk_with_dist_sens_2(u::Function, w_comp::Function,
     end
 end
 
-function pendulum_sensitivity_k_with_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_k_with_dist_sens_1(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -9092,10 +9100,10 @@ function pendulum_sensitivity_k_with_dist_sens_1(u::Function, w::Function, θ::V
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -9119,7 +9127,7 @@ function pendulum_sensitivity_k_with_dist_sens_1(u::Function, w::Function, θ::V
     end
 end
 
-function pendulum_sensitivity_k_with_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_k_with_dist_sens_2(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -9178,10 +9186,10 @@ function pendulum_sensitivity_k_with_dist_sens_2(u::Function, w::Function, θ::V
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -9205,7 +9213,7 @@ function pendulum_sensitivity_k_with_dist_sens_2(u::Function, w::Function, θ::V
     end
 end
 
-function pendulum_sensitivity_k_with_dist_sens_3(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple)::Model
+function pendulum_sensitivity_k_with_dist_sens_3(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # the residual function
@@ -9277,10 +9285,10 @@ function pendulum_sensitivity_k_with_dist_sens_3(u::Function, w::Function, θ::V
         # Initial values, the pendulum starts at rest
         u0 = u(0.0)[1]
         w0 = w(0.0)[1]
-        x1_0 = L * sin(pend_mdl.φ0)
-        x2_0 = -L * cos(pend_mdl.φ0)
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
         dx3_0 = m*g/x2_0
-        dx4_0 = -g*tan(pend_mdl.φ0) + (u0 + w0^2)/m
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
 
         pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
         dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
@@ -9304,12 +9312,12 @@ function pendulum_sensitivity_k_with_dist_sens_3(u::Function, w::Function, θ::V
     end
 end
 
-function my_pendulum_adjoint(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple, T::Float64, sol::DAESolution, sol2::DAESolution, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, sol::DAESolution, sol2::DAESolution, y, dy, xp0::Matrix{Float64}, dx, dx2, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
-        @assert (np == 3) "my_pendulum_adjoint is hard-coded to only handle exactly three parameters (all dynamical), make sure to pass correct xp0"
+        @assert (np == 3) "my_pendulum_adjoint is hard-coded to only handle exactly three parameters (all dynamical), make sure to pass correct xp0. Currently passing $np parameters."
         nx = size(xp0,1)
         x  = t -> sol(t)
         x2 = t -> sol2(t)
@@ -9433,41 +9441,42 @@ function my_pendulum_adjoint(u::Function, w::Function, θ::Vector{Float64}, pend
     end
 end
 
-function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+# TODO: Only this pendulum function is updated to new interpolations, i.e x(t,2) instead of x(t)[2], make sure to update others that you keep!
+function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
-        @assert (np == 1) "my_pendulum_adjoint_monly is hard-coded to only handle one parameter m, make sure to pass correct xp0"
+        @assert (np == 1) "my_pendulum_adjoint_monly is hard-coded to only handle one parameter m, make sure to pass correct xp0. Currently passing $np parameters."
         nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
 
-        Fx = t -> [2dx(t)[6]        0               0   -1                  0           0   0
-                    0           2*dx(t)[6]          0   0                   -1          0   0
-                    -dx(t)[3]         0             0   2k*abs(x(t)[4])     0           0   0
-                    0            -dx(t)[3]          0   0               2k*abs(x(t)[5]) 0   0
-                    2x(t)[1]      2x(t)[2]          0   0                   0           0   0
-                    x(t)[4]        x(t)[5]          0   x(t)[1]            x(t)[2]      0   0
-                    x(t)[2]/(L^2)  -x(t)[1]/(L^2)   0   0                   0           0   1]
+        Fx = t -> [2dx(t,6)        0               0   -1                  0           0   0
+                    0           2*dx(t,6)          0   0                   -1          0   0
+                    -dx(t,3)         0             0   2k*abs(x(t,4))     0           0   0
+                    0            -dx(t,3)          0   0               2k*abs(x(t,5)) 0   0
+                    2x(t,1)      2x(t,2)          0   0                   0           0   0
+                    x(t,4)        x(t,5)          0   x(t,1)            x(t,2)      0   0
+                    x(t,2)/(L^2)  -x(t,1)/(L^2)   0   0                   0           0   1]
         # (namely the derivative of F with respect to the variable x_p)
-        Fdx = t -> vcat([1.0   0   0          0   0   2x(t)[1]    0
-                         0   1.0   0          0   0   2x(t)[2]    0
-                         0   0   -x(t)[1]   m   0   0           0
-                         0   0   -x(t)[2]   0   m   0           0], zeros(3,7))
-        Fddx = t -> vcat([  0   0  0            0   0   2dx(t)[1]    0
-                            0   0  0            0   0   2dx(t)[2]    0
-                            0   0  -dx(t)[1]    0   0   0            0
-                            0   0  -dx(t)[2]    0   0   0            0], zeros(3,7))
+        Fdx = t -> vcat([1.0   0   0          0   0   2x(t,1)    0
+                         0   1.0   0          0   0   2x(t,2)    0
+                         0   0   -x(t,1)   m   0   0           0
+                         0   0   -x(t,2)   0   m   0           0], zeros(3,7))
+        Fddx = t -> vcat([  0   0  0            0   0   2dx(t,1)    0
+                            0   0  0            0   0   2dx(t,2)    0
+                            0   0  -dx(t,1)    0   0   0            0
+                            0   0  -dx(t,2)    0   0   0            0], zeros(3,7))
         Fp = t -> [ .0
                     .0
-                    dx(t)[4]
-                    dx(t)[5]+g
+                    dx(t,4)
+                    dx(t,5)+g
                     .0
                     .0
                     .0]
-        gₓ  = t -> [0    0    0    0    0    0    2(x2(t)[7]-first(y(t)))/T]
-        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t)[7]-first(dy(t)))/T]
+        gₓ  = t -> [0    0    0    0    0    0    2(x2(t,7)-first(y(t,1)))/T]
+        gdₓ = t -> [0    0    0    0    0    0    2(dx2(t,7)-first(dy(t,1)))/T]
 
         # NOTE: Convention is used that derivatives wrt to θ stack along cols
         # while derivatives wrt to x stack along rows
@@ -9491,23 +9500,23 @@ function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}
         function f!(res, dz, z, θ, t)
             # TODO: Complete
             # Completely unreadabe but most efficient version (still not a huge improvement)
-            res[1]  = dz[1] - 2*dx(t)[6]*z[1] + dx(t)[3]*z[3] - 2*x(t)[1]*z[5] - x(t)[4]*z[6] - (x(t)[2]*z[7])/(L^2)
-            res[2]  = dz[2] - 2*dx(t)[6]*z[2] + dx(t)[3]*z[4] - 2*x(t)[2]*z[5] - x(t)[5]*z[6] + (x(t)[1]*z[7])/(L^2)
-            res[3]  = -x(t)[1]*dz[3] - x(t)[2]*dz[4] - dx(t)[1]*z[3] - dx(t)[2]*z[4]
-            res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t)[4])*z[3] - x(t)[1]*z[6]
-            res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t)[5])*z[4] - x(t)[2]*z[6]
-            res[6]  = 2*x(t)[1]*dz[1] + 2*x(t)[2]*dz[2] + 2*dx(t)[1]*z[1] + 2*dx(t)[2]*z[2]
-            res[7]  = (2*(x2(t)[7] - first(y(t))))/T - z[7]
-            # res[1]  = dz[1] + 2x(t)[1]*dz[6]    - 2dx(t)[6]*z[1] + z[4] + 2dx(t)[1]*z[6]
-            # res[2]  = dz[2] + 2x(t)[2]*dz[6]    - 2dx(t)[6]*z[2] + z[5] + 2dx(t)[2]*z[6]
-            # res[3]  = -x(t)[1]*dz[3] + m*dz[4]  + dx(t)[3]*z[1] - dx(t)[1]*z[3] - 2k*abs(x(t)[4])*z[4]
-            # res[4]  = -x(t)[2]*dz[3] + m*dz[5]  + dx(t)[3]*z[2] - dx(t)[2]*z[3] - 2k*abs(x(t)[5])*z[5]
-            # res[5]  =                           - 2x(t)[1]*z[1] - 2x(t)[2]*z[2]
-            # res[6]  =                           - x(t)[4]*z[1] - x(t)[5]*z[2] - x(t)[1]*z[4] - x(t)[2]*z[5]
-            # res[7]  =                           - x(t)[2]*z[1]/(L^2) + x(t)[1]*z[2]/(L^2) - z[7]                + (2/T)*(x2(t)[7]-y(t)[1])
-            res[8]  = dz[8] - z[3]*dx(t)[4] - z[4]*(dx(t)[5]+g)
+            res[1]  = dz[1] - 2*dx(t,6)*z[1] + dx(t,3)*z[3] - 2*x(t,1)*z[5] - x(t,4)*z[6] - (x(t,2)*z[7])/(L^2)
+            res[2]  = dz[2] - 2*dx(t,6)*z[2] + dx(t,3)*z[4] - 2*x(t,2)*z[5] - x(t,5)*z[6] + (x(t,1)*z[7])/(L^2)
+            res[3]  = -x(t,1)*dz[3] - x(t,2)*dz[4] - dx(t,1)*z[3] - dx(t,2)*z[4]
+            res[4]  = m*dz[3] + z[1] - 2*k*abs(x(t,4))*z[3] - x(t,1)*z[6]
+            res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t,5))*z[4] - x(t,2)*z[6]
+            res[6]  = 2*x(t,1)*dz[1] + 2*x(t,2)*dz[2] + 2*dx(t,1)*z[1] + 2*dx(t,2)*z[2]
+            res[7]  = (2*(x2(t,7) - first(y(t,1))))/T - z[7]
+            # res[1]  = dz[1] + 2x(t,1]*dz[6]    - 2dx(t,6]*z[1] + z[4] + 2dx(t,1]*z[6]
+            # res[2]  = dz[2] + 2x(t,2]*dz[6]    - 2dx(t,6]*z[2] + z[5] + 2dx(t,2]*z[6]
+            # res[3]  = -x(t,1]*dz[3] + m*dz[4]  + dx(t,3]*z[1] - dx(t,1]*z[3] - 2k*abs(x(t,4])*z[4]
+            # res[4]  = -x(t,2]*dz[3] + m*dz[5]  + dx(t,3]*z[2] - dx(t,2]*z[3] - 2k*abs(x(t,5])*z[5]
+            # res[5]  =                           - 2x(t,1]*z[1] - 2x(t,2]*z[2]
+            # res[6]  =                           - x(t,4]*z[1] - x(t,5]*z[2] - x(t,1]*z[4] - x(t,2]*z[5]
+            # res[7]  =                           - x(t,2]*z[1]/(L^2) + x(t,1]*z[2]/(L^2) - z[7]                + (2/T)*(x2(t)[7]-y(t)[1])
+            res[8]  = dz[8] - z[3]*dx(t,4) - z[4]*(dx(t,5)+g)
             # res[8]  = dz[8] - z[3]*dx(T-t)[4] - z[4]*(dx(T-t)[5]+g)   # NOTE: SIMPLY WRONG; T-t????
-            # res[8]  = dz[8] - z[3]*abs(x(t)[4])*x(t)[4] - z[4]*abs(x(t)[5])*x(t)[5]   # from pendelum k-only
+            # res[8]  = dz[8] - z[3]*abs(x(t,4])*x(t,4] - z[4]*abs(x(t,5])*x(t,5]   # from pendelum k-only
 
             # # Super-readable but less efficient version ALSO NEGATED
             # res[1:7]  = (dz[1:7]')*Fdx(T-t) + (z[1:7]')*(Fddx(T-t) - Fx(T-t)) + gₓ(T-t)
@@ -9563,12 +9572,12 @@ function my_pendulum_adjoint_monly(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
-        @assert (np == 1) "my_pendulum_adjoint_Lonly is hard-coded to only handle one parameter L, make sure to pass correct xp0"
+        @assert (np == 1) "my_pendulum_adjoint_Lonly is hard-coded to only handle one parameter L, make sure to pass correct xp0. Currently passing $np parameters."
         nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -9692,12 +9701,12 @@ function my_pendulum_adjoint_Lonly(u::Function, w::Function, θ::Vector{Float64}
 end
 
 # NOTE Assumes free dynamical parameters are only k
-function my_pendulum_adjoint_konly_new(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type, N_trans::Int=0)
+function my_pendulum_adjoint_konly_new(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
-        @assert (np == 1) "my_pendulum_adjoint_konly is hard-coded to only handle one parameter k, make sure to pass correct xp0"
+        @assert (np == 1) "my_pendulum_adjoint_konly is hard-coded to only handle one parameter k, make sure to pass correct xp0. Currently passing $np parameters."
         nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -9810,7 +9819,7 @@ function my_pendulum_adjoint_konly_new(u::Function, w::Function, θ::Vector{Floa
     end
 end
 
-function my_pendulum_adjoint_sans_g(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint_sans_g(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -9923,7 +9932,7 @@ function my_pendulum_adjoint_sans_g(u::Function, w::Function, θ::Vector{Float64
 end
 
 # NOTE Assumes free dynamical parameters are only k. Also identifies a1 and a2 from disturbance model
-function my_pendulum_adjoint_konly_with_distsensa(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int=2, N_trans::Int=0)
+function my_pendulum_adjoint_konly_with_distsensa(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int=2, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function. 
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -10049,7 +10058,7 @@ function my_pendulum_adjoint_konly_with_distsensa(u::Function, w::Function, xw::
 end
 
 # NOTE Assumes free dynamical parameters are only k. Also identifies a1/a2 from disturbance model
-function my_pendulum_adjoint_konly_with_distsensa1(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int=1, N_trans::Int=0)
+function my_pendulum_adjoint_konly_with_distsensa1(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int=1, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function. 
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -10174,7 +10183,7 @@ function my_pendulum_adjoint_konly_with_distsensa1(u::Function, w::Function, xw:
     end
 end
 
-function my_pendulum_adjoint_sans_g_with_dist_sens_3(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
+function my_pendulum_adjoint_sans_g_with_dist_sens_3(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -10324,7 +10333,7 @@ function my_pendulum_adjoint_sans_g_with_dist_sens_3(u::Function, w::Function, x
     end
 end
 
-function my_pendulum_adjoint_dist_sens_3(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
+function my_pendulum_adjoint_dist_sens_3(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -10619,7 +10628,7 @@ function my_pendulum_adjoint_distsensa1_new(u::Function, w::Function, xw::Functi
     end
 end
 
-function my_pendulum_adjoint_distsensa2(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
+function my_pendulum_adjoint_distsensa2(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function. 
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -10769,7 +10778,7 @@ function my_pendulum_adjoint_distsensa2(u::Function, w::Function, xw::Function, 
     end
 end
 
-function my_pendulum_foradj_distsensa1(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type, N_trans::Int=0)
+function my_pendulum_foradj_distsensa1(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx::func_type, dx2::func_type, N_trans::Int=0)
     # na should be the number of disturbance parameters corresponding to the a parameters. In this case, it should really just be 1, so it's actually only an input argument to fit the signature of the other adjoint models
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
@@ -10871,7 +10880,7 @@ function my_pendulum_foradj_distsensa1(u::Function, w::Function, θ::Vector{Floa
     end
 end
 
-function my_pendulum_adjoint_distsensc(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Matrix{Float64}, dx::Function, dx2::Function, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
+function my_pendulum_adjoint_distsensc(u::Function, w::Function, xw::Function, v::Function, θ::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, B̃::Matrix{Float64}, B̃θ::Matrix{Float64}, η::Vector{Float64}, na::Int, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function. 
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
@@ -11021,12 +11030,12 @@ function my_pendulum_adjoint_distsensc(u::Function, w::Function, xw::Function, v
     end
 end
 
-function my_pendulum_adjoint_gonly(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint_gonly(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
-        @assert (np == 1) "my_pendulum_adjoint_Lonly is hard-coded to only handle one parameter L, make sure to pass correct xp0"
+        @assert (np == 1) "my_pendulum_adjoint_Lonly is hard-coded to only handle one parameter L, make sure to pass correct xp0. Currently passing $np parameters."
         nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -11151,12 +11160,12 @@ function my_pendulum_adjoint_gonly(u::Function, w::Function, θ::Vector{Float64}
     end
 end
 
-function my_pendulum_adjoint_deb(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function, N_trans::Int=0)
+function my_pendulum_adjoint_deb(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2, N_trans::Int=0)
     # NOTE: A bit ugly to pass sol and sol2 as DAESolution, but dx as a function.
     # But good enough for now, just should be different in final version perhaps
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
         np = size(xp0,2)
-        @assert (np == 1) "my_pendulum_adjoint_Lonly is hard-coded to only handle one parameter L, make sure to pass correct xp0"
+        @assert (np == 1) "my_pendulum_adjoint_Lonly is hard-coded to only handle one parameter L, make sure to pass correct xp0. Currently passing $np parameters."
         nx = size(xp0,1)
         # x  = t -> sol(t)
         # x2 = t -> sol2(t)
@@ -11283,7 +11292,7 @@ function my_pendulum_adjoint_deb(u::Function, w::Function, θ::Vector{Float64}, 
     end
 end
 
-function pendulum_adj_stepbystep_NEW(u::Function, w::Function, θ::Vector{Float64}, pend_mdl::NamedTuple, y::Function, x_func::Function, dx_func::Function, λ::Function, dλ::Function, Fp::Function, T::Float64)::Model
+function pendulum_adj_stepbystep_NEW(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple, y::Function, x_func::Function, dx_func::Function, λ::Function, dλ::Function, Fp::Function, T::Float64)::Model
     let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
 
         # x  = t -> sol(t)
@@ -11428,10 +11437,400 @@ function pendulum_adj_stepbystep_dist_new(u::Function, w::Function, xw::Function
     end
 end
 
+################################ PENDULUM ROBOT INITIALIZATIONS ################################
+
+function get_pendulum_initial(θ::Vector{Float64}, u0::Float64, w0::Float64, φ0::Float64)
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        x1_0 = L * sin(φ0)
+        x2_0 = -L * cos(φ0)
+        dx3_0 = (m*g*x2_0 - x1_0*(u0 + w0^2))/(L^2)
+        dx4_0 = (dx3_0*x1_0 + u0 + w0^2)/m
+        dx5_0 = (dx3_0*x2_0 - m*g)/m
+
+        pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        dpend0 = vcat([0., 0., dx3_0, dx4_0, dx5_0], zeros(2))
+        pend0, dpend0
+    end
+end
+ 
+function get_pendulum_initial_msensonly(θ::Vector{Float64}, u0::Float64, w0::Float64, φ0::Float64, x0::Vector{Float64}, dx0::Vector{Float64})
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        dsm3_0 = g*x0[2]/(L^2)
+        dsm4_0 = -(dx0[3]*x0[1] + u0 + w0^2)/(m^2) + (dsm3_0*x0[1])/m
+        dsm5_0 = -(dx0[3]*x0[2] - m*g)/(m^2) + (dsm3_0*x0[2] - g)/m
+        dsm0 = vcat(zeros(2), [dsm3_0, dsm4_0, dsm5_0, 0., 0.])
+        zeros(7), dsm0
+    end
+end
+
+function get_pendulum_initial_gsensonly(θ::Vector{Float64}, u0::Float64, w0::Float64, φ0::Float64, x0::Vector{Float64}, dx0::Vector{Float64})
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        dsg3_0 = m*x0[2]/(L^2)
+        dsg4_0 = dsg3_0*x0[1]/m
+        dsg5_0 = dsg3_0*x0[2]/m - 1
+        dsg0 = vcat(zeros(2), [dsg3_0, dsg4_0, dsg5_0], zeros(2))
+        zeros(7), dsg0
+    end
+end
+
+function get_pendulum_initial_Lsensonly(θ::Vector{Float64}, u0::Float64, w0::Float64, φ0::Float64, x0::Vector{Float64}, dx0::Vector{Float64})
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+        dsL3_0 = (-m*g*cos(φ0) - sin(φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x0[2] - x0[1]*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x0[1] + dx0[3]*sin(φ0))/m
+        dsL5_0 = (dsL3_0*x0[2] - dx0[3]*cos(φ0))/m
+        sL0  = vcat([sin(φ0), -cos(φ0)], zeros(5))
+        dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
+        sL0, dsL0
+    end
+end
+
+function get_pendulum_initial_ksensonly(kwargs...)
+    zeros(7), zeros(7)
+end
+
+
+function pendulum_sensitivity_k(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # the residual function
+        function f!(res, dx, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = dx[1] - x[4] + 2dx[6]*x[1]
+            res[2] = dx[2] - x[5] + 2dx[6]*x[2]
+            res[3] = m*dx[4] - dx[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*dx[5] - dx[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
+            # Sensitivity Equations (wrt k)
+            res[8]  = -x[11] + dx[8] + 2x[1]*dx[13] + 2x[8]*dx[6]
+            res[9]  = -x[12] + dx[9] + 2x[2]*dx[13] + 2x[9]*dx[6]
+            res[10] = abs(x[4])*x[4] + 2k*x[11]*abs(x[4]) - x[1]*dx[10] + m*dx[11] - x[8]*dx[3]
+            res[11] = abs(x[5])*x[5] + 2k*x[12]*abs(x[5]) - x[2]*dx[10] + m*dx[12] - x[9]*dx[3]
+            res[12] = -2x[8]*x[1] - 2x[9]*x[2]
+            res[13] = x[11]*x[1] + x[12]*x[2] + x[8]*x[4] + x[9]*x[5]
+            # Sensitivity of angle of pendulum
+            # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
+            # L^2 (though they should be equal), is it fine to substitute L^2 here?
+            res[14] = x[14] - (x[1]*x[9] - x[8]*x[2])/(L^2)
+
+            # These equations sensitivity are written on the intuitive form. To
+            # obtain form correct for this funciton, do the following replacements:
+            # s[1] -> x[8],  s[2] -> x[9],  s[3] -> x[10]
+            # s[4] -> x[11], s[5] -> x[12], s[6] -> x[13]
+            # and the corresponding replacements for sp and dx
+
+            # res[8]  = -s[4] + sp[1] + 2x[1]*sp[6] + 2s[1]*dx[6]
+            # res[9]  = -s[5] + sp[2] + 2x[2]*sp[6] + 2s[2]*dx[6]
+            # res[10]  = abs(x[4])*x[4] + 2k*s[4]*abs(x[4]) - x[1]*sp[3] + m*sp[4] - s[1]*dx[3]
+            # res[11] = abs(x[5])*x[5] + 2k*s[5]*abs(x[5]) - x[2]*sp[3] + m*sp[5] - s[2]*dx[3]
+            # res[12] = -2s[1]*x[1] - 2s[2]*x[2]
+            # res[13] = s[4]*x[1] + s[5]*x[2] + s[1]*x[4] + s[2]*x[5]
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
+        dx3_0 = m*g/x2_0
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
+
+        x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(7))
+        dx0 = vcat([0., 0., dx3_0, dx4_0], zeros(10))
+
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false])
+
+        r0 = zeros(length(x0))
+        f!(r0, dx0, x0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, dx0, dvars, r0)
+    end
+end
+
+function pendulum_sensitivity_L(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # the residual function
+        function f!(res, dx, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = dx[1] - x[4] + 2dx[6]*x[1]
+            res[2] = dx[2] - x[5] + 2dx[6]*x[2]
+            res[3] = m*dx[4] - dx[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*dx[5] - dx[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
+            # Sensitivity equations for L
+            res[8]  = dx[8] - x[11] + 2x[8]dx[6] + 2dx[13]x[1]
+            res[9]  = dx[9] - x[12] + 2x[9]dx[6] + 2dx[13]x[2]
+            res[10] = 2k*x[11]*abs(x[4]) + m*dx[11] - x[8]dx[3] - dx[10]x[1]
+            res[11] = 2k*x[12]*abs(x[5]) + m*dx[12] - x[9]dx[3] - dx[10]x[2]
+            res[12] = 2x[8]x[1] + 2x[9]x[2] - 2L
+            res[13] = x[8]x[4] + x[11]x[1] + x[9]x[5] + x[12]x[2]
+            # Sensitivity of angle of pendulum to L
+            # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
+            # L^2 (though they should be equal), is it fine to substitute L^2 here?
+            res[14] = x[14] - (x[1]*x[9] - x[8]*x[2])/(L^2)
+
+            # These equations sensitivity are written on the intuitive form. To
+            # obtain form correct for this funciton, do the following replacements:
+            # s[1] -> x[8],  s[2] -> x[9],  s[3] -> x[10]
+            # s[4] -> x[11], s[5] -> x[12], s[6] -> x[13]
+            # t[1] -> x[15],  t[2] -> x[16],  t[3] -> x[17]
+            # t[4] -> x[18], t[5] -> x[19], t[6] -> x[20]
+            # and the corresponding replacements for sp/dx and tp/dx
+
+            # res[8]  = -s[4] + sp[1] + 2x[1]*sp[6] + 2s[1]*dx[6]
+            # res[9]  = -s[5] + sp[2] + 2x[2]*sp[6] + 2s[2]*dx[6]
+            # res[10]  = abs(x[4])*x[4] + 2k*s[4]*abs(x[4]) - x[1]*sp[3] + m*sp[4] - s[1]*dx[3]
+            # res[11] = abs(x[5])*x[5] + 2k*s[5]*abs(x[5]) - x[2]*sp[3] + m*sp[5] - s[2]*dx[3]
+            # res[12] = -2s[1]*x[1] - 2s[2]*x[2]
+            # res[13] = s[4]*x[1] + s[5]*x[2] + s[1]*x[4] + s[2]*x[5]
+            # res[14] = x[14] - (x[1]*s[2] - x[2]*s[1])/(L^2)
+
+            # MATLAB form
+            # res[15]  = tp[1] - t[4] + 2t[1]dx[6] + 2tp[6]x[1]
+            # res[16]  = tp[2] - t[5] + 2t[2]dx[6] + 2tp[6]x[2]
+            # res[17] = 2k*t[4]*abs(x[4]) + m*tp[4] - t[1]dx[3] - tp[3]x[1]
+            # res[18] = 2k*t[5]*abs(x[5]) + m*tp[5] - t[2]dx[3] - tp[3]x[2]
+            # res[19] = 2L -2t[1]x[1] - 2t[2]x[2]
+            # res[20] = t[1]x[4] + t[4]x[1] + t[2]x[5] + t[5]x[2]
+            # res[21] = (x[1]*t[2] - x[2]*t[1])/(L^2)
+
+            # Hand-derived form
+            # res[15]  = -t[4] + tp[1] + 2x[1]*tp[6] + 2t[1]*dx[6]
+            # res[16]  = -t[5] + tp[2] + 2x[2]*tp[6] + 2t[2]*dx[6]
+            # res[17] = 2k*t[4]*abs(x[4]) - x[1]*tp[3] + m*tp[4] - t[1]*dx[3]
+            # res[18] = 2k*t[5]*abs(x[5]) - x[2]*tp[3] + m*tp[5] - t[2]*dx[3]
+            # res[19] = -2t[1]*x[1] - 2t[2]*x[2] + 2*L
+            # res[20] = t[4]*x[1] + t[5]*x[2] + t[1]*x[4] + t[2]*x[5]
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
+        dx3_0 = m*g/x2_0
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
+
+        pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
+        # Sensitivity initialization
+        dsL3_0 = (-m*g*cos(model_data.φ0) - sin(model_data.φ0)*(u0+w0^2))/(L^2) - 2*(m*g*x2_0 - x1_0*(u0+w0^2))/(L^3)
+        dsL4_0 = (dsL3_0*x1_0 + dx3_0*sin(model_data.φ0))/m
+        dsL5_0 = (dsL3_0*x2_0 - dx3_0*cos(model_data.φ0))/m
+        sL0  = vcat([sin(model_data.φ0), -cos(model_data.φ0)], zeros(5))
+        dsL0 = vcat(zeros(2), [dsL3_0, dsL4_0, dsL5_0], zeros(2))
+        # if x1_0 != 0.0
+        #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(2x1_0*x2_0)], zeros(4))
+        # else
+        #     t0  = vcat([0.0, L/x2_0], zeros(5))
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(x2_0^2)], zeros(4))
+        # end
+
+        x0  = vcat(pend0, sL0)
+        dx0 = vcat(dpend0, dsL0)
+        # x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(14))
+        # dx0 = vcat([0., 0., dx3_0, dx4_0], zeros(17))
+
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false])
+
+        r0 = zeros(length(x0))
+        f!(r0, dx0, x0, [], 0.0)
+        # @info "r0 for pendulum L1 sensitivity is $r0"
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, dx0, dvars, r0)
+    end
+end
+
+function pendulum_sensitivity_m(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # the residual function
+        function f!(res, dx, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = dx[1] - x[4] + 2dx[6]*x[1]
+            res[2] = dx[2] - x[5] + 2dx[6]*x[2]
+            res[3] = m*dx[4] - dx[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*dx[5] - dx[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
+            # Sensitivity with respect to m
+            res[8]  = -x[11] + dx[8] + 2x[1]*dx[13] + 2x[8]*dx[6]
+            res[9]  = -x[12] + dx[9] + 2x[2]*dx[13] + 2x[9]*dx[6]
+            res[10] = 2k*x[11]*abs(x[4]) - x[1]*dx[10] + m*dx[11] - x[8]*dx[3] + dx[4]
+            res[11] = 2k*x[12]*abs(x[5]) - x[2]*dx[10] + m*dx[12] - x[9]*dx[3] + g + dx[5]
+            res[12] = -2x[8]*x[1] - 2x[9]*x[2]
+            res[13] = x[11]*x[1] + x[12]*x[2] + x[8]*x[4] + x[9]*x[5]
+            res[14] = x[14] - (x[1]*x[9] - x[2]*x[8])/(L^2)
+
+            # These equations sensitivity are written on the intuitive form. To
+            # obtain form correct for this funciton, do the following replacements:
+            # s[1] -> x[8],  s[2] -> x[9],  s[3] -> x[10]
+            # s[4] -> x[11], s[5] -> x[12], s[6] -> x[13]
+            # t[1] -> x[15],  t[2] -> x[16],  t[3] -> x[17]
+            # t[4] -> x[18], t[5] -> x[19], t[6] -> x[20]
+            # and the corresponding replacements for sp/dx and tp/dx
+
+            # res[8]  = -s[4] + sp[1] + 2x[1]*sp[6] + 2s[1]*dx[6]
+            # res[9]  = -s[5] + sp[2] + 2x[2]*sp[6] + 2s[2]*dx[6]
+            # res[10]  = abs(x[4])*x[4] + 2k*s[4]*abs(x[4]) - x[1]*sp[3] + m*sp[4] - s[1]*dx[3]
+            # res[11] = abs(x[5])*x[5] + 2k*s[5]*abs(x[5]) - x[2]*sp[3] + m*sp[5] - s[2]*dx[3]
+            # res[12] = -2s[1]*x[1] - 2s[2]*x[2]
+            # res[13] = s[4]*x[1] + s[5]*x[2] + s[1]*x[4] + s[2]*x[5]
+            # res[14] = x[14] - (x[1]*s[2] - x[2]*s[1])/(L^2)
+
+            # MATLAB form
+            # res[15]  = tp[1] - t[4] + 2t[1]dx[6] + 2tp[6]x[1]
+            # res[16]  = tp[2] - t[5] + 2t[2]dx[6] + 2tp[6]x[2]
+            # res[17] = 2k*t[4]*abs(x[4]) + m*tp[4] - t[1]dx[3] - tp[3]x[1]
+            # res[18] = 2k*t[5]*abs(x[5]) + m*tp[5] - t[2]dx[3] - tp[3]x[2]
+            # res[19] = 2L -2t[1]x[1] - 2t[2]x[2]
+            # res[20] = t[1]x[4] + t[4]x[1] + t[2]x[5] + t[5]x[2]
+            # res[21] = (x[1]*t[2] - x[2]*t[1])/(L^2)
+
+            # Hand-derived form
+            # res[15]  = -t[4] + tp[1] + 2x[1]*tp[6] + 2t[1]*dx[6]
+            # res[16]  = -t[5] + tp[2] + 2x[2]*tp[6] + 2t[2]*dx[6]
+            # res[17] = 2k*t[4]*abs(x[4]) - x[1]*tp[3] + m*tp[4] - t[1]*dx[3]
+            # res[18] = 2k*t[5]*abs(x[5]) - x[2]*tp[3] + m*tp[5] - t[2]*dx[3]
+            # res[19] = -2t[1]*x[1] - 2t[2]*x[2] + 2*L
+            # res[20] = t[4]*x[1] + t[5]*x[2] + t[1]*x[4] + t[2]*x[5]
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
+        dx3_0 = (m*g*x2_0 - x1_0*(u0 + w0^2))/(L^2)
+        dx4_0 = (dx3_0*x1_0 + u0 + w0^2)/m
+        dx5_0 = (dx3_0*x2_0 - m*g)/m
+
+        pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        dpend0 = vcat([0., 0., dx3_0, dx4_0, dx5_0], zeros(2))
+        # Sensitivity initialization
+        dsm3_0 = g*x2_0/(L^2)
+        dsm4_0 = -(dx3_0*x1_0 + u0 + w0^2)/(m^2) + (dsm3_0*x1_0)/m
+        dsm5_0 = -(dx3_0*x2_0 - m*g)/(m^2) + (dsm3_0*x2_0 - g)/m
+        sm0  = zeros(7)
+        dsm0 = vcat(zeros(2), [dsm3_0, dsm4_0, dsm5_0, 0., 0.])
+        # if x1_0 != 0.0
+        #     t0  = vcat([L/(2x1_0), L/(2x2_0)], zeros(4), [(x1_0^2-x2_0^2)/(2L*x1_0*x2_0)])
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(2x1_0*x2_0)], zeros(4))
+        # else
+        #     t0  = vcat([0.0, L/x2_0], zeros(5))
+        #     tp0 = vcat([0,0], [(-L*dx3_0)/(x2_0^2)], zeros(4))
+        # end
+
+        x0  = vcat(pend0, sm0)
+        dx0 = vcat(dpend0, dsm0)
+        # x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(14))
+        # dx0 = vcat([0., 0., dx3_0, dx4_0], zeros(17))
+
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false])
+
+        r0 = zeros(length(x0))
+        f!(r0, dx0, x0, [], 0.0)
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, dx0, dvars, r0)
+    end
+end
+
+function pendulum_sensitivity_g(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
+    let m = θ[1], L = θ[2], g = θ[3], k = θ[4]
+
+        # the residual function
+        function f!(res, dx, x, θ, t)
+            wt = w(t)
+            ut = u(t)
+            # Dynamic Equations
+            res[1] = dx[1] - x[4] + 2dx[6]*x[1]
+            res[2] = dx[2] - x[5] + 2dx[6]*x[2]
+            res[3] = m*dx[4] - dx[3]*x[1] + k*abs(x[4])*x[4] - ut[1] - wt[1]^2
+            res[4] = m*dx[5] - dx[3]*x[2] + k*abs(x[5])*x[5] + m*g
+            res[5] = x[1]^2 + x[2]^2 - L^2
+            res[6] = x[4]*x[1] + x[5]*x[2]
+            # Angle of pendulum
+            res[7] = x[7] - atan(x[1] / -x[2])
+            # Sensitivity equations for g
+            res[8]  = dx[8] - x[11] + 2x[8]dx[6] + 2dx[13]x[1]
+            res[9]  = dx[9] - x[12] + 2x[9]dx[6] + 2dx[13]x[2]
+            res[10] = 2k*x[11]*abs(x[4]) + m*dx[11] - x[8]dx[3] - dx[10]x[1]
+            res[11] = 2k*x[12]*abs(x[5]) + m*dx[12] - x[9]dx[3] - dx[10]x[2] + m
+            res[12] = 2x[8]x[1] + 2x[9]x[2]
+            res[13] = x[8]x[4] + x[11]x[1] + x[9]x[5] + x[12]x[2]
+            # Sensitivity of angle of pendulum to L
+            # TODO: Analytical formula says it should be x[1]^2+x[2]^2 instead of
+            # L^2 (though they should be equal), is it fine to substitute L^2 here?
+            res[14] = x[14] - (x[1]*x[9] - x[8]*x[2])/(L^2)
+
+            nothing
+        end
+
+        # Finding consistent initial conditions
+        # Initial values, the pendulum starts at rest
+        u0 = u(0.0)[1]
+        w0 = w(0.0)[1]
+        x1_0 = L * sin(model_data.φ0)
+        x2_0 = -L * cos(model_data.φ0)
+        dx3_0 = m*g/x2_0
+        dx4_0 = -g*tan(model_data.φ0) + (u0 + w0^2)/m
+
+        pend0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)])
+        dpend0 = vcat([0., 0., dx3_0, dx4_0], zeros(3))
+        # Sensitivity initialization
+        dsg3_0 = m*x2_0/(L^2)
+        dsg4_0 = dsg3_0*x1_0/m
+        dsg5_0 = dsg3_0*x2_0/m - 1
+        sg0  = zeros(7)
+        dsg0 = vcat(zeros(2), [dsg3_0, dsg4_0, dsg5_0], zeros(2))
+
+        x0  = vcat(pend0, sg0)
+        dx0 = vcat(dpend0, dsg0)
+        # x0 = vcat([x1_0, x2_0], zeros(4), [atan(x1_0 / -x2_0)], zeros(14))
+        # dx0 = vcat([0., 0., dx3_0, dx4_0], zeros(17))
+
+        dvars = vcat(fill(true, 6), [false], fill(true, 6), [false])
+
+        r0 = zeros(length(x0))
+        f!(r0, dx0, x0, [], 0.0)
+        # @info "r0 residual: $r0"
+
+        # t -> 0.0 is just a dummy function, not to be used
+        Model(f!, t -> 0.0, x0, dx0, dvars, r0)
+    end
+end
+
 ################################ MISCELLAENOUS MODELS ################################
 
-function model_mohamed(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)
-    # NOTE: pend_mdl.φ0 not used, just passed to have consistent interface
+function model_mohamed(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)
+    # NOTE: model_data.φ0 not used, just passed to have consistent interface
     function f!(res, dx, x, p, t)
         wt = w(t)[1]
         ut = u(t)[1]
@@ -11461,7 +11860,7 @@ end
 
 function mohamed_sens(u::Function, w::Function, p::Vector{Float64})
     θ = p[1]
-    # NOTE: pend_mdl.φ0 not used, just passed to have consistent interface
+    # NOTE: model_data.φ0 not used, just passed to have consistent interface
     zeta(x, dx, t) = (θ*x[1] + u(t)[1] + w(t)[1])^2 + 1
     dzeta_dx1(x, dx, t) = 2θ*(θ*x[1]+u(t)[1]+w(t)[1])
     dzeta_dθ(x, dx, t)  = 2x[1]*(θ*x[1]+u(t)[1]+w(t)[1])
@@ -11503,7 +11902,7 @@ function mohamed_sens(u::Function, w::Function, p::Vector{Float64})
 end
 
 # Just writing it from scratch since a lot of time has passed and I've learned some stuff
-function mohamed_adjoint_new(u::Function, w::Function, p::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function)
+function mohamed_adjoint_new(u::Function, w::Function, p::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2)
     θ = p[1]
     np = size(xp0, 2)
     nx = size(xp0,1)
@@ -11575,7 +11974,7 @@ function mohamed_adjoint_new(u::Function, w::Function, p::Vector{Float64}, T::Fl
     Model(f!, t -> 0.0, z0, dz0, dvars, r0), get_Gp
 end
 
-function mohamed_λ1(u::Function, w::Function, p::Vector{Float64}, T::Float64, x::Function, x2::Function, y::Function, dy::Function, xp0::Vector{Float64}, dx::Function, dx2::Function)
+function mohamed_λ1(u::Function, w::Function, p::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xp0::Matrix{Float64}, dx, dx2)
     θ = p[1]
     np = size(xp0, 2)
     nx = size(xp0,1)
@@ -11861,8 +12260,8 @@ function mohamed_an_stepbystep(u__::Function, w__::Function, θs::Vector{Float64
 end
 
 # TODO: Make into ODE instead?
-function mohamed_analytical(u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)
-    # NOTE: pend_mdl.φ0 not used, just passed to have consistent interface
+function mohamed_analytical(u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)
+    # NOTE: model_data.φ0 not used, just passed to have consistent interface
     function f!(res, dx, x, p, t)
         wt = w(t)[1]
         ut = u(t)[1]
@@ -11888,7 +12287,7 @@ function mohamed_analytical(u::Function, w::Function, θ::Vector{Float64}, model
     Model(f!, t -> 0.0, x0, dx0, dvars, r0)
 end
 
-function fast_heat_transfer_reactor(V0::Float64, T0::Float64, u::Function, w::Function, θ::Vector{Float64}, model_tuple::NamedTuple)::Model
+function fast_heat_transfer_reactor(V0::Float64, T0::Float64, u::Function, w::Function, θ::Vector{Float64}, model_data::NamedTuple)::Model
     let k0 = θ[1], k1 = θ[2], k2 = θ[3], k3 = θ[4], k4 = θ[5]
 
         # the residual function

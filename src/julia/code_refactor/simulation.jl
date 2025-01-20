@@ -97,27 +97,27 @@ function solve_in_parallel2(solve_func, is, ny, N)
     Y
 end
 
-# Returns matrix, with np rows and M columns
-function solve_adj_in_parallel(solve_func, is)
-  M = length(is)
-  p = Progress(M, 1, "Running $(M) simulations...", 50)
-  Gp1 = solve_func(is[1])
-  Gps = zeros(length(Gp1), M)
-  Gps[:, 1] .+= Gp1
-  next!(p)
-  Threads.@threads for m = 2:M
-      Gp = solve_func(is[m])
-      Gps[:, m] .+= Gp
-      next!(p)
-  end
-  Gps
-end
+# # Returns matrix, with np rows and M columns
+# function solve_adj_in_parallel(solve_func, is)
+#   M = length(is)
+#   p = Progress(M, 1, "Running $(M) simulations...", 50)
+#   Gp1 = solve_func(is[1])
+#   Gps = zeros(length(Gp1), M)
+#   Gps[:, 1] .+= Gp1
+#   next!(p)
+#   Threads.@threads for m = 2:M
+#       Gp = solve_func(is[m])
+#       Gps[:, m] .+= Gp
+#       next!(p)
+#   end
+#   Gps
+# end
 
 # Returns matrix, with np rows and M columns
 # More efficient than original, mostly relevant for small M
-function solve_adj_in_parallel2(solve_func, is, np)
+function solve_adj_in_parallel(solve_func, is, np)
     M = length(is)
-    p = Progress(M, 1, "Running $(M) simulations...", 50)
+    p = ProgressMeter.Progress(M, 1, "Running $(M) simulations...", 50)
     # Gp1 = solve_func(is[1])
     # Gps = zeros(length(Gp1), M)
     Gps = zeros(np, M)
@@ -126,7 +126,7 @@ function solve_adj_in_parallel2(solve_func, is, np)
     Threads.@threads for m = 1:M
         Gp = solve_func(is[m])
         Gps[:, m] .+= Gp
-        next!(p)
+        ProgressMeter.next!(p)
     end
     Gps
 end
@@ -202,50 +202,63 @@ function solve_in_parallel_sens_debug(solve_func, is, yind, sensinds, sampling_r
     matout, Y, sens
 end
 
-# NOTE: This has a very similar structure to solve_in_parallel_sens_debug, but implemented a little differently. Might be worth at some occation
-# to evaluate which function is better written and make sure to write the two in a similar way
-function solve_in_parallel_debug(solve_func, is, yind, sampling_ratio)
+# Replaces other solve_in_parallel_debug-functions, which never seemed to use the output Y anyway, so what's the point?
+function solve_in_parallel_debug_new(solve_func, is, ny, N)
     M = length(is)
-    p = Progress(M, 1, "Running $(M) simulations...", 50)
-    # the rows of out correspond to different times, and the columns to different state components
-    out = transpose(hcat(solve_func(is[1])...))
-    matout = [Matrix{Float64}(undef, size(out)) for m=1:M]
-    Y = zeros(size(out[1:sampling_ratio:end,:], 1), M)
-    matout[1] = out
-    Y[:,1]    = out[1:sampling_ratio:end, yind]
-    next!(p)
-    Threads.@threads for m = 2:M
-        out = transpose(hcat(solve_func(is[m])...))
-        matout[m] = out
-        Y[:,m]  = out[1:sampling_ratio:end, yind]
-        next!(p)
-    end
-    matout, Y
-end
-
-# NOTE: This has a very similar structure to solve_in_parallel_sens_debug, but implemented a little differently. Might be worth at some occation
-# to evaluate which function is better written and make sure to write the two in a similar way
-# More efficient than original, mostly relevant for small M
-function solve_in_parallel_debug2(solve_func, is, yind, sampling_ratio, ny, N)
-    M = length(is)
-    p = Progress(M, 1, "Running $(M) simulations...", 50)
+    p = ProgressMeter.Progress(M, 1, "Running $(M) simulations...", 50)
     # the rows of out correspond to different times, and the columns to different state components
     # out = transpose(hcat(solve_func(is[1])...))
-    # matout = [Matrix{Float64}(undef, size(out)) for m=1:M]
     matout = [Matrix{Float64}(undef, N, ny) for m=1:M]
-    # Y = zeros(size(out[1:sampling_ratio:end,:], 1), M)  
-    Y = zeros(N÷sampling_ratio+1, M)
-    # out has N rows, then we downsample with sampling_ratio. We should get N/sampling_ration rows, but what if that isn't an integer?
-    # Do we round up or down? Assume every 10th sample. Less than 10 samples, we have 1 element, 10-19, 2 elements, 20-29 3 elements
-    # So it should be N/sampling_ratio rounded down + 1. ÷ truncates to an integer, i.e. rounds down, so let's just use that!
-    # matout[1] = out
-    # Y[:,1]    = out[1:sampling_ratio:end, yind]
-    # next!(p)
-    Threads.@threads for m = 1:M
-        out = transpose(hcat(solve_func(is[m])...))
-        matout[m] = out
-        Y[:,m]  = out[1:sampling_ratio:end, yind]
-        next!(p)
+    Threads.@threads for m = 1:M        # TODO: I should be able to iterate m=is, instead of m=1:M, no?
+        matout[m] = transpose(hcat(solve_func(is[m])...))
+        ProgressMeter.next!(p)
     end
-    matout, Y
+    matout
 end
+# # NOTE: This has a very similar structure to solve_in_parallel_sens_debug, but implemented a little differently. Might be worth at some occation
+# # to evaluate which function is better written and make sure to write the two in a similar way
+# function solve_in_parallel_debug(solve_func, is, yind, sampling_ratio)
+#     M = length(is)
+#     p = Progress(M, 1, "Running $(M) simulations...", 50)
+#     # the rows of out correspond to different times, and the columns to different state components
+#     out = transpose(hcat(solve_func(is[1])...))
+#     matout = [Matrix{Float64}(undef, size(out)) for m=1:M]
+#     Y = zeros(size(out[1:sampling_ratio:end,:], 1), M)
+#     matout[1] = out
+#     Y[:,1]    = out[1:sampling_ratio:end, yind]
+#     next!(p)
+#     Threads.@threads for m = 2:M
+#         out = transpose(hcat(solve_func(is[m])...))
+#         matout[m] = out
+#         Y[:,m]  = out[1:sampling_ratio:end, yind]
+#         next!(p)
+#     end
+#     matout, Y
+# end
+
+# # NOTE: This has a very similar structure to solve_in_parallel_sens_debug, but implemented a little differently. Might be worth at some occation
+# # to evaluate which function is better written and make sure to write the two in a similar way
+# # More efficient than original, mostly relevant for small M
+# function solve_in_parallel_debug2(solve_func, is, yind, sampling_ratio, ny, N)
+#     M = length(is)
+#     p = Progress(M, 1, "Running $(M) simulations...", 50)
+#     # the rows of out correspond to different times, and the columns to different state components
+#     # out = transpose(hcat(solve_func(is[1])...))
+#     # matout = [Matrix{Float64}(undef, size(out)) for m=1:M]
+#     matout = [Matrix{Float64}(undef, N, ny) for m=1:M]
+#     # Y = zeros(size(out[1:sampling_ratio:end,:], 1), M)  
+#     Y = zeros(N÷sampling_ratio+1, M)
+#     # out has N rows, then we downsample with sampling_ratio. We should get N/sampling_ration rows, but what if that isn't an integer?
+#     # Do we round up or down? Assume every 10th sample. Less than 10 samples, we have 1 element, 10-19, 2 elements, 20-29 3 elements
+#     # So it should be N/sampling_ratio rounded down + 1. ÷ truncates to an integer, i.e. rounds down, so let's just use that!
+#     # matout[1] = out
+#     # Y[:,1]    = out[1:sampling_ratio:end, yind]
+#     # next!(p)
+#     Threads.@threads for m = 1:M
+#         out = transpose(hcat(solve_func(is[m])...))
+#         matout[m] = out
+#         Y[:,m]  = out[1:sampling_ratio:end, yind]
+#         next!(p)
+#     end
+#     matout, Y
+# end

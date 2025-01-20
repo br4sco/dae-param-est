@@ -3,7 +3,7 @@ module NoiseGeneration
 # To test which of these are necessary, consider replacing "using" with "import", then one has to write e.g. Random.seed!() to call seed!()
 import Random
 using DataFrames: DataFrame
-using LinearAlgebra: Diagonal, diagm, Hermitian, cholesky, I
+using LinearAlgebra: Diagonal, diagm, Hermitian, cholesky, I, LowerTriangular
 using ControlSystems: ss, lsim
 # import Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra, Random
 
