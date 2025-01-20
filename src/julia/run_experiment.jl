@@ -203,12 +203,9 @@ elseif model_id == DELTA
     const free_dyn_pars_true = [L3, LC1, LC2, M1, M2, M3, J1, J2, γ]#Array{Float64}(undef, 0) # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30#24#30
     const num_dyn_vars_adj = 33#27#33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
-    use_adjoint = true
+    use_adjoint = false
     use_new_adj = true
     get_all_θs(pars::Vector{Float64}) = vcat([L0,L1,L2], pars[1:8], [g], pars[9])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
-    # dyn_par_bounds = Array{Float64}(undef, 0, 2)
-    dyn_par_bounds = hcat(fill(0.01, 9, 1), fill(1e4, 9, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
-    # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
     # const_learning_rate = [0.1]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
     const_learning_rate = [0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2, 0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] #[0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # For disturbance model
@@ -219,7 +216,7 @@ elseif model_id == DELTA
     model_adj_to_use = delta_robot_gc_adjoint_9par
     model_adj_to_use_dist_sens = delta_robot_gc_adjoint_allpar_alldist  # Old adjoint approach, i.e. not using foradj
     model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_allpar_alldist
-    sgd_version_to_use = perform_SGD_adam_new_deltaversion  # Needs to update bounds of L3 dynamically based on L0
+    sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
     model_stepbystep = delta_adj_stepbystep_NEW
     
@@ -228,6 +225,25 @@ elseif model_id == DELTA
     FpL2 = (x, dx) -> [0.0; cos(x[2])*cos(x[3])*dx[27]-sin(x[2])*dx[29]-sin(x[2])*dx[26]+cos(x[2])*cos(x[3])*dx[30]+cos(x[2])*sin(x[3])*dx[25]+cos(x[2])*sin(x[3])*dx[28]; cos(x[3])*sin(x[2])*dx[25]+cos(x[3])*sin(x[2])*dx[28]-sin(x[2])*sin(x[3])*dx[27]-sin(x[2])*sin(x[3])*dx[30]; 0.0; dx[25]*((cos(x[5])*sin(x[6]))*0.5-(sqrt(3)*sin(x[5]))*0.5)-dx[26]*(sin(x[5])*0.5+(sqrt(3)*cos(x[5])*sin(x[6]))*0.5)-cos(x[5])*cos(x[6])*dx[27]; (cos(x[6])*sin(x[5])*dx[25])*0.5+sin(x[5])*sin(x[6])*dx[27]-(sqrt(3)*cos(x[6])*sin(x[5])*dx[26])*0.5; 0.0; dx[28]*((cos(x[8])*sin(x[9]))*0.5+(sqrt(3)*sin(x[8]))*0.5)-dx[29]*(sin(x[8])*0.5-(sqrt(3)*cos(x[8])*sin(x[9]))*0.5)-cos(x[8])*cos(x[9])*dx[30]; (cos(x[9])*sin(x[8])*dx[28])*0.5+sin(x[8])*sin(x[9])*dx[30]+(sqrt(3)*cos(x[9])*sin(x[8])*dx[29])*0.5; L1*M3*dx[11]*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))+L1*M3*x[11]^2*(cos(x[2])*sin(x[1])-cos(x[1])*cos(x[3])*sin(x[2]))-L1*M3*cos(x[1])*cos(x[3])*sin(x[2])*x[12]^2-L1*M3*cos(x[1])*sin(x[2])*sin(x[3])*dx[12]-2*L1*M3*cos(x[1])*cos(x[2])*sin(x[3])*x[11]*x[12]; sin(x[2])*dx[20]+sin(x[2])*dx[23]-cos(x[2])*cos(x[3])*dx[21]-cos(x[2])*cos(x[3])*dx[24]+2*L2*M3*dx[11]-cos(x[2])*sin(x[3])*dx[19]-cos(x[2])*sin(x[3])*dx[22]+L1*M3*dx[10]*(sin(x[1])*sin(x[2])+cos(x[1])*cos(x[2])*cos(x[3]))-M3*g*cos(x[2])*cos(x[3])+L1*M3*x[10]^2*(cos(x[1])*sin(x[2])-cos(x[2])*cos(x[3])*sin(x[1]))-2*L2*M3*cos(x[2])*sin(x[2])*x[12]^2; sin(x[2])*sin(x[3])*dx[21]-cos(x[3])*sin(x[2])*dx[22]-cos(x[3])*sin(x[2])*dx[19]+sin(x[2])*sin(x[3])*dx[24]+2*L2*M3*sin(x[2])^2*dx[12]+M3*g*sin(x[2])*sin(x[3])+2*L2*M3*sin(2*x[2])*x[11]*x[12]+L1*M3*sin(x[1])*sin(x[2])*sin(x[3])*x[10]^2-L1*M3*cos(x[1])*sin(x[2])*sin(x[3])*dx[10]; L1*M3*dx[14]*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))+L1*M3*x[14]^2*(cos(x[5])*sin(x[4])-cos(x[4])*cos(x[6])*sin(x[5]))-L1*M3*cos(x[4])*cos(x[6])*sin(x[5])*x[15]^2-L1*M3*cos(x[4])*sin(x[5])*sin(x[6])*dx[15]-2*L1*M3*cos(x[4])*cos(x[5])*sin(x[6])*x[14]*x[15]; dx[20]*(sin(x[5])*0.5+(sqrt(3)*cos(x[5])*sin(x[6]))*0.5)-dx[19]*((cos(x[5])*sin(x[6]))*0.5-(sqrt(3)*sin(x[5]))*0.5)+cos(x[5])*cos(x[6])*dx[21]+2*L2*M3*dx[14]+L1*M3*dx[13]*(sin(x[4])*sin(x[5])+cos(x[4])*cos(x[5])*cos(x[6]))-M3*g*cos(x[5])*cos(x[6])+L1*M3*x[13]^2*(cos(x[4])*sin(x[5])-cos(x[5])*cos(x[6])*sin(x[4]))-2*L2*M3*cos(x[5])*sin(x[5])*x[15]^2; (sqrt(3)*cos(x[6])*sin(x[5])*dx[20])*0.5-sin(x[5])*sin(x[6])*dx[21]-(cos(x[6])*sin(x[5])*dx[19])*0.5+2*L2*M3*sin(x[5])^2*dx[15]+M3*g*sin(x[5])*sin(x[6])+2*L2*M3*sin(2*x[5])*x[14]*x[15]+L1*M3*sin(x[4])*sin(x[5])*sin(x[6])*x[13]^2-L1*M3*cos(x[4])*sin(x[5])*sin(x[6])*dx[13]; L1*M3*dx[17]*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))+L1*M3*x[17]^2*(cos(x[8])*sin(x[7])-cos(x[7])*cos(x[9])*sin(x[8]))-L1*M3*cos(x[7])*cos(x[9])*sin(x[8])*x[18]^2-L1*M3*cos(x[7])*sin(x[8])*sin(x[9])*dx[18]-2*L1*M3*cos(x[7])*cos(x[8])*sin(x[9])*x[17]*x[18]; dx[23]*(sin(x[8])*0.5-(sqrt(3)*cos(x[8])*sin(x[9]))*0.5)-dx[22]*((cos(x[8])*sin(x[9]))*0.5+(sqrt(3)*sin(x[8]))*0.5)+cos(x[8])*cos(x[9])*dx[24]+2*L2*M3*dx[17]+L1*M3*dx[16]*(sin(x[7])*sin(x[8])+cos(x[7])*cos(x[8])*cos(x[9]))-M3*g*cos(x[8])*cos(x[9])+L1*M3*x[16]^2*(cos(x[7])*sin(x[8])-cos(x[8])*cos(x[9])*sin(x[7]))-2*L2*M3*cos(x[8])*sin(x[8])*x[18]^2; 2*L2*M3*sin(x[8])^2*dx[18]-sin(x[8])*sin(x[9])*dx[24]-(sqrt(3)*cos(x[9])*sin(x[8])*dx[23])*0.5-(cos(x[9])*sin(x[8])*dx[22])*0.5+M3*g*sin(x[8])*sin(x[9])+2*L2*M3*sin(2*x[8])*x[17]*x[18]+L1*M3*sin(x[7])*sin(x[8])*sin(x[9])*x[16]^2-L1*M3*cos(x[7])*sin(x[8])*sin(x[9])*dx[16]; (sqrt(3)*cos(x[5]))*0.5+sin(x[2])*sin(x[3])+(sin(x[5])*sin(x[6]))*0.5; cos(x[2])+cos(x[5])*0.5-(sqrt(3)*sin(x[5])*sin(x[6]))*0.5; cos(x[3])*sin(x[2])-cos(x[6])*sin(x[5]); sin(x[2])*sin(x[3])-(sqrt(3)*cos(x[8]))*0.5+(sin(x[8])*sin(x[9]))*0.5; cos(x[2])+cos(x[8])*0.5+(sqrt(3)*sin(x[8])*sin(x[9]))*0.5; cos(x[3])*sin(x[2])-cos(x[9])*sin(x[8]); cos(x[2])*sin(x[3])*x[11]-(sqrt(3)*sin(x[5])*x[14])*0.5+cos(x[3])*sin(x[2])*x[12]+(cos(x[5])*sin(x[6])*x[14])*0.5+(cos(x[6])*sin(x[5])*x[15])*0.5; -sin(x[2])*x[11]-(sin(x[5])*x[14])*0.5-(sqrt(3)*cos(x[5])*sin(x[6])*x[14])*0.5-(sqrt(3)*cos(x[6])*sin(x[5])*x[15])*0.5; cos(x[2])*cos(x[3])*x[11]-cos(x[5])*cos(x[6])*x[14]-sin(x[2])*sin(x[3])*x[12]+sin(x[5])*sin(x[6])*x[15]; (sqrt(3)*sin(x[8])*x[17])*0.5+cos(x[2])*sin(x[3])*x[11]+cos(x[3])*sin(x[2])*x[12]+(cos(x[8])*sin(x[9])*x[17])*0.5+(cos(x[9])*sin(x[8])*x[18])*0.5; (sqrt(3)*cos(x[8])*sin(x[9])*x[17])*0.5-(sin(x[8])*x[17])*0.5-sin(x[2])*x[11]+(sqrt(3)*cos(x[9])*sin(x[8])*x[18])*0.5; cos(x[2])*cos(x[3])*x[11]-cos(x[8])*cos(x[9])*x[17]-sin(x[2])*sin(x[3])*x[12]+sin(x[8])*sin(x[9])*x[18]; -sin(x[2])*sin(x[3]); -cos(x[2]); -cos(x[3])*sin(x[2]) ;;]
     Fpγ  = (x, dx) -> [0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; x[10]; x[11]; x[12]; x[13]; x[14]; x[15]; x[16]; x[17]; x[18]; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0]
     deb_Fp = Fpγ
+
+    # ----- Parameter bounds -----
+    # dyn_par_bounds = Array{Float64}(undef, 0, 2)
+    dyn_par_bounds = hcat(fill(0.01, 9, 1), fill(1e4, 9, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
+    # The bounds that generally have to be satisfied for the delta robot are:
+    #   * L2 >= 1.0
+    #   ** max(0.01, L0-L2) <= L3 <= L0+L2
+    #   ** 0.01 <= LC1 <= L1
+    #   ** 0.01 <= LC2 <= L2
+    # Those marked with ** are dynamically enforced in perform_SGD_adam_new_deltaversion
+
+    # 9par case (all pars except L0-L2)
+    dyn_par_bounds[1,1] = max(0.01, L0-L2); dyn_par_bounds[1,2] = L0+L2 # Ensures max(0.01, L0-L2) <= L3 <= L0+L2
+    dyn_par_bounds[2,2] = L1 # Ensures LC1 <= L1
+    dyn_par_bounds[3,2] = L2 # Ensures LC2 <= L2
+    
+
+    # # allpar case
+    # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
 
     # # If output is all three servo angles
     # f(x::Vector{Float64}) = [x[1],x[4],x[7]]    # All three servo angles
@@ -491,7 +507,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
 
     # E = size(Y, 2)
     # DEBUG
-    E = 1
+    E = 10
     @warn "Using E = $E instead of default"
     opt_pars_baseline = zeros(length(free_dyn_pars_true), E)
     # trace_base[e][t][j] contains the value of parameter j before iteration t
@@ -841,6 +857,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     #     end
     # end
 
+    writedlm(joinpath(data_dir, "tmp/forward_started.csv"), "Yeah started forward sens", ',')
+
     # @warn "Not running proposed identification now"
     for e=1:E
         time_start = now()
@@ -850,9 +868,9 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
                 sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
 
         # @warn "NOT WRITING BACKUPS RIGHT NOW!"
-        writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
-        writedlm(joinpath(data_dir, "tmp/backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
-        writedlm(joinpath(data_dir, "tmp/backup_trace_e$e.csv"), trace_proposed[e], ',')
+        writedlm(joinpath(data_dir, "tmp/for_backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
+        writedlm(joinpath(data_dir, "tmp/for_backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
+        writedlm(joinpath(data_dir, "tmp/for_backup_trace_e$e.csv"), trace_proposed[e], ',')
 
         # proposed_result, proposed_trace = get_fit(Y[:,e], pars0,
         #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws),

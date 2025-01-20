@@ -914,7 +914,7 @@ function delta_robot_gc_9parsens(Φ::Float64, u::Function, w::Function, θ::Vect
             res[29] = (sqrt(3)*L2*cos(z[8])*sin(z[9])*z[17])*0.5-L2*sin(z[2])*z[11]-(L1*sin(z[7])*z[16])*0.5-(L2*sin(z[8])*z[17])*0.5-L1*sin(z[1])*z[10]+(sqrt(3)*L2*cos(z[9])*sin(z[8])*z[18])*0.5
             res[30] = L1*cos(z[1])*z[10]-L1*cos(z[7])*z[16]+L2*cos(z[2])*cos(z[3])*z[11]-L2*cos(z[8])*cos(z[9])*z[17]-L2*sin(z[2])*sin(z[3])*z[12]+L2*sin(z[8])*sin(z[9])*z[18]
 
-            # Sensitivity equations for the 12 parameters
+            # Sensitivity equations for the 9 parameters
             for ind = 1:9
                 res[30*ind+1] = dz[30*ind+1]-z[30*ind+10]-z[30*ind+1]*(L1*cos(z[1])*dz[26]+L1*cos(z[1])*dz[29]+L1*sin(z[1])*dz[27]+L1*sin(z[1])*dz[30])+L1*cos(z[1])*dz[30*ind+27]+L1*cos(z[1])*dz[30*ind+30]-L1*sin(z[1])*dz[30*ind+26]-L1*sin(z[1])*dz[30*ind+29]
                 res[30*ind+2] = dz[30*ind+2]-z[30*ind+11]+z[30*ind+3]*(L2*cos(z[2])*cos(z[3])*dz[25]+L2*cos(z[2])*cos(z[3])*dz[28]-L2*cos(z[2])*sin(z[3])*dz[27]-L2*cos(z[2])*sin(z[3])*dz[30])-z[30*ind+2]*(L2*cos(z[2])*dz[26]+L2*cos(z[2])*dz[29]+L2*cos(z[3])*sin(z[2])*dz[27]+L2*cos(z[3])*sin(z[2])*dz[30]+L2*sin(z[2])*sin(z[3])*dz[25]+L2*sin(z[2])*sin(z[3])*dz[28])-L2*sin(z[2])*dz[30*ind+26]-L2*sin(z[2])*dz[30*ind+29]+L2*cos(z[2])*cos(z[3])*dz[30*ind+27]+L2*cos(z[2])*cos(z[3])*dz[30*ind+30]+L2*cos(z[2])*sin(z[3])*dz[30*ind+25]+L2*cos(z[2])*sin(z[3])*dz[30*ind+28]
@@ -988,7 +988,7 @@ function delta_robot_gc_9parsens(Φ::Float64, u::Function, w::Function, θ::Vect
             res[30ind+17] +=	LC2^2*dz[17]+L1*LC2*dz[16]*(sin(z[7])*sin(z[8])+cos(z[7])*cos(z[8])*cos(z[9]))-LC2*0.0*cos(z[8])*cos(z[9])+L1*LC2*z[16]^2*(cos(z[7])*sin(z[8])-cos(z[8])*cos(z[9])*sin(z[7]))-LC2^2*cos(z[8])*sin(z[8])*z[18]^2
             res[30ind+18] +=	LC2^2*sin(z[8])^2*dz[18]+LC2^2*sin(2*z[8])*z[17]*z[18]+LC2*0.0*sin(z[8])*sin(z[9])+L1*LC2*sin(z[7])*sin(z[8])*sin(z[9])*z[16]^2-L1*LC2*cos(z[7])*sin(z[8])*sin(z[9])*dz[16]
             # Parameter-specific part for M3
-            ind=7
+            ind=6
             res[30ind+10] +=	L1^2*dz[10]-L1*0.0*cos(z[1])+L1*L2*dz[11]*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))+L1*L2*z[11]^2*(cos(z[2])*sin(z[1])-cos(z[1])*cos(z[3])*sin(z[2]))-L1*L2*cos(z[1])*cos(z[3])*sin(z[2])*z[12]^2-L1*L2*cos(z[1])*sin(z[2])*sin(z[3])*dz[12]-2*L1*L2*cos(z[1])*cos(z[2])*sin(z[3])*z[11]*z[12]
             res[30ind+11] +=	L2^2*dz[11]+L1*L2*dz[10]*(sin(z[1])*sin(z[2])+cos(z[1])*cos(z[2])*cos(z[3]))-L2*0.0*cos(z[2])*cos(z[3])+L1*L2*z[10]^2*(cos(z[1])*sin(z[2])-cos(z[2])*cos(z[3])*sin(z[1]))-L2^2*cos(z[2])*sin(z[2])*z[12]^2
             res[30ind+12] +=	L2^2*sin(z[2])^2*dz[12]+L2^2*sin(2*z[2])*z[11]*z[12]+L2*0.0*sin(z[2])*sin(z[3])+L1*L2*sin(z[1])*sin(z[2])*sin(z[3])*z[10]^2-L1*L2*cos(z[1])*sin(z[2])*sin(z[3])*dz[10]
