@@ -8,7 +8,7 @@ using ControlSystems: ss, lsim
 # import Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra, Random
 
 export DisturbanceMetaData, demangle_XW, get_filtered_noise, disturbance_model_1, disturbance_model_2, disturbance_model_3, get_ct_disturbance_model
-export discretize_ct_noise_model_with_sensitivities, simulate_noise_process_mangled
+export discretize_ct_noise_model_with_sensitivities, simulate_noise_process_mangled, discretize_ct_noise_model_with_sensitivities_for_adj
 
 seed = 54321    # Important that random samples generated here are independent of those generated in run_experiment.jl
 Random.seed!(seed)
@@ -37,7 +37,7 @@ end
 
 struct DisturbanceMetaData
     nx::Int
-    n_in::Int
+    n_in::Int   # n_tot = nx*n_in
     n_out::Int
     η::Vector{Float64}
     free_par_inds::Vector{Int}

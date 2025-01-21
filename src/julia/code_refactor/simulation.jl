@@ -1,8 +1,8 @@
 import DifferentialEquations
 import Sundials
 import ProgressMeter
-include("models.jl")
-using .DynamicalModels: Model, Model_ode
+# include("models.jl")
+# using .DynamicalModels: Model, Model_ode
 # include("Model_type.jl")
 
 # function problem(m::Model, N::Int, Ts::Float64)

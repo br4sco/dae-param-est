@@ -1,19 +1,29 @@
 include("noise_generation.jl")
 include("noise_interpolation_multivar.jl")
-include("simulation.jl")
-include("minimizers.jl")
-using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_with_sensitivities, simulate_noise_process, simulate_noise_process_mangled
+# include("minimizers.jl")
+include("models.jl")
+using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_with_sensitivities, simulate_noise_process, simulate_noise_process_mangled, discretize_ct_noise_model_with_sensitivities_for_adj
 using .NoiseInterpolation: InterSampleWindow, initialize_isw, reset_isws!, noise_inter, mk_newer_noise_interp, mk_noise_interp, linear_interpolation_multivar
-using Interpolations: Cubic, BSpline, NoInterp, Line, extrapolate, scale, interpolate
+using .DynamicalModels: AdjointSDEApproxData
+using Interpolations: Cubic, BSpline, NoInterp, Line, extrapolate, scale, interpolate, Extrapolation
 # import .NoiseGeneration, .NoiseInterpolation
 using DelimitedFiles: readdlm, writedlm
 using LsqFit: curve_fit, coef
+using LinearAlgebra: I
 import CSV, Statistics
+# For pendulum.jl file. Okay figure out a way to make this all niucer
+using .DynamicalModels: pendulum, pendulum_forward_m, get_pendulum_initial, get_pendulum_initial_msens, get_pendulum_initial_ksens, get_pendulum_initial_distsens
+using .DynamicalModels: pendulum_adjoint_m, pendulum_adjoint_k_1a_ODEdist, pendulum_adjoint_k_1a, pendulum_forward_k_1a, Model_ode, Model
+include("simulation.jl")
 
 # === DATA TYPES AND CONSTANTS ===
 const PENDULUM = 1
 const MOH_MDL  = 2
 const DELTA    = 3
+
+const FOR_SENS = 1
+const ADJ_SENS = 2
+const ADJ_ODEDIST = 3
 
 struct ExperimentData
     # Y is the measured output of system, contains N+1 rows and E columns
@@ -44,11 +54,11 @@ function get_disturbance_free_pars(nx::Int, n_out::Int, n_tot::Int)::Vector{Bool
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    free_dist_pars = fill(false, nx + n_tot*n_out)                                             # Known disturbance model
+    # free_dist_pars = fill(false, nx + n_tot*n_out)                                             # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_out), fill(true, (n_tot-1)*n_out))     # Whole a-vector and all but first n_out elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY (PENDULUM))
     # free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_tot*n_out))                    # Whole a-vector unknown
-    # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
+    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
 end
 # ===================================================================================================
@@ -86,13 +96,10 @@ const interp_type = Cubic()
 
 # ====================== MAIN FUNCTIONS ======================
 
-# NOTE: It is this call to DifferentialEquations.solve() that causes the performance warning 
-# "Using arrays or dicts to store parameters of different types can hurt performance. │ Consider using tuples instead."
-# It's not obvious to me exactly what causes it or how to solve it, so I'm gonna let it be for now.
 solve_wrapper(mdl_func::Function, u::Function, w::Function, pars::Vector{Float64}, T::Float64, Ts::Float64; kwargs...) = DifferentialEquations.solve(
     begin
         m = mdl_func(u, w, md.get_all_θs(pars), md)
-        DifferentialEquations.DAEProblem(m.f!, m.dx0, m.x0, (0.0, T), [], differential_vars=m.dvars)
+        DifferentialEquations.DAEProblem(m.f!, m.dx0, m.x0, (0.0, T), (), differential_vars=m.dvars)  # TODO: Trying to splat into tuples right now, see if that fixes warning and adress if it does
     end,
     saveat = 0:Ts:T,
     abstol = abstol,
@@ -105,17 +112,23 @@ solve_wrapper(mdl_func::Function, u::Function, w::Function, pars::Vector{Float64
 # Similar to solve_wrapper(), except 1. adjoint models require more input arguments, and 2. the solution is made backwards in time instead of forward, and 3. returns the get_Gp() function too
 solve_adj_wrapper(mdl_adj_func::Function, 
     u::Function, w::Function, pars::Vector{Float64}, T::Float64, Ts::Float64,
-    x_func::Interpolations.Extrapolation,
-    x2_func::Interpolations.Extrapolation,
-    y_func::Interpolations.Extrapolation,
-    dy_func::Interpolations.Extrapolation,
+    x_func::Extrapolation,
+    x2_func::Extrapolation,
+    y_func::Extrapolation,
+    dy_func::Extrapolation,
     xp0::AbstractMatrix{Float64},
-    dx::Interpolations.Extrapolation,
-    dx2::Interpolations.Extrapolation; kwargs...) = 
+    dx::Extrapolation,
+    dx2::Extrapolation; ad::Union{Nothing,AdjointSDEApproxData}=nothing, kwargs...) = 
 begin
-    m, get_Gp = mdl_adj_func(u, w, md.get_all_θs(pars), md, T, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
+    m, get_Gp = begin
+        if isnothing(ad)
+            mdl_adj_func(u, w, md.get_all_θs(pars), md, T, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
+        else
+            mdl_adj_func(u, w, md.get_all_θs(pars), md, T, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, ad)
+        end
+    end
     DifferentialEquations.solve(
-        DifferentialEquations.DAEProblem(m.f!, m.dx0, m.x0, (T, 0.0), [], differential_vars=m.dvars),
+        DifferentialEquations.DAEProblem(m.f!, m.dx0, m.x0, (T, 0.0), (), differential_vars=m.dvars),
         saveat = 0:Ts:T,
         abstol = abstol,
         reltol = reltol,
@@ -289,27 +302,130 @@ function get_der_est2(ts, func, dim)
     return der_est
 end
 
-function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData, isws::Vector{InterSampleWindow}; use_exact_interp::Bool = false, maxiters::Int64 = maxiters_opt, verbose::Bool = true, E_in::Int64=typemax(Int64))
+# TODO: RENAME ALL THE FUNCTIONS INSIDE FOR MORE INTUITIVE NAMES!!!!!
+
+function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData, isws::Vector{InterSampleWindow}; 
+    use_exact_interp::Bool = false, maxiters::Int64 = maxiters_opt, verbose::Bool = true, E_in::Int64=typemax(Int64), method_type::Int64 = FOR_SENS)
     
     # Tsλ is the sampling period of the forward solution that is then used for the backwards computation for the adjoint method, good to have smaller for better interpolation
     let N = size(exp_data.Y, 1)÷md.ny-1, E = min(size(exp_data.Y, 2), E_in), W_meta = exp_data.W_meta, δ = W_meta.δ, Ts = exp_data.Ts, Tsλ = exp_data.Ts/10
-        # ------------------ OKAY THESE FUNCTIONS ARE FOR FORWARD SENS, LET'S SEE IF I NEED ANY OF THEM FOR FORADJ ----------------
-        # Helper function to improve readability. Instead of calling solve_wrapper with lots of arguments and then transforming
-        # the solution to samples of the output, this function can be called instead
-        function solve_with_sens_func(w_func::Function, pars::Vector{Float64})
-            sol = solve_wrapper(md.model_sens, exp_data.u, w_func, pars, N*Ts, Ts)
-            h_comp(sol, md.get_all_θs(pars))
-        end
 
-        # Returns estimate of gradient of cost function
-        # M_mean specifies over how many realizations the gradient estimate is computed
-        function get_gradient_estimate(y::Vector{Float64}, free_pars::Vector{Float64}, isws::Vector{InterSampleWindow}, M_mean::Int=1)
-            # --- Generates disturbance signal for the provided parameters ---
-            # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
-            Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
-            η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
-            dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
-            wmm(m::Int) = if use_exact_interp
+        # Depending on method, the function used for computing cost function gradient estimate differs a lot
+        get_gradient_func = if method_type == FOR_SENS
+
+            # Helper function to improve readability. Instead of calling solve_wrapper with lots of arguments and then transforming
+            # the solution to samples of the output, this function can be called instead
+            function solve_with_sens_func(w_func::Function, pars::Vector{Float64})
+                sol = solve_wrapper(md.model_sens, exp_data.u, w_func, pars, N*Ts, Ts)
+                h_comp(sol, md.get_all_θs(pars))
+            end
+
+            # Returns estimate of gradient of cost function
+            # M_mean specifies over how many realizations the gradient estimate is computed
+            function get_gradient_estimate(y::Vector{Float64}, free_pars::Vector{Float64}, isws::Vector{InterSampleWindow}, M_mean::Int=1)
+                # --- Generates disturbance signal for the provided parameters ---
+                # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
+                Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
+                η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
+                dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
+                wmm(m::Int) = if use_exact_interp
+                        reset_isws!(isws)
+                        XWm = simulate_noise_process(dmdl, Zm)
+                        mk_newer_noise_interp(view(η, 1:W_meta.nx), dmdl.Cd, XWm, m, W_meta.n_in, δ, isws)
+                    else
+                        XWm = simulate_noise_process_mangled(dmdl, Zm)
+                        mk_noise_interp(dmdl.Cd, XWm, m, δ)
+                    end
+
+                # 2M_mean solutions computed because the used realizations of Ym and jacsYm have to be independent
+                # (For computing the Ym, a smaller DAE could be solved instead, but this is not currently implemented)
+                Ym, jacsYm = solve_in_parallel_sens(m->solve_with_sens_func(wmm(m),free_pars), 1:2M_mean)
+
+                # --- Computes cost function gradient ---
+                # Y.-Ym is a matrix with as many columns as Ym, where column i contains Y-Ym[:,i]
+                # Taking the mean of that gives us the average error as a function of time over all realizations contained in Ym.
+                # mean(-jacsYm) is the average (over all m) jacobian of Ym.
+                # Different rows correspond to different t, while different columns correspond to different parameters
+                tmp = (2/N) * (transpose(Statistics.mean(-jacsYm))*Statistics.mean(y.-Ym, dims=2))[:]
+                tmp
+            end
+
+        elseif method_type == ADJ_SENS || (method_type == ADJ_ODEDIST && length(W_meta.free_par_inds)==0)
+            
+            function compute_Gp_adj_dist_sens_new(y_func, dy_func, xvec1::Matrix{Float64}, xvec2::Matrix{Float64}, free_pars::Vector{Float64}, w::Function)
+                x_func  = get_interpolation(xvec1, N*Ts, Tsλ)
+                x2_func = get_interpolation(xvec2, N*Ts, Tsλ)
+    
+                der_est  = get_der_est2(0.0:Tsλ:N*Ts, x_func, size(xvec1,2)) # TODO: Rename this if I never end up using get_der_est() without the 2
+                der_est2 = get_der_est2(0.0:Tsλ:N*Ts, x2_func, size(xvec1,2))
+                # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+                dx =  get_interpolation(der_est,  N*Ts-Tsλ/2, Tsλ)
+                dx2 = get_interpolation(der_est2, N*Ts-Tsλ/2, Tsλ)
+        
+        
+                # ----------------- Actually solving adjoint system ------------------------
+                xp0 = md.get_sens_init(md.get_all_θs(free_pars), exp_data.u(0.0), w(0.0)) # NOTE: In case initial conditions are independent of m (independent of w in this case), we could do this outside
+    
+                # To choose between dist and non-dist cases, the only change is the model md.model_adjdae_fordist it seems! So it should have a better name :))))))
+                adj_sol, get_Gp = solve_adj_wrapper(md.model_adjdae_fordist, exp_data.u, w, md.get_all_θs(free_pars), N*Ts, Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2) # TODO: Add back option to have different Tso????
+                get_Gp(adj_sol)
+            end
+
+            function get_gradient_adjoint_distsens_new(y::Vector{Float64}, free_pars::Vector{Float64}, isws::Vector{InterSampleWindow}, M_mean::Int=1)
+                compute_Gp = compute_Gp_adj_dist_sens_new       # DEBUG: I'm not sure if we'll need several of these, probably yes. I can just define other function first, then it will exist here.
+                # --- Generates disturbance signal for the provided parameters ---
+                # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
+                Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
+                η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
+                dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
+                wm(m::Int) = if use_exact_interp
+                        reset_isws!(isws)
+                        XWm = simulate_noise_process(dmdl, Zm)
+                        mk_newer_noise_interp(view(η, 1:W_meta.nx), dmdl.Cd, XWm, m, W_meta.n_in, δ, isws)
+                    else
+                        XWm = simulate_noise_process_mangled(dmdl, Zm)
+                        mk_noise_interp(dmdl.Cd, XWm, m, δ)
+                    end
+    
+                # --- Runs forward pass and generates output function needed for backward pass ---
+                solve_func(m) = solve_wrapper(md.model_nominal, exp_data.u, wm(m), free_pars, N*Ts, Tsλ) |> sol -> h_all_adj(sol,md.get_all_θs(free_pars))
+                Xcomp_m = solve_in_parallel_debug_new(m -> solve_func(m), 1:2M_mean, md.ny, N)  # TODO: Get rid of unused simulation functions, potentially rename this one to remove _new
+    
+                y_func = get_interpolation(transpose(reshape(y, md.ny, :)), N*Ts, Ts)
+                dy_est  = (y[md.ny+1:end,1]-y[1:end-md.ny,1])/Ts
+                dy_func = get_interpolation(transpose(reshape(dy_est, md.ny, :)), (N-1)*Ts, Ts)
+    
+                Statistics.mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wm(m)), 1:M_mean, length(free_pars)), dims=2)[:]
+            end
+
+        elseif method_type == ADJ_ODEDIST
+
+            function compute_Gp_adj_dist_sens_old(y_func, dy_func, xvec1, xvec2, free_pars, w, ad::AdjointSDEApproxData)#xwmm_m, vmm_m, B̃, B̃ηa, η, ndist, na)
+                x_func  = get_interpolation(xvec1, N*Ts, Tsλ)
+                x2_func = get_interpolation(xvec2, N*Ts, Tsλ)
+    
+                der_est  = get_der_est2(0.0:Tsλ:N*Ts, x_func, size(xvec1,2)) # TODO: Rename this if I never end up using get_der_est() without the 2
+                der_est2 = get_der_est2(0.0:Tsλ:N*Ts, x2_func, size(xvec1,2))
+                # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
+                dx =  get_interpolation(der_est,  N*Ts-Tsλ/2, Tsλ)
+                dx2 = get_interpolation(der_est2, N*Ts-Tsλ/2, Tsλ)
+        
+        
+                # ----------------- Actually solving adjoint system ------------------------
+                xp0 = md.get_sens_init(md.get_all_θs(free_pars), exp_data.u(0.0), w(0.0)) # NOTE: In case initial conditions are independent of m (independent of w in this case), we could do this outside
+    
+                adj_sol, get_Gp = solve_adj_wrapper(md.model_adjoint_odedist, exp_data.u, w, md.get_all_θs(free_pars), N*Ts, Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2; ad=ad) # TODO: Add back option to have different Tso????
+                get_Gp(adj_sol)
+            end
+
+            function get_gradient_adjoint_distsens_old(y::Vector{Float64}, free_pars::Vector{Float64}, isws::Vector{InterSampleWindow}, M_mean::Int=1)
+                compute_Gp = compute_Gp_adj_dist_sens_old       # DEBUG: I'm not sure if we'll need several of these, probably yes. I can just define other function first, then it will exist here.
+                # --- Generates disturbance signal for the provided parameters ---
+                # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
+                Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
+                η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
+                dmdl, B̃, B̃ηa = discretize_ct_noise_model_with_sensitivities_for_adj(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
+                wm(m::Int) = if use_exact_interp
                     reset_isws!(isws)
                     XWm = simulate_noise_process(dmdl, Zm)
                     mk_newer_noise_interp(view(η, 1:W_meta.nx), dmdl.Cd, XWm, m, W_meta.n_in, δ, isws)
@@ -317,122 +433,52 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                     XWm = simulate_noise_process_mangled(dmdl, Zm)
                     mk_noise_interp(dmdl.Cd, XWm, m, δ)
                 end
-
-            # 2M_mean solutions computed because the used realizations of Ym and jacsYm have to be independent
-            # (For computing the Ym, a smaller DAE could be solved instead, but this is not currently implemented)
-            Ym, jacsYm = solve_in_parallel_sens(m->solve_with_sens_func(wmm(m),free_pars), 1:2M_mean)
-
-            # --- Computes cost function gradient ---
-            # Y.-Ym is a matrix with as many columns as Ym, where column i contains Y-Ym[:,i]
-            # Taking the mean of that gives us the average error as a function of time over all realizations contained in Ym.
-            # mean(-jacsYm) is the average (over all m) jacobian of Ym.
-            # Different rows correspond to different t, while different columns correspond to different parameters
-            (2/N) * (transpose(Statistics.mean(-jacsYm))*Statistics.mean(y.-Ym, dims=2))[:]
-        end
-        # --------------------------------------------------------------------------------------------------------------------------
-
-        # TODO: What adjoint versions do we need, for the different adjoint versions?????
-
-        # GOOD NEWS: get_gradient_adjoint_distsens_new HAS SAME FUNCTION SIGNATURE AS CORRESPONDING FORWARD SENS FUNCTION!!!
-        # ----------------------- Let's see what we need for adjoint ---------------------
-        function get_gradient_adjoint_distsens_new(y::Vector{Float64}, free_pars::Vector{Float64}, isws::Vector{InterSampleWindow}, M_mean::Int=1)   #TODO: Type declarations maybe...?
-            compute_Gp = compute_Gp_adj_dist_sens_new       # DEBUG: I'm not sure if we'll need several of these, probably yes. I can just define other function first, then it will exist here.
-            # --- Generates disturbance signal for the provided parameters ---
-            # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
-            Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
-            η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
-            dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
-            wm(m::Int) = if use_exact_interp
+    
+                xwm(m::Int) = if use_exact_interp
                     reset_isws!(isws)
                     XWm = simulate_noise_process(dmdl, Zm)
-                    mk_newer_noise_interp(view(η, 1:W_meta.nx), dmdl.Cd, XWm, m, W_meta.n_in, δ, isws)
+                    mk_newer_noise_interp(view(η, 1:W_meta.nx), Matrix(1.0*I(W_meta.nx*W_meta.n_in)), XWm, m, W_meta.n_in, δ, isws)
                 else
                     XWm = simulate_noise_process_mangled(dmdl, Zm)
-                    mk_noise_interp(dmdl.Cd, XWm, m, δ)
+                    mk_noise_interp(Matrix(1.0*I(W_meta.nx*W_meta.n_in)), XWm, m, δ)
                 end
+    
+                # vm returns a function that's the zero-order-hold version of the white noise signal
+                vm(m::Int) = t -> begin
+                    # n*δ <= t <= (n+1)*δ
+                    n = Int(t÷δ)
+                    Zm[m][n+1, :]  # +1 because t = 0 (and thus n=0) corresponds to index 1
+                end
+    
+                # --- Runs forward pass and generates output function needed for backward pass ---
+                solve_func(m) = solve_wrapper(md.model_nominal, exp_data.u, wm(m), free_pars, N*Ts, Tsλ) |> sol -> h_all_adj(sol,md.get_all_θs(free_pars))
+                Xcomp_m = solve_in_parallel_debug_new(m -> solve_func(m), 1:2M_mean, md.ny, N)  # TODO: Get rid of unused simulation functions, potentially rename this one to remove _new
+    
+                y_func = get_interpolation(transpose(reshape(y, md.ny, :)), N*Ts, Ts)
+                dy_est  = (y[md.ny+1:end,1]-y[1:end-md.ny,1])/Ts
+                dy_func = get_interpolation(transpose(reshape(dy_est, md.ny, :)), (N-1)*Ts, Ts)
+    
+                na = length(findall(W_meta.free_par_inds .<= W_meta.nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
+                ad(m) = AdjointSDEApproxData(xwm(m), vm(m), B̃, B̃ηa, η, na)
+    
+                Statistics.mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wm(m), ad(m)), 1:M_mean, length(free_pars)), dims=2)[:]
+            end
 
-            # --- Runs forward pass and generates output function needed for backward pass ---
-            solve_func(m) = solve_wrapper(md.model_nominal, exp_data.u, wm(m), free_pars, N*Ts, Tsλ) |> sol -> h_all_adj(sol,md.get_all_θs(free_pars))
-            Xcomp_m = solve_in_parallel_debug_new(m -> solve_func(m), 1:2M_mean, md.ny, N)  # TODO: Get rid of unused simulation functions, potentially rename this one to remove _new
-
-            y_func = get_interpolation(transpose(reshape(y, md.ny, :)), N*Ts, Ts)
-            dy_est  = (y[md.ny+1:end,1]-y[1:end-md.ny,1])/Ts
-            dy_func = get_interpolation(transpose(reshape(dy_est, md.ny, :)), (N-1)*Ts, Ts)
-
-            Statistics.mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wm(m)), 1:M_mean, length(free_pars)), dims=2)[:]
+        else
+            throw(DomainError(method_type, "Given method_type does not correspond to any implemented method."))
         end
 
-        # function get_gradient_adjoint_distsens_old(y, free_pars, compute_Gp, M_mean::Int=1)
-        #     compute_Gp = compute_Gp_adj_dist_sens_new       # DEBUG: I'm not sure if we'll need several of these, probably yes. I can just define other function first, then it will exist here.
-        #     # --- Generates disturbance signal for the provided parameters ---
-        #     # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
-        #     Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
-        #     η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
-        #     dmdl, B̃, B̃ηa = discretize_ct_noise_model_with_sensitivities_for_adj(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
-
-        #     Zm = [randn(Nw, n_tot) for _ = 1:2M_mean]
-        #     W_meta = exp_data.W_meta
-        #     nx = W_meta.nx
-        #     n_out = W_meta.n_out
-        #     N = size(exp_data.Y, 1)÷y_len-1
-    
-        #     η = exp_data.get_all_ηs(free_pars)
-    
-        #     vmm(m::Int) = mk_v_ZOH(Zm[m], δ)
-    
-        #     dmdl, B̃, B̃ηa = discretize_ct_noise_model_with_sensitivities_for_adj(get_ct_disturbance_model(η, nx, n_out), δ, dist_par_inds)
-        #     # # NOTE: OPTION 1: Use the rows below here for linear interpolation
-        #     XWm = simulate_noise_process_mangled(dmdl, Zm)
-        #     wmm(m::Int)  = mk_noise_interp(dmdl.Cd, XWm, m, δ)
-        #     xwmm(m::Int) = mk_xw_interp(dmdl.Cd, XWm, m, δ)
-    
-        #     # NOTE: No optoin of using transient here, that might be confusing for future reference! Or should that option even be here, or maybe outside?
-        #     # y_func  = linear_interpolation_multivar(y[:,1], Ts, y_len)        # Old, custom interpolation
-        #     y_func  = extrapolate(scale(interpolate(transpose(reshape(y[:,1], y_len, :)), (BSpline(interp_type), NoInterp())), 0.0:Ts:N*Ts, 1:y_len), Line())   # New, better interpolation
-        #     dy_est  = (y[y_len+1:end,1]-y[1:end-y_len,1])/Ts
-        #     # dy_func = linear_interpolation_multivar(dy_est, Ts, y_len)        # Old, custom interpolation
-        #     dy_func = extrapolate(scale(interpolate(transpose(reshape(dy_est, y_len, :)), (BSpline(interp_type), NoInterp())), 0.0:Ts:(N-1)*Ts, 1:y_len), Line())   # New, better interpolation
-        #     sampling_ratio = Int(Ts/Tsλ)
-        #     solve_func(m) = solve_customstep(u, wmm(m), free_pars, N, Tsλ) |> sol -> h_debug(sol,get_all_θs(free_pars))
-        #     Xcomp_m, _ = solve_in_parallel_debug(m -> solve_func(m), 1:2M_mean, 7, sampling_ratio)    # NOTE: Have to make sure not to solve problem with forward sensitivities, that might not work and also just defeats purpose of adjoint method
-        #     # NOTE: Hard-coded 7 is wrong, the number depends on model, and can be a range, BUT: It doesn't matter, since second output is never used
-        #     # temp = solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m)), 1:M_mean)
-        #     # mean(temp, dims=2)[:]
-        #     na = length(findall(W_meta.free_par_inds .<= nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
-        #     # mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:M_mean), dims=2)[:]
-        #     mean(solve_adj_in_parallel2(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wmm(m), xwmm(m), vmm(m), B̃, B̃ηa, η, length(W_meta.free_par_inds), na), 1:M_mean, length(free_pars)), dims=2)[:]
-        # end
-
-        function compute_Gp_adj_dist_sens_new(y_func, dy_func, xvec1::Matrix{Float64}, xvec2::Matrix{Float64}, free_pars::Vector{Float64}, w::Function)
-            x_func  = get_interpolation(xvec1, N*Ts, Tsλ)
-            x2_func = get_interpolation(xvec2, N*Ts, Tsλ)
-
-            der_est  = get_der_est2(0.0:Tsλ:N*Ts, x_func, size(xvec1,2)) # TODO: Rename this if I never end up using get_der_est() without the 2
-            der_est2 = get_der_est2(0.0:Tsλ:N*Ts, x2_func, size(xvec1,2))
-            # Subtracting Tsλ/2 because sometimes we don't get the right number of elements due to numerical inaccuracies otherwise
-            dx =  get_interpolation(der_est,  N*Ts-Tsλ/2, Tsλ)
-            dx2 = get_interpolation(der_est2, N*Ts-Tsλ/2, Tsλ)
-    
-    
-            # ----------------- Actually solving adjoint system ------------------------
-            xp0 = md.get_sens_init(md.get_all_θs(free_pars), exp_data.u(0.0), w(0.0)) # NOTE: In case initial conditions are independent of m (independent of w in this case), we could do this outside
-
-            # To choose between dist and non-dist cases, the only change is the model md.model_adjdae_fordist it seems! So it should have a better name :))))))
-            adj_sol, get_Gp = solve_adj_wrapper(md.model_adjdae_fordist, exp_data.u, w, md.get_all_θs(free_pars), N*Ts, Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2) # TODO: Add back option to have different Tso????
-            get_Gp(adj_sol)
-        end
-        # --------------------------------------------------------------------------------
-
-
-        opt_pars_proposed = zeros(md.dθ, E)
+        opt_pars_proposed = zeros(md.dθ+length(W_meta.free_par_inds), E)
         trace_proposed = [ [Float64[]] for _=1:E]
         trace_gradient = [ [Float64[]] for _=1:E]
 
         for e=1:E
             opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
                 md.minimizer(
-                    # (free_pars, M_mean) -> get_gradient_estimate(exp_data.Y[:,e], free_pars, isws, M_mean),
-                    (free_pars, M_mean) -> get_gradient_adjoint_distsens_new(exp_data.Y[:,e], free_pars, isws, M_mean),
+                    # (free_pars, M_mean) -> get_gradient_estimate(exp_data.Y[:,e], free_pars, isws, M_mean),       # Forward sens
+                    # (free_pars, M_mean) -> get_gradient_adjoint_distsens_new(exp_data.Y[:,e], free_pars, isws, M_mean), # adjoint, sansdist or new dist
+                    # (free_pars, M_mean) -> get_gradient_adjoint_distsens_old(exp_data.Y[:,e], free_pars, M_mean),           # adjoint old dist
+                    (free_pars, M_mean) -> get_gradient_func(exp_data.Y[:,e], free_pars, isws, M_mean),
                     (t,_)->md.init_learning_rate./sqrt(t),
                     t->M,
                     pars0,

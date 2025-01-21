@@ -88,7 +88,7 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
         isw.ptr = map_to_container(isw.ptr+num_steps, isw)
         isw.start += num_steps
     else # n < isw.start
-        @warn "Tried to add sample outside of inter-sample window (adding $n to window $(isw.start) -- $(isw.start+isw.W-1))"
+        # @warn "Tried to add sample outside of inter-sample window (adding $n to window $(isw.start) -- $(isw.start+isw.W-1))"
         return
     end
     num_stored = isw.num_stored[container_id]
@@ -176,6 +176,7 @@ function initialize_isd(Q::Int64, N::Int64, nx::Int64, use_interpolation::Bool):
     return InterSampleData(isd_states, isd_sample_times, Q, use_interpolation)
 end
 
+# TODO: This one is not generalized to disturbance sensitivity yet! I guess nx should change?
 function noise_inter(t::Float64,
                      Ts::Float64,       # Sampling time of noise process
                      a_vec::AbstractArray{Float64, 1},
@@ -185,12 +186,13 @@ function noise_inter(t::Float64,
                      # num_sampled_per_interval::AbstractArray,
                      # num_times_visited::AbstractArray,
                      ϵ::Float64=10e-8,
-                     rng::Random.TaskLocalRNG=Random.default_rng())
+                     rng::Random.TaskLocalRNG=Random.default_rng())::Vector{Float64}
                      # rng::MersenneTwister=Random.default_rng())   # VERSION
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
     # num_sampled_per_interval[n+1] += 1
-    nx = length(a_vec)
+    nx = length(a_vec) # DEBUG: JUST TRYING
+    # @warn "Indeed got nx=$nx"
     n_out = Int(length(x[1])÷nx)
     Q = isw.Q
     # P = size(z_inter[1])[1]
@@ -215,6 +217,7 @@ function noise_inter(t::Float64,
     #TODO: Q = 0, WE DON'T RLY PRE-ALLOCATE, SO get_neighbors FAILS!!!!!!!!
 
     xu, xl, δu, δl, should_interpolate = get_neighbors(n, t, x, Ts, isw)
+    # @warn "And here xl is $(size(xl))"
 
     # If it's not possible to store any more samples for this interval, and
     # use_interpolation == True, the get_neighbors()-functions tells us to use
@@ -285,6 +288,7 @@ function noise_inter(t::Float64,
         end
     end
     Σr = kron(LinearAlgebra.Diagonal(ones(n_in)), CΣ.L)
+    # @warn "Somehting funky: $(size(AdΔ)), $(size(xl))"
     v_Δ = xu - kron(LinearAlgebra.Diagonal(ones(n_in)), AdΔ)*xl
     μ = zeros(n_out*nx,1)
     for ind = 1:n_out
@@ -307,8 +311,7 @@ function noise_inter(t::Float64,
     end
     # println("base5")
     # num_times_visited[5] += 1
-    return x_new
-
+    return x_new[:]
 end
 
 # Function for using conditional interpolation
