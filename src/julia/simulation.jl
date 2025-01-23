@@ -7,19 +7,19 @@ function problem(m::Model, N::Int, Ts::Float64)
   T = N * Ts
   # ff = DAEFunction(m.f!, jac = m.jac!)
   # ff = DAEFunction{true,true}(m.f!)
-  DAEProblem(m.f!, m.dx0, m.x0, (0, T), [], differential_vars=m.dvars)
+  DAEProblem(m.f!, m.dx0, m.x0, (0, T), (), differential_vars=m.dvars)
 end
 
 function problem_reverse(m::Model, N::Int, Ts::Float64)
     T = N * Ts
     # ff = DAEFunction(m.f!, jac = m.jac!)
     # ff = DAEFunction{true,true}(m.f!)
-    DAEProblem(m.f!, m.dx0, m.x0, (T, 0), [], differential_vars=m.dvars)
+    DAEProblem(m.f!, m.dx0, m.x0, (T, 0), (), differential_vars=m.dvars)
 end
 
 function problem_ode(m::Model_ode, N::Int, Ts::Float64)
     T = N * Ts
-    ODEProblem(m.f, m.x0, (0,T), [])
+    ODEProblem(m.f, m.x0, (0,T), ())
 end
 
 function solve(prob; kwargs...)

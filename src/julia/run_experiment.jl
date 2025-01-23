@@ -200,20 +200,20 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [L3, LC1, LC2, M1, M2, M3, J1, J2, γ]#Array{Float64}(undef, 0) # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ]#Array{Float64}(undef, 0) # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30#24#30
     const num_dyn_vars_adj = 33#27#33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     use_adjoint = false
     use_new_adj = true
-    get_all_θs(pars::Vector{Float64}) = vcat([L0,L1,L2], pars[1:8], [g], pars[9])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    get_all_θs(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
     # const_learning_rate = [0.1]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
     const_learning_rate = [0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2, 0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] #[0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # For disturbance model
-    const_learning_rate = const_learning_rate[4:12]
-    model_sens_to_use = delta_robot_gc_9parsens#_alldist_FAKE#delta_robot_gc_γsens    # Ah, when using _FAKE version, baseline fails because of computation of Jacobian
+    const_learning_rate = const_learning_rate[1:24]
+    model_sens_to_use = delta_robot_gc_allpar_alldist#_alldist_FAKE#delta_robot_gc_γsens    # Ah, when using _FAKE version, baseline fails because of computation of Jacobian
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_adjoint_9par
+    model_adj_to_use = delta_robot_gc_adjoint_6par
     model_adj_to_use_dist_sens = delta_robot_gc_adjoint_allpar_alldist  # Old adjoint approach, i.e. not using foradj
     model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_allpar_alldist
     sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
@@ -228,7 +228,7 @@ elseif model_id == DELTA
 
     # ----- Parameter bounds -----
     # dyn_par_bounds = Array{Float64}(undef, 0, 2)
-    dyn_par_bounds = hcat(fill(0.01, 9, 1), fill(1e4, 9, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
+    dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
     # The bounds that generally have to be satisfied for the delta robot are:
     #   * L2 >= 1.0
     #   ** max(0.01, L0-L2) <= L3 <= L0+L2
@@ -236,10 +236,10 @@ elseif model_id == DELTA
     #   ** 0.01 <= LC2 <= L2
     # Those marked with ** are dynamically enforced in perform_SGD_adam_new_deltaversion
 
-    # 9par case (all pars except L0-L2)
-    dyn_par_bounds[1,1] = max(0.01, L0-L2); dyn_par_bounds[1,2] = L0+L2 # Ensures max(0.01, L0-L2) <= L3 <= L0+L2
-    dyn_par_bounds[2,2] = L1 # Ensures LC1 <= L1
-    dyn_par_bounds[3,2] = L2 # Ensures LC2 <= L2
+    # # 9par case (all pars except L0-L2)
+    # dyn_par_bounds[1,1] = max(0.01, L0-L2); dyn_par_bounds[1,2] = L0+L2 # Ensures max(0.01, L0-L2) <= L3 <= L0+L2
+    # dyn_par_bounds[2,2] = L1 # Ensures LC1 <= L1
+    # dyn_par_bounds[3,2] = L2 # Ensures LC2 <= L2
     
 
     # # allpar case
@@ -295,11 +295,16 @@ elseif model_id == DELTA
     # # Sensitivity wrt to one disturbance parameter
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
 
-    # Sensitivity wrt to all dynamical parameters except for L0-L2
-    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat( 
-        f_sens_base(x, θ, 1)+f_sens_L3(x), f_sens_base(x, θ, 2)+f_sens_other(x), f_sens_base(x, θ, 3)+f_sens_other(x), f_sens_base(x, θ, 4)+f_sens_other(x),
-        f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x), f_sens_base(x, θ, 8)+f_sens_other(x),
-        f_sens_base(x, θ, 9)+f_sens_other(x))
+    # # Sensitivity wrt to all dynamical parameters except for L0-L2
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat( 
+    #     f_sens_base(x, θ, 1)+f_sens_L3(x), f_sens_base(x, θ, 2)+f_sens_other(x), f_sens_base(x, θ, 3)+f_sens_other(x), f_sens_base(x, θ, 4)+f_sens_other(x),
+    #     f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x), f_sens_base(x, θ, 8)+f_sens_other(x),
+    #     f_sens_base(x, θ, 9)+f_sens_other(x))
+
+    # # Sensitivity wrt to all dynamical parameters except for L0-LC2
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat( 
+    #     f_sens_base(x, θ, 1)+f_sens_other(x), f_sens_base(x, θ, 2)+f_sens_other(x), f_sens_base(x, θ, 3)+f_sens_other(x), 
+    #     f_sens_base(x, θ, 4)+f_sens_other(x), f_sens_base(x, θ, 5)+f_sens_other(x),  f_sens_base(x, θ, 6)+f_sens_other(x))
 
     # # Sensitivity wrt to all parameters
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
@@ -313,14 +318,14 @@ elseif model_id == DELTA
     #     f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
     #     f_sens_base(x, θ, 12)+f_sens_other(x))
 
-    # # Sensitivity wrt to all dynamical parameters AND all disturbance parameters
-    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
-    #     f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
-    #     f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
-    #     f_sens_base(x, θ, 12)+f_sens_other(x), f_sens_base(x, θ, 13)+f_sens_other(x), f_sens_base(x, θ, 14)+f_sens_other(x), f_sens_base(x, θ, 15)+f_sens_other(x), 
-    #     f_sens_base(x, θ, 16)+f_sens_other(x), f_sens_base(x, θ, 17)+f_sens_other(x), f_sens_base(x, θ, 18)+f_sens_other(x), f_sens_base(x, θ, 19)+f_sens_other(x),
-    #     f_sens_base(x, θ, 20)+f_sens_other(x), f_sens_base(x, θ, 21)+f_sens_other(x), f_sens_base(x, θ, 22)+f_sens_other(x), f_sens_base(x, θ, 23)+f_sens_other(x),
-    #     f_sens_base(x, θ, 24)+f_sens_other(x))
+    # Sensitivity wrt to all dynamical parameters AND all disturbance parameters
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
+        f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
+        f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
+        f_sens_base(x, θ, 12)+f_sens_other(x), f_sens_base(x, θ, 13)+f_sens_other(x), f_sens_base(x, θ, 14)+f_sens_other(x), f_sens_base(x, θ, 15)+f_sens_other(x), 
+        f_sens_base(x, θ, 16)+f_sens_other(x), f_sens_base(x, θ, 17)+f_sens_other(x), f_sens_base(x, θ, 18)+f_sens_other(x), f_sens_base(x, θ, 19)+f_sens_other(x),
+        f_sens_base(x, θ, 20)+f_sens_other(x), f_sens_base(x, θ, 21)+f_sens_other(x), f_sens_base(x, θ, 22)+f_sens_other(x), f_sens_base(x, θ, 23)+f_sens_other(x),
+        f_sens_base(x, θ, 24)+f_sens_other(x))
 
     # BASELINE: SHOULD NOT INCLUDE DISTURBANCE PARAMETERS, SINCE BASELINE METHOD CANNOT IDENTIFY THEM ANYWAY
     # Sensitivity wrt to all dynamical parameters
@@ -857,7 +862,7 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     #     end
     # end
 
-    writedlm(joinpath(data_dir, "tmp/forward_started.csv"), "Yeah started forward sens", ',')
+    writedlm(joinpath(data_dir, "tmp/adjoint2_started.csv"), "Yeah started adjoint sens", ',')
 
     # @warn "Not running proposed identification now"
     for e=1:E
@@ -868,9 +873,9 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
                 sgd_version_to_use((free_pars, M_mean) -> get_gradient_estimate_p(free_pars, M_mean, e), pars0, par_bounds, verbose=true, tol=1e-8, maxiters=100)
 
         # @warn "NOT WRITING BACKUPS RIGHT NOW!"
-        writedlm(joinpath(data_dir, "tmp/for_backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
-        writedlm(joinpath(data_dir, "tmp/for_backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
-        writedlm(joinpath(data_dir, "tmp/for_backup_trace_e$e.csv"), trace_proposed[e], ',')
+        writedlm(joinpath(data_dir, "tmp/adj2_backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
+        writedlm(joinpath(data_dir, "tmp/adj2_backup_average_e$e.csv"), avg_pars_proposed[:,e], ',')
+        writedlm(joinpath(data_dir, "tmp/adj2_backup_trace_e$e.csv"), trace_proposed[e], ',')
 
         # proposed_result, proposed_trace = get_fit(Y[:,e], pars0,
         #     (dummy_input, pars) -> proposed_model_parametrized(δ, Zm, dummy_input, pars, isws),
@@ -987,9 +992,9 @@ function get_experiment_data(expid::String)::Tuple{ExperimentData, Array{InterSa
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    free_dist_pars = fill(false, size(η_true))                                                  # Known disturbance model
+    # free_dist_pars = fill(false, size(η_true))                                                  # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_out), fill(true, (n_tot-1)*n_out))    # Whole a-vector and all but first n_out elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY (PENDULUM))
-    # free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
+    free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_tot*n_out))                    # Whole a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
