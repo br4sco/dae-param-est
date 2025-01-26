@@ -2,7 +2,7 @@ include("noise_generation.jl")
 include("noise_interpolation_multivar.jl")
 # include("minimizers.jl")
 include("models.jl")
-using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_with_sensitivities, simulate_noise_process, simulate_noise_process_mangled, discretize_ct_noise_model_with_sensitivities_for_adj
+using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_with_sensitivities, simulate_noise_process, simulate_noise_process_mangled, discretize_ct_noise_model_with_adj_SDEApprox_mats
 using .NoiseInterpolation: InterSampleWindow, initialize_isw, reset_isws!, noise_inter, mk_newer_noise_interp, mk_noise_interp, linear_interpolation_multivar
 using .DynamicalModels: AdjointSDEApproxData
 using Interpolations: Cubic, BSpline, NoInterp, Line, extrapolate, scale, interpolate, Extrapolation
@@ -12,8 +12,8 @@ using LsqFit: curve_fit, coef
 using LinearAlgebra: I
 import CSV, Statistics
 # For pendulum.jl file. Okay figure out a way to make this all niucer
-using .DynamicalModels: pendulum, pendulum_forward_m, get_pendulum_initial, get_pendulum_initial_msens, get_pendulum_initial_ksens, get_pendulum_initial_distsens
-using .DynamicalModels: pendulum_adjoint_m, pendulum_adjoint_k_1a_ODEdist, pendulum_adjoint_k_1a, pendulum_forward_k_1a, Model_ode, Model
+using .DynamicalModels: pendulum, pendulum_forward_m, pendulum_forward_k, get_pendulum_initial, get_pendulum_initial_msens, get_pendulum_initial_ksens, get_pendulum_initial_distsens
+using .DynamicalModels: pendulum_adjoint_m, pendulum_adjoint_k_1dist_ODEdist, pendulum_adjoint_k_1dist, pendulum_forward_k_1dist, Model_ode, Model
 include("simulation.jl")
 
 # === DATA TYPES AND CONSTANTS ===
@@ -122,9 +122,9 @@ solve_adj_wrapper(mdl_adj_func::Function,
 begin
     m, get_Gp = begin
         if isnothing(ad)
-            mdl_adj_func(u, w, md.get_all_θs(pars), md, T, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
+            mdl_adj_func(w, md.get_all_θs(pars), T, x_func, x2_func, y_func, dy_func, xp0, dx, dx2)
         else
-            mdl_adj_func(u, w, md.get_all_θs(pars), md, T, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, ad)
+            mdl_adj_func(w, md.get_all_θs(pars), T, x_func, x2_func, y_func, dy_func, xp0, dx, dx2, ad)
         end
     end
     DifferentialEquations.solve(
@@ -366,8 +366,8 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 # ----------------- Actually solving adjoint system ------------------------
                 xp0 = md.get_sens_init(md.get_all_θs(free_pars), exp_data.u(0.0), w(0.0)) # NOTE: In case initial conditions are independent of m (independent of w in this case), we could do this outside
     
-                # To choose between dist and non-dist cases, the only change is the model md.model_adjdae_fordist it seems! So it should have a better name :))))))
-                adj_sol, get_Gp = solve_adj_wrapper(md.model_adjdae_fordist, exp_data.u, w, md.get_all_θs(free_pars), N*Ts, Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2) # TODO: Add back option to have different Tso????
+                # To choose between dist and non-dist cases, the only change is the model md.model_adjoint it seems! So it should have a better name :))))))
+                adj_sol, get_Gp = solve_adj_wrapper(md.model_adjoint, exp_data.u, w, md.get_all_θs(free_pars), N*Ts, Ts, x_func, x2_func, y_func, dy_func, xp0, dx, dx2) # TODO: Add back option to have different Tso????
                 get_Gp(adj_sol)
             end
 
@@ -400,7 +400,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
 
         elseif method_type == ADJ_ODEDIST
 
-            function compute_Gp_adj_dist_sens_old(y_func, dy_func, xvec1, xvec2, free_pars, w, ad::AdjointSDEApproxData)#xwmm_m, vmm_m, B̃, B̃ηa, η, ndist, na)
+            function compute_Gp_adj_dist_sens_old(y_func, dy_func, xvec1, xvec2, free_pars, w, ad::AdjointSDEApproxData)
                 x_func  = get_interpolation(xvec1, N*Ts, Tsλ)
                 x2_func = get_interpolation(xvec2, N*Ts, Tsλ)
     
@@ -424,7 +424,8 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
                 Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
-                dmdl, B̃, B̃ηa = discretize_ct_noise_model_with_sensitivities_for_adj(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
+                dmdl, Ǎη, B̌η, Čη = discretize_ct_noise_model_with_adj_SDEApprox_mats(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
+                # dmdl, B̌, B̌ηa = discretize_ct_noise_model_with_sensitivities_for_adj(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
                 wm(m::Int) = if use_exact_interp
                     reset_isws!(isws)
                     XWm = simulate_noise_process(dmdl, Zm)
@@ -459,7 +460,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 dy_func = get_interpolation(transpose(reshape(dy_est, md.ny, :)), (N-1)*Ts, Ts)
     
                 na = length(findall(W_meta.free_par_inds .<= W_meta.nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
-                ad(m) = AdjointSDEApproxData(xwm(m), vm(m), B̃, B̃ηa, η, na)
+                ad(m) = AdjointSDEApproxData(xwm(m), vm(m), Ǎη, B̌η, Čη, dmdl.Cd, η, na, W_meta.nx*W_meta.n_in, length(W_meta.free_par_inds))   # TODO: Copying these matrices is a waste of space, a reference of some sort would be better
     
                 Statistics.mean(solve_adj_in_parallel(m -> compute_Gp(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wm(m), ad(m)), 1:M_mean, length(free_pars)), dims=2)[:]
             end
