@@ -200,25 +200,26 @@ elseif model_id == MOH_MDL
     f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[3];;]#[x[4]]
     f_sens_deb(x::Vector{Float64}) = x[3:4]
 elseif model_id == DELTA
-    const free_dyn_pars_true = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ]#Array{Float64}(undef, 0) # TODO: Change dyn_par_bounds if changing parameter
+    const free_dyn_pars_true = [γ]#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ]#Array{Float64}(undef, 0) # TODO: Change dyn_par_bounds if changing parameter
     const num_dyn_vars = 30#24#30
     const num_dyn_vars_adj = 33#27#33 # For adjoint method, there might be additional state variables, since outputs need to be baked into the state
     use_adjoint = true
     use_new_adj = true
-    get_all_θs(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
+    get_all_θs(pars::Vector{Float64}) = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, pars[1]]#vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     # dyn_par_bounds = Array{Float64}(undef, 0, 2)
-    dyn_par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
-    dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
+    dyn_par_bounds = hcat(fill(0.01, 1, 1), fill(1e4, 1, 1))#[0.01 1e4]#[2*(L3-L0-L2)/sqrt(3)+0.01 2*(L2+L3-L0)/sqrt(3)-0.01; 0.01 1e4; 0.01 1e4]#[0.01 1e4]
+    # dyn_par_bounds[3,1] = 1.0 # Setting lower bound for L2
     @warn "The learning rate dimension doesn't deal with disturbance parameters in any nice way, other info comes from W_meta, and this part is hard coded" # Oooh, what if we define what function of nx, n_in etc to use here, and in get_experiment_data that function is simply used? Instead of having to define stuff there since only then are nx and n_in defined
     # const_learning_rate = [0.1]#[0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
-    const_learning_rate = [0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]#, 0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] #[0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # For disturbance model
-    model_sens_to_use = delta_robot_gc_allparsens#_alldist_FAKE#delta_robot_gc_γsens    # Ah, when using _FAKE version, baseline fails because of computation of Jacobian
+    const_learning_rate = [0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2, 0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] #[0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # For disturbance model
+    const_learning_rate = const_learning_rate[12]
+    model_sens_to_use = delta_robot_gc_γsens#allparsens#_alldist_FAKE#delta_robot_gc_γsens    # Ah, when using _FAKE version, baseline fails because of computation of Jacobian
     # TODO: Add length assertions here in file instead of in functions? So they crash during include? Or maybe that's worse
     model_to_use = delta_robot_gc
-    model_adj_to_use = delta_robot_gc_adjoint_allpar_new
+    model_adj_to_use = delta_robot_gc_adjoint_γonly_new#allpar_new
     model_adj_to_use_dist_sens = delta_robot_gc_adjoint_allpar_alldist  # Old adjoint approach, i.e. not using foradj
     model_adj_to_use_dist_sens_new = delta_robot_gc_foradj_allpar_alldist
-    sgd_version_to_use = perform_SGD_adam_new_deltaversion  # Needs to update bounds of L3 dynamically based on L0
+    sgd_version_to_use = perform_SGD_adam_new#_deltaversion  # Needs to update bounds of L3 dynamically based on L0
     # Models for debug:
     model_stepbystep = delta_adj_stepbystep_NEW
     
@@ -256,8 +257,8 @@ elseif model_id == DELTA
     # # Sensitivity wrt to L1 (currently for stabilised model). To create a column-matrix, make sure to use ;; at the end, e.g. [...;;]
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_L1(x)
 
-    # # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
-    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
+    # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
 
     # # Sensitivity wrt to [L1, M1, J1]
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_L1(x)+f_sens_base(x,θ,1), f_sens_other(x)+f_sens_base(x,θ,2), f_sens_other(x)+f_sens_base(x,θ,3))
@@ -278,11 +279,11 @@ elseif model_id == DELTA
     # # Sensitivity wrt to one disturbance parameter
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = f_sens_base(x, θ, 1)+f_sens_other(x)
 
-    # Sensitivity wrt to all parameters
-    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
-        f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
-        f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
-        f_sens_base(x, θ, 12)+f_sens_other(x))
+    # # Sensitivity wrt to all parameters
+    # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_L0(x), f_sens_base(x, θ, 2)+f_sens_L1(x), f_sens_base(x, θ, 3)+f_sens_L2(x), 
+    #     f_sens_base(x, θ, 4)+f_sens_L3(x), f_sens_base(x, θ, 5)+f_sens_other(x), f_sens_base(x, θ, 6)+f_sens_other(x), f_sens_base(x, θ, 7)+f_sens_other(x),
+    #     f_sens_base(x, θ, 8)+f_sens_other(x), f_sens_base(x, θ, 9)+f_sens_other(x), f_sens_base(x, θ, 10)+f_sens_other(x), f_sens_base(x, θ, 11)+f_sens_other(x),
+    #     f_sens_base(x, θ, 12)+f_sens_other(x))
 
     # # Sensitivity wrt to all disturbance parameters
     # f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, θ, 1)+f_sens_other(x), f_sens_base(x, θ, 2)+f_sens_other(x), f_sens_base(x, θ, 3)+f_sens_other(x), 
@@ -492,8 +493,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     trace_base = [[pars0] for e=1:E]
     setup_duration = now() - start_datetime
     baseline_durations = Array{Millisecond, 1}(undef, E)
-    # @warn "Not running baseline identification now"
-    for e=1:E
+    @warn "Not running baseline identification now"
+    for e=[]#1:E
         time_start = now()
         use_sgd_instead = false
         if use_sgd_instead
@@ -834,8 +835,8 @@ function get_estimates(expid::String, pars0::Vector{Float64}, N_trans::Int = 0, 
     #     end
     # end
 
-    @warn "Not running proposed identification now"
-    for e=[]#1:E
+    # @warn "Not running proposed identification now"
+    for e=1:E
         time_start = now()
         # jacobian_model(x, p) = get_proposed_jacobian(pars, isws, M)  # NOTE: This won't give a jacobian estimate independent of Ym, but maybe we don't need that since this isn't SGD?
         @warn "Only using maxiters=100 right now"

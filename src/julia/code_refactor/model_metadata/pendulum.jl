@@ -1,7 +1,4 @@
-# include("../models.jl")
 include("../minimizers.jl")
-# using .DynamicalModels: pendulum_new, pendulum_sensitivity_m, get_pendulum_initial, get_pendulum_initial_msensonly, get_pendulum_initial_ksensonly, get_pendulum_initial_distsensonly
-# using .DynamicalModels: my_pendulum_adjoint_monly, my_pendulum_adjoint_konly_with_distsensa1
 using .Minimizers: perform_ADAM
 
 pend_model_data = let
@@ -14,7 +11,7 @@ pend_model_data = let
     num_dyn_vars = 7   # Number of variables in the nominal model
 
     # ------- The following fields are part of the informal interface for model metadata -------
-    get_all_θs(pars::Vector{Float64}) = [m, L, g, pars[1]]  # [m, L, g, k]
+    get_all_pars(pars::Vector{Float64}) = [m, L, g, pars[1]]  # [m, L, g, k]
     free_dyn_pars_true = [k]#Array{Float64}(undef, 0)#[k]# True values of free parameters
     init_learning_rate = [1.0] # The initial learning rate for each component of free_dyn_pars_true
     # Left column contains lower bound for parameters, right column contains upper bound
@@ -36,18 +33,18 @@ pend_model_data = let
     end
 
     f(x::Vector{Float64}, θ::Vector{Float64}) = x[7]        # Output function, returns the output given the state vector x
-    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[14]   x[21]]# x[21] x[28] x[35]]# x[42] x[49]]# x[28]]##[x[14] x[21] x[28] x[35] x[42]]   # Returns sensitivities of the output
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[14]   x[21]]# x[21] x[28] x[35] ;;]# x[42] x[49]]# x[28] ;;]##[x[14] x[21] x[28] x[35] x[42];;]   # Returns sensitivities of the output
     # THERE MUST BE BETTER WAY OF DOING THIS!!!
     # f_all_sens(x::Vector{Float64}, θ::Vector{Float64}) = x[8:end]            # Returns the sensitivity of all states, but only the sensitivities
     f_all_adj(x::Vector{Float64}, θ::Vector{Float64}) = x[1:num_dyn_vars]    # Returns all nominal states, including the model output
     dθ = length(free_dyn_pars_true)
-    ny = length(f(ones(7), get_all_θs(free_dyn_pars_true)))
+    ny = length(f(ones(7), get_all_pars(free_dyn_pars_true)))
     # E.g. the Delta robot needs a slightly different implementation of ADAM that was hard to generalize. 
     # Therefore, we attach the used minimizer to the model through minimizer so that it can vary between models.
     minimizer = perform_ADAM
 
     # TODO: Is f_sens_base really not relevant for pendulum? Shouldn't it become relevant when we do ID of forward sens????? Edit: Im pretty sure it should be relevant, but do check it out
-    (σ = σ, m = m, L = L, g = g, k = k, φ0 = .0, get_all_θs = get_all_θs, free_dyn_pars_true = free_dyn_pars_true, par_bounds = par_bounds,
+    (σ = σ, m = m, L = L, g = g, k = k, φ0 = .0, get_all_pars = get_all_pars, free_dyn_pars_true = free_dyn_pars_true, par_bounds = par_bounds,
         ny = ny, model_nominal = model_nominal, model_sens = model_sens, model_adjoint = model_adjoint, model_adjoint_odedist=model_adjoint_odedist,
         f=f, f_sens=f_sens, f_sens_baseline=f_sens, f_all_adj=f_all_adj, dθ = dθ, minimizer=minimizer, init_learning_rate=init_learning_rate, get_sens_init=get_sens_init)
 end
