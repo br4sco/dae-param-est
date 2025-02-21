@@ -10,6 +10,9 @@ pend_model_data = let
     
     num_dyn_vars = 7   # Number of variables in the nominal model
 
+    # NOTE: If the sensitivity with respect to some disturbance parameters will also be considered,
+    # this needs to be set in the get_disturbance_free_pars()-function in run_experiment.jl
+
     # ------- The following fields are part of the informal interface for model metadata -------
     get_all_pars(pars::Vector{Float64}) = [m, L, g, pars[1]]  # [m, L, g, k]
     free_dyn_pars_true = [k]#Array{Float64}(undef, 0)#[k]# True values of free parameters

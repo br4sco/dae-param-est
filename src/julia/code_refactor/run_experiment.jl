@@ -2,7 +2,7 @@ include("noise_generation.jl")
 include("noise_interpolation_multivar.jl")
 # include("minimizers.jl")
 include("models.jl")
-using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_with_sensitivities, simulate_noise_process, simulate_noise_process_mangled, discretize_ct_noise_model_with_adj_SDEApprox_mats
+using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_disc_then_diff, simulate_noise_process, simulate_noise_process_mangled, discretize_ct_noise_model_with_adj_SDEApprox_mats
 using .NoiseInterpolation: InterSampleWindow, initialize_isw, reset_isws!, noise_inter, mk_newer_noise_interp, mk_noise_interp, linear_interpolation_multivar
 using .DynamicalModels: AdjointSDEApproxData
 using Interpolations: Cubic, BSpline, NoInterp, Line, extrapolate, scale, interpolate, Extrapolation
@@ -13,7 +13,9 @@ using LinearAlgebra: I
 using .DynamicalModels: pendulum, pendulum_forward_m, pendulum_forward_k, get_pendulum_initial, get_pendulum_initial_msens, get_pendulum_initial_ksens, get_pendulum_initial_distsens
 using .DynamicalModels: pendulum_adjoint_m, pendulum_adjoint_k_1dist_ODEdist, pendulum_adjoint_k_1dist, pendulum_forward_k_1dist, Model_ode, Model
 # For delta_robot.jl file
-using .DynamicalModels: get_delta_initial_with_mats, get_delta_initial_γsens, delta_robot, delta_forward_γ, delta_adjoint_γ
+using .DynamicalModels: delta_robot, delta_forward_γ, delta_adjoint_γ, delta_forward_allpar_alldist, delta_adjoint_allpar_alldist, delta_adjoint_allpar_alldist_ODEdist
+using .DynamicalModels: get_delta_initial_with_mats, get_delta_initial_L0sens, get_delta_initial_L1sens, get_delta_initial_L2sens, get_delta_initial_L3sens, get_delta_initial_LC1sens
+using .DynamicalModels: get_delta_initial_LC2sens, get_delta_initial_M1sens, get_delta_initial_M2sens, get_delta_initial_M3sens, get_delta_initial_J1sens, get_delta_initial_J2sens, get_delta_initial_γsens
 
 import CSV, Statistics
 
@@ -57,13 +59,20 @@ const M = Threads.nthreads()÷2
 const W = 100           # Number of intervals for which isw stores data
 const Q = 1000          # Number of conditional samples stored per interval
 
+# The initial learning rate for each component for each component of the disturbance parameters ρ
+# The components corresponding to the free disturbance parameters η are picked out later
+# using a call to get_disturbance_free_pars
+dist_init_learning_rate = [0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+# Similarly for disturbance parameter bounds
+dist_bounds = repeat([-Inf Inf], 12)
+
 function get_disturbance_free_pars(nx::Int, n_out::Int, n_tot::Int)::Vector{Bool}
     # Use this function to specify which parameters should be free and optimized over
     # Each element represent whether the corresponding element in η is a free parameter
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
-    free_dist_pars = fill(false, nx + n_tot*n_out)                                             # Known disturbance model
+    # free_dist_pars = fill(false, nx + n_tot*n_out)                                             # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_out), fill(true, (n_tot-1)*n_out))     # Whole a-vector and all but first n_out elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY (PENDULUM))
-    # free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
+    free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_tot*n_out))                    # Whole a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
@@ -331,7 +340,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
                 Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
-                dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
+                dmdl = discretize_ct_noise_model_disc_then_diff(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
                 wmm(m::Int) = if use_exact_interp
                         reset_isws!(isws)
                         XWm = simulate_noise_process(dmdl, Zm)
@@ -378,7 +387,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
                 Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
-                dmdl = discretize_ct_noise_model_with_sensitivities(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
+                dmdl = discretize_ct_noise_model_disc_then_diff(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
                 wm(m::Int) = if use_exact_interp
                         reset_isws!(isws)
                         XWm = simulate_noise_process(dmdl, Zm)
@@ -423,8 +432,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
                 Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.n_in) for _ = 1:2M_mean]
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
-                dmdl, Ǎη, B̌η, Čη = discretize_ct_noise_model_with_adj_SDEApprox_mats(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
-                # dmdl, B̌, B̌ηa = discretize_ct_noise_model_with_sensitivities_for_adj(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
+                dmdl, Ǎη, B̌η, Čη, Ǎ = discretize_ct_noise_model_with_adj_SDEApprox_mats(get_ct_disturbance_model(η, W_meta.nx, W_meta.n_out), δ, W_meta.free_par_inds)
                 wm(m::Int) = if use_exact_interp
                     reset_isws!(isws)
                     XWm = simulate_noise_process(dmdl, Zm)
@@ -459,7 +467,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 dy_func = get_interpolation(transpose(reshape(dy_est, md.ny, :)), (N-1)*Ts, Ts)
     
                 na = length(findall(W_meta.free_par_inds .<= W_meta.nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
-                ad(m) = AdjointSDEApproxData(xwm(m), vm(m), Ǎη, B̌η, Čη, dmdl.Cd, η, na, W_meta.nx*W_meta.n_in, length(W_meta.free_par_inds))   # TODO: Copying these matrices is a waste of memory, a reference of some sort would be better
+                ad(m) = AdjointSDEApproxData(xwm(m), vm(m), Ǎη, B̌η, Čη, Ǎ, dmdl.Cd, η, na, W_meta.nx*W_meta.n_in, W_meta.n_out, length(W_meta.free_par_inds))   # TODO: Copying these matrices is a waste of memory, a reference of some sort would be better
     
                 Statistics.mean(solve_adj_in_parallel(m -> get_one_grad_rel_adjodedist(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wm(m), ad(m)), 1:M_mean, length(free_pars)), dims=2)[:]
             end
@@ -472,6 +480,12 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
         trace_proposed = [ [Float64[]] for _=1:E]
         trace_gradient = [ [Float64[]] for _=1:E]
 
+        free_dist_inds = findall(get_disturbance_free_pars(W_meta.nx, W_meta.n_out, W_meta.nx*W_meta.n_in))
+        # Concatenates learning rates of parameters of dynamical model and of disturbance model
+        init_learning_rate = vcat(md.init_learning_rate, dist_init_learning_rate[free_dist_inds])
+        # Concatenates bounds of parameters of dynamical model and of disturbance model
+        par_bounds = vcat(md.par_bounds, dist_bounds[free_dist_inds,:])
+
         for e=1:E
             opt_pars_proposed[:,e], trace_proposed[e], trace_gradient[e] =
                 md.minimizer(
@@ -479,10 +493,10 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                     # (free_pars, M_mean) -> get_gradient_adjoint_distsens_new(exp_data.Y[:,e], free_pars, isws, M_mean), # adjoint, sansdist or new dist
                     # (free_pars, M_mean) -> get_gradient_adjoint_distsens_old(exp_data.Y[:,e], free_pars, M_mean),           # adjoint old dist
                     (free_pars, M_mean) -> get_gradient_func(exp_data.Y[:,e], free_pars, isws, M_mean),
-                    (t,_)->md.init_learning_rate./sqrt(t),
+                    (t,_)->init_learning_rate./sqrt(t),
                     t->M,
                     pars0,
-                    md.par_bounds;
+                    par_bounds;
                     maxiters=maxiters,
                     verbose=verbose)
             println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
