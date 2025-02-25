@@ -1,4 +1,4 @@
-using Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra
+using Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra, Random
 
 seed = 54321    # Important that random samples generated here are independent of those generated in run_experiment.jl
 Random.seed!(seed)
@@ -31,7 +31,7 @@ struct DisturbanceMetaData
     n_in::Int
     n_out::Int
     η::Array{Float64,1}
-    free_par_inds::Array{Int64,1}
+    free_par_inds::Array{Int64,1}   # Indices of free variables in vector of all disturbance parameters. Assumed to be sorted in ascending order.
     num_rels::Int
 end
 
@@ -100,6 +100,7 @@ function discretize_ct_noise_model(mdl::CT_SS_Model, Ts::Float64)::DT_SS_Model
     return DT_SS_Model(AdTs, BdTs, mdl.C, mdl.x0, Ts)
 end
 
+# NOTE: Darn it, it is the alt-version that I should've updated....
 function discretize_ct_noise_model_with_sensitivities(
     mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
     # sens_inds: indices of parameter with respect to which we compute the
@@ -108,151 +109,172 @@ function discretize_ct_noise_model_with_sensitivities(
     nx = size(mdl.A,1)
     n_out = size(mdl.C, 1)
     n_in  = size(mdl.C, 2)÷nx
+    n_tot = nx*n_in
     function get_k_j_i(zeta::Int64)::Tuple{Int64, Int64, Int64}
         k = rem( (zeta-1), nx ) + 1
-        j = rem( (zeta - k - nx), nx*n_in)÷nx + 1
-        i = (zeta - j*nx - k)÷(nx*n_in) + 1
+        j = rem( (zeta - k - nx), n_tot)÷nx + 1
+        i = (zeta - j*nx - k)÷(n_tot) + 1
         return k, j, i
+    end
+
+    # NEW
+    function get_row_and_col(ind::Int64)::Tuple{Int64, Int64}
+        row = ind÷(n_tot) + 1
+        col = ind - (row-1)n_tot
+        row, col
     end
 
     # Indices of free parameters corresponding to "a-vector" in disturbance model
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
     nη   = length(sens_inds)
     na = length(sens_inds_a)
-    nx_sens = (1+na)*nx
 
-    Aηa = zeros(na*nx, nx)
-    for i = 1:na
-        Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
+    Aηa = zeros(na*nx*n_in, nx*n_in)
+    for ind1 = 1:n_in
+        for ind2 = 1:na
+            Aηa[(ind1-1)nx + (ind2-1)*nx+1, (ind1-1)nx + sens_inds_a[ind2]] = -1
+        end
     end
+    @warn "Let's print Aηa just to see if it is correct!"
+    println(Aηa)
 
-    M = [mdl.A             zeros(nx, na*nx)                mdl.B*(mdl.B');
-         Aηa         kron(Matrix(1.0I, na, na), mdl.A)   zeros(nx*na, nx);
-         zeros(nx, nx)     zeros(nx, nx*na)                -mdl.A' ]
+    # Aηa = zeros(na*nx, nx)
+    # for i = 1:na
+    #     Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
+    # end
+
+    M = [mdl.A                    zeros(nx, na*nx)                mdl.B*(mdl.B');
+         Aηa                kron(Matrix(1.0I, na, na), mdl.A)   zeros(n_tot*na, nx);
+         zeros(n_tot, n_tot)     zeros(n_tot, n_tot*na)                -mdl.A' ]
     Mexp = exp(M*Ts)
-    Ad   = Mexp[1:nx, 1:nx]
-    Dd   = Hermitian(Mexp[1:nx, (na+1)*nx+1:(na+2)*nx]*(Ad'))
+    # This result corresponds to Corollary 5.1 in my Licentiate thesis, i.e.
+    # Mexp = [Ad      0      Dd*inv(A')
+    #         Adθ   I⊗Ad    H(θ)
+    #          0      0      F_2]
+
+    Ad   = Mexp[1:n_tot 1:n_tot]
+    Dd   = Hermitian(Mexp[1:n_tot, (na+1)*n_tot+1:(na+2)*n_tot]*(Ad'))
     Bd   = cholesky(Dd).L
-    Adηa = Mexp[nx+1:(na+1)*nx, 1:nx]
-    # temp = Mexp[nx+1:(nθ+1)*nx, (nθ+1)*nx+1:(nθ+2)*nx]*(Ad')
-    Ddηa = Mexp[nx+1:(na+1)*nx, (na+1)*nx+1:(na+2)*nx]*(Ad')
+    Adηa = Mexp[n_tot+1:(na+1)*n_tot, 1:n_tot]
+    Ddηa = Mexp[n_tot+1:(na+1)*n_tot, (na+1)*n_tot+1:(na+2)*n_tot]*(Ad')
     for i = 1:na
-        Ddηa[(i-1)*nx+1:i*nx, :] += (Ddηa[(i-1)*nx+1:i*nx, :])'
+        Ddηa[(i-1)*n_tot+1:i*n_tot, :] += (Ddηa[(i-1)*n_tot+1:i*n_tot, :])'
     end
     Φ_arg = ((kron(Matrix(I, na, na), Bd)) \ Ddηa ) / (Bd')
     Bdηa = kron(Matrix(I, na, na), Bd)*Φ( Φ_arg )
 
-    A_mat = [Ad zeros(nx,na*nx); Adηa kron(Matrix(I,na,na), Ad)]
+    A_mat = [Ad zeros(n_tot,na*n_tot); Adηa kron(Matrix(I,na,na), Ad)]
     B_mat = [Bd; Bdηa]
-    C_mat = zeros((nη+1)n_out, nx_sens*n_in)
-    for row_block = 1:nη+1
-        if row_block == 1
-            for col_block = 1:n_in
-                C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
-                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-                # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
-                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
-            end
-        elseif row_block <= na+1
-            ind = row_block-1
-            for col_block = 1:n_in
-                C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
-                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-            end
-        else
-            k, j, i = get_k_j_i(sens_inds[row_block-1])
-            C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
-        end
+    C_mat = zeros((nη+1)n_out, (1+na)*n_tot)
+    # Because C-matrix only depends on C-parameters and the disturbance state xw depends only on a-parameters, we have
+    # C_mat = [C    0
+    #          0   Ina⊗C
+    #          Cηc  0]
+    C_mat[1:n_out, 1:n_tot] = mdl.C
+    C_mat[n_out+1:na*n_out, n_tot+1:end] = kron(Matrix(1.0I, na, na), mdl.C)
+    for ind = 1:nη-na
+        ηind = na + ind
+        k, j, i = get_k_j_i(sens_inds[ηind])
+        row2 = i
+        col2 = (j-1)*nx + k
+        row, col = get_row_and_col(sens_inds[ηind])
+        @warn "Diff in row and col: $(row-row2), $(col-col2)"
+        C_mat[ηind*n_out + row, col] = 1.0
     end
 
-    return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
+    return DT_SS_Model(A_mat, B_mat, C_mat, zeros((1+na)*n_tot), Ts)
 end
 
 # Analytically equivalent to non-alt version, but should be numerically more efficient.
 # Instead of computing huge matrices that are then inverted, it inverts several small matrices,
 # which are blocks in the huge matrix.
-function discretize_ct_noise_model_with_sensitivities_alt(
-    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
+function discretize_ct_noise_model_with_sensitivities_alt(mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
-    nx = size(mdl.A,1)
+    n_in = size(mdl.B, 2)
     n_out = size(mdl.C, 1)
-    n_in  = size(mdl.C, 2)÷nx
-    function get_k_j_i(zeta::Int64)::Tuple{Int64, Int64, Int64}
-        k = rem( (zeta-1), nx ) + 1
-        j = rem( (zeta - k - nx), nx*n_in)÷nx + 1
-        i = (zeta - j*nx - k)÷(nx*n_in) + 1
-        return k, j, i
+    n_tot = size(mdl.A, 1)
+    nx = n_tot÷n_in
+
+    function get_row_and_col(ind::Int64)::Tuple{Int64, Int64}
+        Ĩ = (ind-1)÷n_tot
+        L̃ = ind-1 - Ĩ*n_tot
+        Ĩ+1, L̃+1
     end
 
-    # Indices of free parameters corresponding to "a-vector" in disturbance model
+    # Indices of free parameters corresponding to "a-vector" in vector of all disturbance parameters
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
     nη   = length(sens_inds)
     na = length(sens_inds_a)
-    nx_sens = (1+na)*nx
 
-    Aηa = zeros(na*nx, nx)
-    for i = 1:na
-        Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
-    end
-
-    M = [mdl.A             zeros(nx, na*nx)                mdl.B*(mdl.B');
-         Aηa         kron(Matrix(1.0I, na, na), mdl.A)   zeros(nx*na, nx);
-         zeros(nx, nx)     zeros(nx, nx*na)                -mdl.A' ]
-    Mexp = exp(M*Ts)
-    Ad   = Mexp[1:nx, 1:nx]
-    Dd   = Hermitian(Mexp[1:nx, (na+1)*nx+1:(na+2)*nx]*(Ad'))
-    Bd   = cholesky(Dd).L
-    # Adηa = Mexp[nx+1:(na+1)*nx, 1:nx]
-    # temp = Mexp[nx+1:(nθ+1)*nx, (nθ+1)*nx+1:(nθ+2)*nx]*(Ad')
-
-    # # OLD, creates huge matrices which it then "inverts" (solves equations rather)
-    # Ddηa = Mexp[nx+1:(na+1)*nx, (na+1)*nx+1:(na+2)*nx]*(Ad')
-    # for i = 1:na
-    #     Ddηa[(i-1)*nx+1:i*nx, :] += (Ddηa[(i-1)*nx+1:i*nx, :])'
-    # end
-    # Φ_arg = ((kron(Matrix(I, na, na), Bd)) \ Ddηa ) / (Bd')
-    # Bdηa = kron(Matrix(I, na, na), Bd)*Φ( Φ_arg )
-
-    # NEW, "inverts"/solves equations with many smaller matrices instead of one huge one. Should be more efficient.
-    Bdηa = zeros(na*nx, nx)
-    for i = 1:na
-        # H = Mexp[i*nx+1:(i+1)*nx, nx*(na+1)+1:nx*(2+na)]
-        Ddηai = Mexp[i*nx+1:(i+1)*nx, nx*(na+1)+1:nx*(2+na)]*(Ad')
-        Ddηai += Ddηai'
-        Bdηa[(i-1)*nx+1:i*nx,:] = Bd*Phi((Bd\Ddηai)/(Bd'), nx)
-    end
-
-    # A_mat = [Ad zeros(nx,na*nx); Adηa kron(Matrix(I,na,na), Ad)]
-    A_mat = Mexp[1:nx*(1+na), 1:nx*(1+na)]
-    B_mat = [Bd; Bdηa]
-    C_mat = zeros((nη+1)n_out, nx_sens*n_in)
-    for row_block = 1:nη+1
-        if row_block == 1
-            for col_block = 1:n_in
-                C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    (col_block-1)*(na+1)*nx+1:(col_block-1)*(na+1)*nx+nx] =
-                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-                # C_mat[:, (col_block-1)*(na+1)*nx+1:col_block*(na+1)*nx]
-                # = hcat(mdl.C[:,(col_block-1)*nx+1:col_block*nx], zeros(n_out, na*nx))
-            end
-        elseif row_block <= na+1
-            ind = row_block-1
-            for col_block = 1:n_in
-                C_mat[(row_block-1)*n_out+1:row_block*n_out,
-                    ind*nx+(col_block-1)*(na+1)*nx+1:ind*nx+(col_block-1)*(na+1)*nx+nx] =
-                    mdl.C[:,(col_block-1)*nx+1:col_block*nx]
-            end
-        else
-            k, j, i = get_k_j_i(sens_inds[row_block-1])
-            C_mat[(row_block-1)*n_out+i, (j-1)*(na+1)*nx+k] = 1
+    Aηa = zeros(na*n_tot, n_tot)
+    for ind1 = 1:na
+        for ind2 = 1:n_in
+            Aηa[(ind1-1)n_tot + (ind2-1)nx + 1, (ind2-1)nx + sens_inds_a[ind1]] = -1
         end
     end
 
-    return DT_SS_Model(A_mat, B_mat, C_mat, zeros(nx_sens*n_in), Ts)
+    M = [mdl.A                    zeros(n_tot, na*n_tot)                mdl.B*(mdl.B');
+         Aηa                kron(Matrix(1.0I, na, na), mdl.A)   zeros(n_tot*na, n_tot);
+         zeros(n_tot, n_tot)     zeros(n_tot, n_tot*na)                -mdl.A' ]
+    Mexp = exp(M*Ts)
+    # This result corresponds to Corollary 5.1 in my Licentiate thesis, i.e.
+    # Mexp = [Ad      0      Dd*inv(A')
+    #         Adθ   I⊗Ad    H(θ)
+    #          0      0      F_2]
+
+
+    Ad   = Mexp[1:n_tot, 1:n_tot]
+    Dd   = Hermitian(Mexp[1:n_tot, (na+1)*n_tot+1:(na+2)*n_tot]*(Ad'))
+    Bd = try
+        cholesky(Dd).L
+    catch PosDefException
+        # Due to numerical inaccuracies, Dd can occasionally become indefinite, 
+        # at which point we modify the diagonal elements as little as possible
+        # but enough to make it positive definite
+        eigs = eigen(Dd).values
+        @warn "Had to modify Dd with $(-eigs[1])"
+        # eigs[1] is the lowest (in this case negative) eigenvale. By subtracting it, 
+        # in theory the matrix should become positive SEMIDEFINITE, but because of numerical
+        # inaccuracies it has so far become positive definite when I have tested. If it ever
+        # throws another PosDefException, it might be worth subtracting twice as much
+        try
+            cholesky(Dd - eigs[1]*I).L
+        catch PosDefException
+            @warn "Actually had to reduce by even 1e-20"
+            cholesky(Dd + (1e-20)*I).L
+        end
+    end
+
+    # NEW, "inverts"/solves equations with many smaller matrices instead of one huge one. Should be more efficient.
+    Bdηa = zeros(na*n_tot, n_tot)
+    for i = 1:na
+        # H = Mexp[i*nx+1:(i+1)*nx, nx*(na+1)+1:nx*(2+na)]
+        Ddηai = Mexp[i*n_tot+1:(i+1)*n_tot, n_tot*(na+1)+1:n_tot*(2+na)]*(Ad')
+        Ddηai += Ddηai'
+        Bdηa[(i-1)*n_tot+1:i*n_tot,:] = Bd*Phi((Bd\Ddηai)/(Bd'), n_tot)
+    end
+
+    A_mat = Mexp[1:(na+1)n_tot, 1:(na+1)n_tot] #[Ad zeros(n_tot,na*n_tot); Adηa kron(Matrix(I,na,na), Ad)]
+    B_mat = [Bd; Bdηa]
+    C_mat = zeros((nη+1)n_out, (1+na)*n_tot)
+    # Because C-matrix only depends on C-parameters and the disturbance state xw depends only on a-parameters, we have
+    # C_mat = [C    0
+    #          0   Ina⊗C
+    #          Cηc  0]
+    C_mat[1:n_out, 1:n_tot] = mdl.C
+    C_mat[n_out+1:(1+na)*n_out, n_tot+1:end] = kron(Matrix(1.0I, na, na), mdl.C)
+    for ind = 1:nη-na
+        ηind = na + ind
+        # We want to pass the index of the currently considered c-parameter in the C-matrix.
+        # sens_inds contains the index of that parameter in η, which contains the additional na
+        # parameters corresponding to the A-matrix
+        row, col = get_row_and_col(sens_inds[ηind]-na)  # row and col of the currently considered parameter in mdl.C
+        C_mat[(na+ind)n_out + row, col] = 1.0
+    end
+
+    return DT_SS_Model(A_mat, B_mat, C_mat, zeros((1+na)n_tot), Ts)
 end
 
 # New version, after realizing that in fact the SDE should be differentiated before it is discretized.
@@ -422,19 +444,29 @@ function get_c_parameter_vector(c_vals, w_scale, nx::Int, n_out::Int, n_in::Int)
     return c_vec
 end
 
-function get_ct_disturbance_model(η::Array{Float64,1}, nx::Int, n_out::Int)
+function get_multisine(num::Int; min_amp::Float64=1.0, max_amp::Float64=10.0, min_freq::Float64=1.0, max_freq::Float64=50.0)
+    amps = rand(min_amp:0.01:max_amp, num)
+    freqs = rand(min_freq:0.1:max_freq, num)
+    phases = [-k*(k-1)*pi/num for k=1:num]  # Schröder phases
+    t -> sum(
+            amps.*(sin.(freqs*t+phases))
+        )
+end
+
+function get_ct_disturbance_model(η::Vector{Float64}, nx::Int, n_out::Int, n_in::Int)
     # First nx parameters of η are parameters for A-matrix, the remaining
     # parameters are for the C-matrix
-    A = diagm(-1 => ones(nx-1,))
-    A[1,:] = -η[1:nx]
-    B = zeros(nx,1)
+    n_tot = nx*n_in
+    A = diagm(-1 => ones(n_tot-1,))
+    A[1,:] = -η[1:n_tot]
+    B = zeros(n_tot,1)
     B[1] = 1.0
-    C = reshape(η[nx+1:end], n_out, :)
-    x0 = zeros(nx)
+    C = reshape(η[nx+1:end], n_out, n_tot)
+    x0 = zeros(n_tot)
     return CT_SS_Model(A, B, C, x0)
     #= With the dimensions we most commonly use, the model becomes
     A = [-a1 -a2
-          1   0 ]
+            1   0 ]
     B = [1; 0]
     C = [c1 c2]
     =#
@@ -475,10 +507,7 @@ function simulate_noise_process(
     return x_process
 end
 
-function simulate_noise_process_mangled(
-    mdl::DT_SS_Model,
-    data::Array{Array{Float64,2}, 1},
-)
+function simulate_noise_process_mangled(mdl::DT_SS_Model, data::Array{Array{Float64,2}, 1},)
     # data[m][i, k*nx + j] should be the j:th component of the noise
     # corresponding to input k at time i of realization m
     M = length(data)
@@ -605,6 +634,27 @@ function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     c_vec = [scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale]
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
+    mdl =
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
+    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    return mdl, [nx, n_in, n_out], η0
+end
+
+# Used for new multivariate input for delta-robot
+function disturbance_model_5(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
+    ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
+    ζ = 0.1       # damping coefficient (tunes damping)
+    p3 = -2       # The additional pole that is added
+    nx = 3        # model order
+    n_out = 3     # number of outputs
+    n_in = 3      # number of inputs
+    # Denominator of every transfer function is given by p(s), where
+    # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
+    # Old a_vec, i.e. for the 2d-model: a_vec = [2*ω*ζ, ω^2]
+    a_vec = [2*ω*ζ-p3, ω^2-p3*2*ω*ζ, -p3*ω^2]
+    c_vec = zeros(3*9)
+    c_vec[1] = scale; c_vec[9+4] = scale; c_vec[18+7] = scale
+    η0 = vcat(a_vec, c_vec)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
     # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
