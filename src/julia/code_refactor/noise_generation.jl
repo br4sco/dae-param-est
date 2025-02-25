@@ -17,10 +17,10 @@ struct CT_SS_Model
     # dx/dt = A*x + B*u
     # y = C*x
     # where x is the state, u is the input and y is the output
-    A::Array{Float64, 2}
-    B::Array{Float64, 2}
-    C::Array{Float64, 2}
-    x0::Array{Float64, 1}
+    A::Matrix{Float64}
+    B::Matrix{Float64}
+    C::Matrix{Float64}
+    x0::Vector{Float64}
 end
 
 struct DT_SS_Model
@@ -28,10 +28,10 @@ struct DT_SS_Model
     # x[k+1] = Ad*x[k] + Bd*u[k]
     # y[k] = Cd*x[k]
     # where x is the state, u is the input and y is the output
-    Ad::Array{Float64, 2}
-    Bd::Array{Float64, 2}
-    Cd::Array{Float64, 2}
-    x0::Array{Float64, 1}
+    Ad::Matrix{Float64}
+    Bd::Matrix{Float64}
+    Cd::Matrix{Float64}
+    x0::Vector{Float64}
     Ts::Float64                     # Sampling period of the system
 end
 
@@ -41,7 +41,7 @@ struct DisturbanceMetaData
     n_out::Int  # TODO: Consider renaming n_in -> nv and n_out = nw, to match better my thesis and other work?
     η::Vector{Float64}
     free_par_inds::Vector{Int}
-    # Array containing lower and upper bound of a disturbance parameter in each row
+    # Vector containing lower and upper bound of a disturbance parameter in each row
     free_par_bounds::Matrix{Float64}
     # get_all_ηs encodes what information of the disturbance model is known
     # This function should always return all parameters of the disturbance model,
@@ -56,12 +56,12 @@ end
 
 demangle_XW(XW::AbstractMatrix{Float64}, n_tot::Int) = [XW[(i-1)*n_tot+1:i*n_tot, m] for i=1:(size(XW,1)÷n_tot), m=1:size(XW,2)]
 
-function Φ(mat_in::Array{Float64,2})
+function Φ(mat_in::Matrix{Float64})
     nx = minimum(size(mat_in))
     Φ(mat_in, nx)
 end
 
-function Φ(mat_in::Array{Float64,2}, nx::Int)
+function Φ(mat_in::Matrix{Float64}, nx::Int)
     mat = copy(mat_in)
     for i=1:size(mat,1)
         for j=1:size(mat,2)
@@ -80,7 +80,7 @@ function Φ(mat_in::Array{Float64,2}, nx::Int)
 end
 
 # TODO: Don't need all these matrix functions Phi, Φ... Figure out which ones you need and maybe rename!
-function Phi(mat_in::Array{Float64,2}, n_tot::Int)::LowerTriangular
+function Phi(mat_in::Matrix{Float64}, n_tot::Int)::LowerTriangular
     mat = LowerTriangular(mat_in)
     for i=1:n_tot
         mat[i,i] *= 0.5
@@ -221,7 +221,7 @@ end
 
 # Differentiates ct model before discretization, corresponds to Proposition 5.1 in my Licentiate thesis. 
 # Assumes that B is not parametrized, but this does not really simplify the function, just makes some elements zero.
-function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::DT_SS_Model
+function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::DT_SS_Model
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
@@ -293,7 +293,7 @@ end
 # approximated by an ODE. Corresponds to Proposition 5.6 in my Licentiate thesis.
 # Assumes that B-matrix is not parametrized, i.e. the version of Proposition 5.6 that uses Corollary 5.1
 function discretize_ct_noise_model_with_adj_SDEApprox_mats(
-    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
@@ -377,7 +377,7 @@ end
 
 # TODO: Might use nx instead of n_tot in some places! Also, this function in particular might not be finished
 function discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(
-    mdl::CT_SS_Model, Ts::Float64, sens_inds::Array{Int64, 1})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
@@ -485,7 +485,7 @@ end
 
 # ============== Functions for generating specific realization ===============
 
-function get_ct_disturbance_model(η::Array{Float64,1}, nx::Int, n_in::Int)
+function get_ct_disturbance_model(η::Vector{Float64}, nx::Int, n_in::Int)
     # First nx parameters of η are parameters for A-matrix, the remaining
     # parameters are for the C-matrix
     n_tot = nx*n_in
@@ -521,7 +521,6 @@ function get_c_parameter_vector(c_vals, w_scale, nx::Int, n_out::Int, n_in::Int)
 end
 
 # Used for disturbance
-# function disturbance_model_1(Ts::Float64; bias::Float64=0.0, scale::Float64=0.6)::Tuple{DT_SS_Model, DataFrame}
 function disturbance_model_1(Ts::Float64; scale::Float64=0.6)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     nx = 2        # model order
     n_out = 2     # number of outputs
@@ -544,7 +543,6 @@ function disturbance_model_1(Ts::Float64; scale::Float64=0.6)::Tuple{DT_SS_Model
 end
 
 # Used for input
-# function disturbance_model_2(Ts::Float64; bias::Float64=0.0, scale::Float64=0.2)::Tuple{DT_SS_Model, DataFrame}
 function disturbance_model_2(Ts::Float64; scale::Float64=0.2)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     nx = 2        # model order
     n_out = 1     # number of outputs
@@ -566,7 +564,6 @@ function disturbance_model_2(Ts::Float64; scale::Float64=0.2)::Tuple{DT_SS_Model
 end
 
 # Used for scalar disturbance and input
-# function disturbance_model_3(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)::Tuple{DT_SS_Model, DataFrame}
 function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
@@ -586,7 +583,6 @@ function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
 end
 
 # Used for multivariate input for delta-robot
-# function disturbance_model_4(Ts::Float64; bias::Float64=0.0, scale::Float64=1.0)::Tuple{DT_SS_Model, DataFrame}
 function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
@@ -608,9 +604,38 @@ function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     return mdl, [nx, n_in, n_out], η0
 end
 
+# Used for new multivariate input for delta-robot
+function disturbance_model_5(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
+    ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
+    ζ = 0.1       # damping coefficient (tunes damping)
+    p3 = -2       # The additional pole that is added
+    nx = 3        # model order
+    n_out = 3     # number of outputs
+    n_in = 3      # number of inputs
+    # Denominator of every transfer function is given by p(s), where
+    # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
+    # Old a_vec, i.e. for the 2d-model: a_vec = [2*ω*ζ, ω^2]
+    a_vec = [2*ω*ζ-p3, ω^2-p3*2*ω*ζ, -p3*ω^2]
+    c_vec = zeros(3*9)
+    c_vec[1] = scale; c_vec[9+4] = scale; c_vec[18+7] = scale
+    η0 = vcat(a_vec, c_vec)
+    mdl =
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
+    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
+    return mdl, [nx, n_in, n_out], η0
+end
+
+function get_multisine(num::Int; min_amp::Float64=1.0, max_amp::Float64=10.0, min_freq::Float64=1.0, max_freq::Float64=50.0)
+    amps = rand(min_amp:0.01:max_amp, num)
+    freqs = rand(min_freq:0.1:max_freq, num)
+    phases = [-k*(k-1)*pi/num for k=1:num]  # Schröder phases
+    t -> sum(
+            amps.*(sin.(freqs*t+phases))
+        )
+end
 
 function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
-    bias::Float64=0.0, scale::Float64=1.0)::Tuple{Array{Float64,2}, Array{Float64,2}, DataFrame}
+    bias::Float64=0.0, scale::Float64=1.0)::Tuple{Matrix{Float64}, Matrix{Float64}, DataFrame}
 
     mdl, meta_raw, η0 = gen(Ts, scale=scale)
     metadata = DataFrame(nx = meta_raw[1], n_in = meta_raw[2], n_out = meta_raw[3], η = η0, bias=bias, num_rel = M, Nw=Nw, δ = Ts)
@@ -623,8 +648,8 @@ function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
 end
 
 # Converts mangled states to an output vector using the provided model
-function get_system_output_mangled(mdl::DT_SS_Model, states::Array{Float64, 2}
-    )::Array{Float64, 2}
+function get_system_output_mangled(mdl::DT_SS_Model, states::Matrix{Float64}
+    )::Matrix{Float64}
     M = size(states, 2)
     (n_out, n_tot) = size(mdl.Cd)
     N = size(states, 1)÷n_tot
@@ -643,7 +668,7 @@ end
 # statistical properties
 function test_generated_data(
     mdl::DT_SS_Model,
-    x_process::Array{Array{Float64, 2}}
+    x_process::Vector{Matrix{Float64}}
 )
     (N, M) = size(x_process)
     nx = size(x_process[1,1])[1]
