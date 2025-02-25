@@ -18,7 +18,7 @@ pend_model_data = let
     free_dyn_pars_true = [k]#Array{Float64}(undef, 0)#[k]# True values of free parameters
     init_learning_rate = [1.0] # The initial learning rate for each component of free_dyn_pars_true
     # Left column contains lower bound for parameters, right column contains upper bound
-    par_bounds = [0.1 1e4; 0.01 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     model_nominal = pendulum
     model_sens = pendulum_forward_k_1dist                                 # For forward sensitivity
     model_adjoint = pendulum_adjoint_k_1dist                              # For adjoint sensitivity

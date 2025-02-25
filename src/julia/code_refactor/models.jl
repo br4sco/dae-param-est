@@ -474,11 +474,6 @@ function pendulum_adjoint_k_1dist_ODEdist(w::Function, pars::Vector{Float64}, T:
             # 0 = zw' + (z')*Fw(t)                                  # Matrix form
             res[nx+nxw+1:nx+ndist] = z[nx+nxw+1:nx+ndist]' + (z[1:nx]')*Fw(t)
 
-            # Old, hard-coded  versions: TODO: run longer experiment to see if there's any noticeable difference in performance
-            # res[8]  = dz[8] + z[9] - ad.ρ[1]*z[8] + ad.ρ[3]*z[10]
-            # res[9]  = dz[9] - ad.ρ[2]*z[8] + ad.ρ[4]*z[10]
-            # res[10] = 2w(t)[1]*z[3] - z[10]
-
             # ---------- β-equations ----------
             # 0 = dβᵢ - gθᵢ + λᵀFθᵢ + λₓᵀ(Ǎθᵢ*xw(t) + B̌θᵢ*v(t)) + λwᵀČθᵢxw(t)                                     # Analytical form
             res[nx+ndist+1]  = dz[nx+ndist+1] - z[3]*abs(x(t,4))*x(t,4) - z[4]*abs(x(t,5))*x(t,5)                                 # For parameter k, only dβᵢ + λᵀFθᵢ

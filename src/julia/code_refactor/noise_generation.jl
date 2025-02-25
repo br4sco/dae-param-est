@@ -3,7 +3,7 @@ module NoiseGeneration
 # To test which of these are necessary, consider replacing "using" with "import", then one has to write e.g. Random.seed!() to call seed!()
 import Random
 using DataFrames: DataFrame
-using LinearAlgebra: Diagonal, diagm, Hermitian, cholesky, I, LowerTriangular
+using LinearAlgebra: Diagonal, diagm, Hermitian, cholesky, I, LowerTriangular, eigen
 using ControlSystems: ss, lsim
 # import Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra, Random
 
@@ -324,7 +324,26 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
     Mexp = exp(M*Ts)
     Ad   = Mexp[(na+1)*n_tot + 1:(na+2)*n_tot, (na+1)*n_tot + 1:(na+2)*n_tot]
     Dd   = Hermitian(Mexp[(na+1)*n_tot + 1:(na+2)*n_tot, (2na+2)*n_tot + 1:(2na+3)*n_tot]*(Ad'))
-    Bd   = cholesky(Dd).L
+    Bd = try
+        cholesky(Dd).L
+    catch PosDefException
+        # Due to numerical inaccuracies, Dd can occasionally become indefinite, 
+        # at which point we modify the diagonal elements as little as possible
+        # but enough to make it positive definite
+        eigs = eigen(Dd).values
+        @warn "Had to modify Dd with $(-eigs[1])"
+        # eigs[1] is the lowest (in this case negative) eigenvale. By subtracting it, 
+        # in theory the matrix should become positive SEMIDEFINITE, but because of numerical
+        # inaccuracies it has so far become positive definite when I have tested. If it ever
+        # throws another PosDefException, it might be worth subtracting twice as much
+        try
+            cholesky(Dd - eigs[1]*I).L
+        catch PosDefException
+            @warn "Actually had to increase by even 1e-20"
+            cholesky(Dd + (1e-20)*I).L
+        end
+    end
+
     Bdηa = zeros(na*n_tot, n_tot)
     for i = 1:na
         # H = Mexp[(na+i+1)*nx + 1:(na+i+2)*nx, (2na+2)*nx + 1:(2na+3)*nx]
@@ -466,15 +485,16 @@ end
 
 # ============== Functions for generating specific realization ===============
 
-function get_ct_disturbance_model(η::Array{Float64,1}, nx::Int, n_out::Int)
+function get_ct_disturbance_model(η::Array{Float64,1}, nx::Int, n_in::Int)
     # First nx parameters of η are parameters for A-matrix, the remaining
     # parameters are for the C-matrix
-    A = diagm(-1 => ones(nx-1,))
-    A[1,:] = -η[1:nx]
-    B = zeros(nx,1)
+    n_tot = nx*n_in
+    A = diagm(-1 => ones(n_tot-1,))
+    A[1,:] = -η[1:n_tot]
+    B = zeros(n_tot,1)
     B[1] = 1.0
-    C = reshape(η[nx+1:end], n_out, :)
-    x0 = zeros(nx)
+    C = reshape(η[nx+1:end], :, n_tot)
+    x0 = zeros(n_tot)
     return CT_SS_Model(A, B, C, x0)
     #= With the dimensions we most commonly use, the model becomes
     A = [-a1 -a2
@@ -518,7 +538,7 @@ function disturbance_model_1(Ts::Float64; scale::Float64=0.6)::Tuple{DT_SS_Model
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
     mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_in), Ts)
     # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
     return mdl, [nx, n_in, n_out], η0
 end
@@ -540,7 +560,7 @@ function disturbance_model_2(Ts::Float64; scale::Float64=0.2)::Tuple{DT_SS_Model
     η0 = vcat(a_vec, Diagonal(w_scale)*c_vec)
     dη = length(η0)
     mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_in), Ts)
     # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
     return mdl, [nx, n_in, n_out], η0
 end
@@ -560,7 +580,7 @@ function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
     mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_in), Ts)
     # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
     return mdl, [nx, n_in, n_out], η0
 end
@@ -583,7 +603,7 @@ function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
     mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_in), Ts)
     # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
     return mdl, [nx, n_in, n_out], η0
 end
