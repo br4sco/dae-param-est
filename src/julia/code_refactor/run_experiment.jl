@@ -62,8 +62,8 @@ const Q = 1000          # Number of conditional samples stored per interval
 # The initial learning rate for each component for each component of the disturbance parameters ρ
 # The components corresponding to the free disturbance parameters η are picked out later
 # using a call to get_disturbance_free_pars
-# dist_init_learning_rate = [0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
-dist_init_learning_rate = vcat([0.1, 0.2, 0.2, 0.05, 0.05, 0.05], zeros(9), [0.05, 0.05, 0.05], zeros(9), [0.05, 0.05, 0.05])
+dist_init_learning_rate = [0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+# dist_init_learning_rate = vcat([0.1, 0.2, 0.2, 0.05, 0.05, 0.05], zeros(9), [0.05, 0.05, 0.05], zeros(9), [0.05, 0.05, 0.05])
 # Similarly for disturbance parameter bounds
 dist_bounds = repeat([-Inf Inf], 30)
 
@@ -73,10 +73,10 @@ function get_disturbance_free_pars(nx::Int, n_out::Int, n_tot::Int)::Vector{Bool
     # Structure: η = vcat(ηa, ηc), where ηa is nx large, and ηc is n_tot*n_out large
     # free_dist_pars = fill(false, nx + n_tot*n_out)                                             # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_out), fill(true, (n_tot-1)*n_out))     # Whole a-vector and all but first n_out elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY (PENDULUM))
-    # free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
-    free_dist_pars = vcat(fill(true, nx), 
-        fill(true, nx), fill(false, n_tot),
-        fill(true, nx), fill(false, n_tot), fill(true, nx))                            # New disturbance model but corresponding same free parameter as old disturbance model all parameters, delta case
+    free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*n_out))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
+    # free_dist_pars = vcat(fill(true, nx), 
+    #     fill(true, nx), fill(false, n_tot),
+    #     fill(true, nx), fill(false, n_tot), fill(true, nx))                            # New disturbance model but corresponding same free parameter as old disturbance model all parameters, delta case
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_tot*n_out))                    # Whole a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*n_out))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*n_out))    # Second parameter of a-vector unknown
@@ -264,7 +264,6 @@ function get_disturbance_metadata(W_meta_raw::Matrix{Float64})::DisturbanceMetaD
 end
 
 function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData; verbose::Bool = true, E_in::Int64=typemax(Int64))
-
     let N = size(exp_data.Y, 1)÷md.ny-1, E = min(size(exp_data.Y, 2), E_in), dη = length(exp_data.W_meta.η), W_meta = exp_data.W_meta
 
         opt_pars_baseline = zeros(md.dθ, E)
@@ -310,7 +309,7 @@ function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 end
             end
 
-            println("Completed for dataset $e for parameters $(opt_pars_baseline[:,e])")
+            @info "Completed for dataset $e for parameters $(opt_pars_baseline[:,e])"
 
             writedlm(joinpath(data_dir, "tmp/backup_baseline_e$e.csv"), opt_pars_baseline[:,e], ',')
             writedlm(joinpath(data_dir, "tmp/backup_trace_baseline_e$e.csv"), trace_baseline[e], ',')
@@ -326,6 +325,11 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
     
     # Tsλ is the sampling period of the forward solution that is then used for the backwards computation for the adjoint method, good to have smaller for better interpolation
     let N = size(exp_data.Y, 1)÷md.ny-1, E = min(size(exp_data.Y, 2), E_in), W_meta = exp_data.W_meta, δ = W_meta.δ, Ts = exp_data.Ts, Tsλ = exp_data.Ts/10
+
+        # Makes sure there is a "tmp" directory to store intermediate results in during simulation
+        if !isdir(joinpath(data_dir, "tmp/"))
+            mkdir(joinpath(data_dir, "tmp/"))
+        end
 
         # Depending on method, the function used for computing cost function gradient estimate differs a lot
         get_gradient_func = if method_type == FOR_SENS
@@ -506,7 +510,12 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                     par_bounds;
                     maxiters=maxiters,
                     verbose=verbose)
-            println("Completed for dataset $e for parameters $(opt_pars_proposed[:,e])")
+
+            @info "Completed for dataset $e for parameters $(opt_pars_proposed[:,e])"
+            # === Writing backups ===
+            writedlm(joinpath(data_dir, "tmp/backup_proposed_e$e.csv"), opt_pars_proposed[:,e], ',')
+            writedlm(joinpath(data_dir, "tmp/backup_trace_e$e.csv"), trace_proposed[e], ',')
+            writedlm(joinpath(data_dir, "tmp/backup_gradient_e$e.csv"), trace_gradient[e], ',')
         end
 
         opt_pars_proposed, trace_proposed, trace_gradient
