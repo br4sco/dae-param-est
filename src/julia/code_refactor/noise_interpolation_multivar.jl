@@ -2,8 +2,6 @@ module NoiseInterpolation
 
 import Random, LinearAlgebra, Future
 
-export InterSampleWindow, initialize_isw, noise_inter, mk_newer_noise_interp, mk_newer_noise_interp, linear_interpolation_multivar
-
 mutable struct InterSampleWindow
     containers::Array{Array{Float64,2},1}
     sample_times::Array{Array{Float64,1},1}

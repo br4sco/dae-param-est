@@ -7,8 +7,6 @@ using LinearAlgebra: Diagonal, diagm, Hermitian, cholesky, I, LowerTriangular, e
 using ControlSystems: ss, lsim
 # import Statistics, CSV, DataFrames, ControlSystems, LinearAlgebra, Random
 
-export DisturbanceMetaData, demangle_XW, get_filtered_noise, disturbance_model_1, disturbance_model_2, disturbance_model_3, get_ct_disturbance_model
-export discretize_ct_noise_model_disc_then_diff, simulate_noise_process_mangled, discretize_ct_noise_model_with_sensitivities_for_adj
 
 seed = 54321    # Important that random samples generated here are independent of those generated in run_experiment.jl
 Random.seed!(seed)
@@ -37,8 +35,8 @@ end
 
 struct DisturbanceMetaData
     nx::Int
-    n_in::Int   # n_tot = nx*n_in
-    n_out::Int  # TODO: Consider renaming n_in -> nv and n_out = nw, to match better my thesis and other work?
+    nv::Int   # n_tot = nx*nv
+    nw::Int
     η::Vector{Float64}
     free_par_inds::Vector{Int}
     # Vector containing lower and upper bound of a disturbance parameter in each row
@@ -56,46 +54,12 @@ end
 
 demangle_XW(XW::AbstractMatrix{Float64}, n_tot::Int) = [XW[(i-1)*n_tot+1:i*n_tot, m] for i=1:(size(XW,1)÷n_tot), m=1:size(XW,2)]
 
-function Φ(mat_in::Matrix{Float64})
-    nx = minimum(size(mat_in))
-    Φ(mat_in, nx)
-end
-
-function Φ(mat_in::Matrix{Float64}, nx::Int)
-    mat = copy(mat_in)
-    for i=1:size(mat,1)
-        for j=1:size(mat,2)
-            i1 = (i-1)%nx+1
-            j1 = (j-1)%nx+1
-            if i1 > j1
-                continue
-            elseif i1 == j1
-                mat[i,j] = 0.5*mat[i,j]
-            else
-                mat[i,j] = 0
-            end
-        end
-    end
-    return mat
-end
-
-# TODO: Don't need all these matrix functions Phi, Φ... Figure out which ones you need and maybe rename!
 function Phi(mat_in::Matrix{Float64}, n_tot::Int)::LowerTriangular
     mat = LowerTriangular(mat_in)
     for i=1:n_tot
         mat[i,i] *= 0.5
     end
     return mat
-    # mat = zeros(size(mat_in))
-    # for i=1:nx
-    #     for j=1:nx
-    #         if i==j
-    #             mat[i,j] = 0.5*mat_in[i,j]
-    #         elseif i>j
-    #             mat[i,j] = mat_in[i,j]
-    #         end
-    #     end
-    # end
 end
 
 # Given index of element in C-matrix, returns row and col of that index
@@ -133,16 +97,16 @@ function get_disc_then_diff_matrices(mdl::CT_SS_Model, Ts::Float64, sens_inds::V
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
-    n_in = size(mdl.B, 2)
+    nv = size(mdl.B, 2)
     n_tot = size(mdl.A, 1)
-    nx = n_tot÷n_in
+    nx = n_tot÷nv
     # Indices of free parameters corresponding to "a-vector" in vector of all disturbance parameters
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
     na = length(sens_inds_a)
 
     Aηa = zeros(na*n_tot, n_tot)
     for ind1 = 1:na
-        for ind2 = 1:n_in
+        for ind2 = 1:nv
             Aηa[(ind1-1)n_tot + (ind2-1)nx + 1, (ind2-1)nx + sens_inds_a[ind1]] = -1
         end
     end
@@ -190,30 +154,28 @@ end
 function discretize_ct_noise_model_disc_then_diff(mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::DT_SS_Model
     Mexp, B̃d, B̃dηa = get_disc_then_diff_matrices(mdl, Ts, sens_inds)
 
-    n_in = size(mdl.B, 2)
-    n_out = size(mdl.C, 1)
+    nv = size(mdl.B, 2)
+    nw = size(mdl.C, 1)
     n_tot = size(mdl.A, 1)
-    nx = n_tot÷n_in
+    nx = n_tot÷nv
     nη = length(sens_inds)
     na = length(findall(sens_inds .<= nx))
 
     A_mat = Mexp[1:(na+1)n_tot, 1:(na+1)n_tot]
     B_mat = [B̃d; B̃dηa]
-    C_mat = zeros((nη+1)n_out, (1+na)*n_tot)
+    C_mat = zeros((nη+1)nw, (1+na)*n_tot)
     # Because C-matrix only depends on C-parameters and the disturbance state xw depends only on a-parameters, we have
     # C_mat = [C    0
     #          0   Ina⊗C
     #          Cηc  0]
-    C_mat[1:n_out, 1:n_tot] = mdl.C
-    C_mat[n_out+1:(1+na)*n_out, n_tot+1:end] = kron(Matrix(1.0I, na, na), mdl.C)
-    # for ind = 1:nη-na
+    C_mat[1:nw, 1:n_tot] = mdl.C
+    C_mat[nw+1:(1+na)*nw, n_tot+1:end] = kron(Matrix(1.0I, na, na), mdl.C)
     for ηind = na+1:nη
-        # ηind = na + ind # TODO: Delete
         # We want to pass the index of the currently considered c-parameter in the C-matrix.
         # sens_inds contains the index of that parameter in η, which contains the additional na
         # parameters corresponding to the A-matrix
         row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
-        C_mat[ηind*n_out + row, col] = 1.0
+        C_mat[ηind*nw + row, col] = 1.0
     end
 
     return DT_SS_Model(A_mat, B_mat, C_mat, zeros((1+na)n_tot), Ts)
@@ -225,10 +187,10 @@ function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
-    n_in = size(mdl.B, 2)
-    n_out = size(mdl.C, 1)
+    nv = size(mdl.B, 2)
+    nw = size(mdl.C, 1)
     n_tot = size(mdl.A, 1)
-    nx = n_tot÷n_in
+    nx = n_tot÷nv
     # Indices of free parameters corresponding to "a-vector" in vector of all disturbance parameters
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
     nη   = length(sens_inds)
@@ -236,7 +198,7 @@ function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64
 
     Aηa = zeros(na*n_tot, n_tot)
     for ind1 = 1:na
-        for ind2 = 1:n_in
+        for ind2 = 1:nv
             Aηa[(ind1-1)n_tot + (ind2-1)nx + 1, (ind2-1)nx + sens_inds_a[ind1]] = -1.0
         end
     end
@@ -270,20 +232,20 @@ function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64
         end
     end
 
-    C_mat = zeros((nη+1)n_out, (1+na)*n_tot)
+    C_mat = zeros((nη+1)nw, (1+na)*n_tot)
     # Because C-matrix only depends on C-parameters and the disturbance state xw depends only on a-parameters, we have
     # C_mat = [C    0
     #          0   Ina⊗C
     #          Cηc  0]
-    C_mat[1:n_out, 1:n_tot] = mdl.C
-    C_mat[n_out+1:(1+na)*n_out, n_tot+1:end] = kron(Matrix(1.0I, na, na), mdl.C)
+    C_mat[1:nw, 1:n_tot] = mdl.C
+    C_mat[nw+1:(1+na)*nw, n_tot+1:end] = kron(Matrix(1.0I, na, na), mdl.C)
     for ind = 1:nη-na
         ηind = na + ind
         # We want to pass the index of the currently considered c-parameter in the C-matrix.
         # sens_inds contains the index of that parameter in η, which contains the additional na
         # parameters corresponding to the A-matrix
         row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
-        C_mat[(na+ind)n_out + row, col] = 1.0
+        C_mat[(na+ind)nw + row, col] = 1.0
     end
 
     return DT_SS_Model(Ad, Bd, C_mat, zeros((1+na)n_tot), Ts)
@@ -299,10 +261,10 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
 
     @assert (length(sens_inds) > 0) "Make sure at least one disturbance parameter is marked for identification. Can't create model for sensitivity with respect to no parameters."
 
-    n_in = size(mdl.B, 2)
-    n_out = size(mdl.C, 1)
+    nv = size(mdl.B, 2)
+    nw = size(mdl.C, 1)
     n_tot = size(mdl.A, 1)
-    nx = n_tot÷n_in
+    nx = n_tot÷nv
 
     # Indices of free parameters corresponding to "a-vector" in disturbance model
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
@@ -358,14 +320,14 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
     B̌ηa = kron(Matrix(I,na,na), P) \ (Bdηa - (R/P)*Bd)
     # B̌  = P\Bd
 
-    Čη = zeros(nη*n_out, n_tot)
+    Čη = zeros(nη*nw, n_tot)
     # Čη = [Čηa; Čηc] = [0; Čηc]
     for ηind = na+1:nη
         # We want to pass the index of the currently considered c-parameter in the C-matrix to get_C_row_and_col
         # sens_inds contains the index of that parameter in η, which contains the additional na
         # parameters corresponding to the A-matrix
         row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
-        Čη[(ηind-1)n_out + row, col] = 1.0
+        Čη[(ηind-1)nw + row, col] = 1.0
     end
 
     Ǎη = vcat(Ǎηa, zeros((nη-na)n_tot, n_tot))
@@ -375,17 +337,17 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
     return DT_SS_Model(Ad, Bd, mdl.C, zeros(n_tot), Ts), Ǎη, B̌η, Čη, mdl.A
 end
 
-# TODO: Might use nx instead of n_tot in some places! Also, this function in particular might not be finished
 function discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(
-    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
     @assert (length(sens_inds) > 0) "Make sure at least one disturbance parameter is marked for identification. Can't create model for sensitivity with respect to no parameters."
 
-    nx = size(mdl.A,1)
-    n_out = size(mdl.C, 1)
-    n_in  = size(mdl.C, 2)÷nx
+    nv = size(mdl.B, 2)
+    nw = size(mdl.C, 1)
+    n_tot = size(mdl.A, 1)
+    nx = n_tot÷nv
 
     # Indices of free parameters corresponding to "a-vector" in disturbance model
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
@@ -394,56 +356,84 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(
     na = length(sens_inds_a)
     # nx_sens = (1+na)*nx
 
-    Aηa = zeros(na*nx, nx)
+    Aηa = zeros(na*n_tot, n_tot)
     for i = 1:na
-        Aηa[(i-1)*nx+1, sens_inds_a[i]] = -1
+        Aηa[(i-1)*n_tot+1, sens_inds_a[i]] = -1.0
     end
 
-    # NEW TODO: MAY BE TEST THIS!
     Mexp, B̃d, B̃dηa = get_disc_then_diff_matrices(mdl, Ts, sens_inds)
-    Ãdηa = Mexp[nx+1:nx(1+na), nx+1:nx(1+na)]   # TODO: Maybe double-check? I wrote this while tired
-    M = (Ãdηa - Matrix(1.0I, nx*na, nx*na))\B̃d
-    B̌ηa = Aηa*M + kron(Matrix(I,na,na), A/(Ãd-Matrix(I,nx,nx)))*(B̃dηa-Ãdηa*M)
+    Ãd = Mexp[1:n_tot, 1:n_tot]
+    Ãdηa = Mexp[n_tot+1:n_tot*(1+na), 1:n_tot]
+    M = (Ãd - Matrix(1.0I, n_tot, n_tot))\B̃d
+    B̌ηa = Aηa*M + kron(Matrix(I,na,na), mdl.A/(Ãd-Matrix(I,n_tot,n_tot)))*(B̃dηa-Ãdηa*M)
 
-    # Ǎη = vcat(Aηa, zeros(nη-na, nx))
-    # B̌η = vcat(B̌ηa, zeros(nη-na, nx))
-    Čη = zeros(n_out*nη, n_in*nx)
-    for ind=na+1:nη
-        cind = sens_inds[ind]
-        tmp = Int(ind÷(nx*n_in))
-        row = na + tmp + 1
-        col = cind - tmp*nx*n_in
-        Čη[row,col] = 1.0
+    Čη = zeros(nη*nw, n_tot)
+    # Čη = [Čηa; Čηc] = [0; Čηc]
+    for ηind = na+1:nη
+        # We want to pass the index of the currently considered c-parameter in the C-matrix to get_C_row_and_col
+        # sens_inds contains the index of that parameter in η, which contains the additional na
+        # parameters corresponding to the A-matrix
+        row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
+        Čη[(ηind-1)nw + row, col] = 1.0
     end
+
+    Ǎη = vcat(Aηa, zeros((nη-na)n_tot, n_tot))
+    B̌η = vcat(B̌ηa, zeros((nη-na)n_tot, n_tot))
 
     # Returns non-sensitivity disturbance model and other matrices needed for adjoint disturbance sensitivity
-    return DT_SS_Model(Ad, Bd, mdl.C, zeros(nx*n_in), Ts), Aηa, B̌ηa, Čη
+    return DT_SS_Model(Ãd, B̃d, mdl.C, zeros(n_tot), Ts), Ǎη, B̌η, Čη, mdl.A
 end
 
 # ================= Functions simulating disturbance =======================
 
-function simulate_noise_process(mdl::DT_SS_Model, data::Vector{Matrix{Float64}})::Matrix{Vector{Float64}}
-    # data[m][i, k*nx + j] should be the j:th component of the noise
-    # corresponding to input k at time i of realization m
+# TODO: These function do not at all utilize the structure of our model structure
+# Write functions that actually use that structure optimally, ideally also parallelize
+# simulation of the subsystems
+
+function simulate_noise_process_mangled(mdl::DT_SS_Model, data::Vector{Matrix{Float64}})::Matrix{Float64}
+    # data[m][i, j] should be the j:th component of the noise
+    # corresponding to time i of realization m
     M = length(data)
-    N = size(data[1], 1)-1
-    nx = size(mdl.Ad, 1)
-    # When sensitivities are included in disturbance model, nv != nx
-    nv = size(mdl.Bd, 2)
-    n_in = size(mdl.Cd, 2)÷nx
+    N = size(data[1], 2)-1
+    nA = size(mdl.Ad, 1)
     # We only care about the state, not the output, so we ignore the C-matrix
-    C_placeholder = zeros(1, nx)
+    C_placeholder = zeros(1,nA)
 
     sys = ss(mdl.Ad, mdl.Bd, C_placeholder, 0.0, mdl.Ts)
     t = 0:mdl.Ts:N*mdl.Ts
     # Allocating space for noise process
-    x_process = [ fill(NaN, (nx*n_in,)) for i=1:N+1, m=1:M]
-    for ind = 1:n_in
-        for m=1:M
-            _, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv]', t, x0=mdl.x0)
-            for i=1:N+1
-                x_process[i,m][(ind-1)*nx+1:ind*nx] = x[:,i]
-            end
+    x_process = fill(NaN, ((N+1)*nA, M))
+
+    for m=1:M
+        _, t, x = lsim(sys, data[m], t, x0=mdl.x0)
+        for i=1:N+1
+            # x_process = [xvec1; xvec2; ...; xvecN+1]          # N+1 blocks of size nA
+            x_process[(i-1)nA+1 : i*nA, m] = x[:,i]
+        end
+    end
+
+    # x_process[(i-1)*n_tot + j, m] is the j:th element of the noise model at
+    # sample i of realization m. Sample 1 corresponds to time 0
+    return x_process
+end
+
+function simulate_noise_process(mdl::DT_SS_Model, data::Vector{Matrix{Float64}})::Matrix{Vector{Float64}}
+    # data[m][i, j] should be the j:th component of the noise
+    # corresponding to time i of realization m
+    M = length(data)
+    N = size(data[1], 2)-1
+    nA = size(mdl.Ad, 1)
+    # We only care about the state, not the output, so we ignore the C-matrix
+    C_placeholder = zeros(1, nA)
+
+    sys = ss(mdl.Ad, mdl.Bd, C_placeholder, 0.0, mdl.Ts)
+    t = 0:mdl.Ts:N*mdl.Ts
+    # Allocating space for noise process
+    x_process = [fill(NaN, (nA,)) for i=1:N+1, m=1:M]
+    for m=1:M
+        _, t, x = lsim(sys, data[m], t, x0=mdl.x0)
+        for i=1:N+1
+            x_process[i,m] = x[:,i]
         end
     end
 
@@ -452,47 +442,27 @@ function simulate_noise_process(mdl::DT_SS_Model, data::Vector{Matrix{Float64}})
     return x_process
 end
 
-function simulate_noise_process_mangled(mdl::DT_SS_Model, data::Vector{Matrix{Float64}})::Matrix{Float64}
-    # data[m][i, k*nx + j] should be the j:th component of the noise
-    # corresponding to input k at time i of realization m
-    M = length(data)
-    N = size(data[1], 1)-1
-    nx = size(mdl.Ad, 1)
-    # When sensitivities are included in disturbance model, nv != nx
-    nv = size(mdl.Bd, 2)
-    n_in = size(mdl.Cd, 2)÷nx
-    # We only care about the state, not the output, so we ignore the C-matrix
-    C_placeholder = zeros(1, nx)
-
-    sys = ss(mdl.Ad, mdl.Bd, C_placeholder, 0.0, mdl.Ts)
-    t = 0:mdl.Ts:N*mdl.Ts
-    # Allocating space for noise process
-    x_process = fill(NaN, ((N+1)*nx*n_in, M))
-    for ind = 1:n_in
-        for m=1:M
-            # x[i, j] is the j:th element of the state at sample i
-            _, t, x = lsim(sys, data[m][:, (ind-1)*nv+1:ind*nv]', t, x0=mdl.x0)
-            for i=1:N+1
-                x_process[(i-1)*n_in*nx + (ind-1)*nx + 1: (i-1)*n_in*nx + ind*nx, m] = x[:,i]
-            end
-        end
-    end
-
-    # x_process[(i-1)*nx*n_in + j, m] is the j:th element of the noise model at
-    # sample i of realization m. Sample 1 corresponds to time 0
-    return x_process
-end
-
 # ============== Functions for generating specific realization ===============
 
-function get_ct_disturbance_model(η::Vector{Float64}, nx::Int, n_in::Int)
+function get_ct_disturbance_model(η::Vector{Float64}, nx::Int, nv::Int)
     # First nx parameters of η are parameters for A-matrix, the remaining
     # parameters are for the C-matrix
-    n_tot = nx*n_in
+    n_tot = nx*nv
     A = diagm(-1 => ones(n_tot-1,))
-    A[1,:] = -η[1:n_tot]
-    B = zeros(n_tot,1)
-    B[1] = 1.0
+    B = zeros(n_tot,nv)
+    for ind=1:nv
+        # A here is actually what I in my licentiate thesis call Φ, and
+        # Φ = diag(A,...,A) (nv blocks) where
+        # A = [-η[1] -η[2] ⋯ -η[nx]
+        #         1     0  ⋯   0
+        #         ⋮      ⋮  ⋱    ⋮
+        #         0     0  ⋯    0] (i.e. A how I define it in thesis, not here)
+        A[(ind-1)nx+1,(ind-1)nx+1:ind*nx] = -η[1:nx]
+        # B here is actually what I in my licentiate thesis call Γ, and 
+        # Γ = diag(B,...,B) (nv blocks) where
+        # B = [1; 0; ...; 0] (nx × 1) (i.e. B how I define it in thesis, not here)
+        B[(ind-1)nx+1, ind] = 1.0
+    end
     C = reshape(η[nx+1:end], :, n_tot)
     x0 = zeros(n_tot)
     return CT_SS_Model(A, B, C, x0)
@@ -506,14 +476,14 @@ end
 
 # Parameter values for C-matrix as entered are converted into a single vector
 # more suitable to be used in the code
-function get_c_parameter_vector(c_vals, w_scale, nx::Int, n_out::Int, n_in::Int)
-    c_vec = zeros(nx*n_out*n_in)
-    for i = 1:n_out
-        for j = 1:n_in
+function get_c_parameter_vector(c_vals, w_scale, nx::Int, nw::Int, nv::Int)
+    c_vec = zeros(nx*nw*nv)
+    for i = 1:nw
+        for j = 1:nv
             for k = 1:nx
                 # Multiplying with w_scale[i] here is equivalent to scaling ith
                 # component of the disturbance output (w) with factor w_scale[i]
-                c_vec[(j-1)*n_out*nx + (k-1)*n_out + i] = w_scale[i]*c_vals[i,j][k]
+                c_vec[(j-1)*nw*nx + (k-1)*nw + i] = w_scale[i]*c_vals[i,j][k]
             end
         end
     end
@@ -523,44 +493,44 @@ end
 # Used for disturbance
 function disturbance_model_1(Ts::Float64; scale::Float64=0.6)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     nx = 2        # model order
-    n_out = 2     # number of outputs
-    n_in = 2      # number of inputs
-    w_scale = scale*ones(n_out)             # noise scale
+    nw = 2     # number of outputs
+    nv = 2      # number of inputs
+    w_scale = scale*ones(nw)             # noise scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [0.8, 4^2]
     # Transfer function (i,j) has numerator c_[i,j][1]s^{nx-1} + ... + c_[i,j][nx]
-    c_ = [zeros(nx) for i=1:n_out, j=1:n_in]
+    c_ = [zeros(nx) for i=1:nw, j=1:nv]
     c_[1,1][nx] = 1 # c_[1,1][:] = vcat(zeros(nx-1), [1])
     c_[2,2][nx] = 1 # c_[2,2][:] = vcat(zeros(nx-1), [1])
-    c_vec = get_c_parameter_vector(c_, w_scale, nx, n_out, n_in)
+    c_vec = get_c_parameter_vector(c_, w_scale, nx, nw, nv)
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
     mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_in), Ts)
-    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
-    return mdl, [nx, n_in, n_out], η0
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
+    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
+    return mdl, [nx, nv, nw], η0
 end
 
 # Used for input
 function disturbance_model_2(Ts::Float64; scale::Float64=0.2)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     nx = 2        # model order
-    n_out = 1     # number of outputs
-    n_in = 2      # number of inputs
+    nw = 1     # number of outputs
+    nv = 2      # number of inputs
     u_scale = scale # input scale
-    w_scale = scale*ones(n_out)             # noise scale
+    w_scale = scale*ones(nw)             # noise scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [0.8, 4^2]
-    c_vec = zeros(n_out*nx*n_in)
+    c_vec = zeros(nw*nx*nv)
     # The first state will act as output of the filter
     c_vec[1] = u_scale
     η0 = vcat(a_vec, Diagonal(w_scale)*c_vec)
     dη = length(η0)
     mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_in), Ts)
-    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
-    return mdl, [nx, n_in, n_out], η0
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
+    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
+    return mdl, [nx, nv, nw], η0
 end
 
 # Used for scalar disturbance and input
@@ -568,8 +538,8 @@ function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
     nx = 2        # model order
-    n_out = 1     # number of outputs
-    n_in = 1      # number of inputs
+    nw = 1     # number of outputs
+    nv = 1      # number of inputs
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     a_vec = [2*ω*ζ, ω^2]
@@ -577,9 +547,9 @@ function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
     mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_in), Ts)
-    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
-    return mdl, [nx, n_in, n_out], η0
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
+    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
+    return mdl, [nx, nv, nw], η0
 end
 
 # Used for multivariate input for delta-robot
@@ -588,9 +558,9 @@ function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     ζ = 0.1       # damping coefficient (tunes damping)
     p3 = -2       # The additional pole that is added
     nx = 3        # model order
-    n_out = 3     # number of outputs
-    n_in = 1      # number of inputs
-    w_scale = scale*ones(n_out)             # noise scale
+    nw = 3     # number of outputs
+    nv = 1      # number of inputs
+    w_scale = scale*ones(nw)             # noise scale
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     # Old a_vec, i.e. for the 2d-model: a_vec = [2*ω*ζ, ω^2]
@@ -599,9 +569,9 @@ function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
     mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_in), Ts)
-    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
-    return mdl, [nx, n_in, n_out], η0
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
+    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
+    return mdl, [nx, nv, nw], η0
 end
 
 # Used for new multivariate input for delta-robot
@@ -610,8 +580,8 @@ function disturbance_model_5(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     ζ = 0.1       # damping coefficient (tunes damping)
     p3 = -2       # The additional pole that is added
     nx = 3        # model order
-    n_out = 3     # number of outputs
-    n_in = 3      # number of inputs
+    nw = 3     # number of outputs
+    nv = 3      # number of inputs
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     # Old a_vec, i.e. for the 2d-model: a_vec = [2*ω*ζ, ω^2]
@@ -620,9 +590,9 @@ function disturbance_model_5(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     c_vec[1] = scale; c_vec[9+4] = scale; c_vec[18+7] = scale
     η0 = vcat(a_vec, c_vec)
     mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, n_out), Ts)
-    # return mdl, DataFrame(nx = nx, n_in = n_in, n_out = n_out, η = η0, bias=bias)
-    return mdl, [nx, n_in, n_out], η0
+        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nw), Ts)
+    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
+    return mdl, [nx, nv, nw], η0
 end
 
 function get_multisine(num::Int; min_amp::Float64=1.0, max_amp::Float64=10.0, min_freq::Float64=1.0, max_freq::Float64=50.0)
@@ -638,12 +608,12 @@ function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     bias::Float64=0.0, scale::Float64=1.0)::Tuple{Matrix{Float64}, Matrix{Float64}, DataFrame}
 
     mdl, meta_raw, η0 = gen(Ts, scale=scale)
-    metadata = DataFrame(nx = meta_raw[1], n_in = meta_raw[2], n_out = meta_raw[3], η = η0, bias=bias, num_rel = M, Nw=Nw, δ = Ts)
+    metadata = DataFrame(nx = meta_raw[1], nv = meta_raw[2], nw = meta_raw[3], η = η0, bias=bias, num_rel = M, Nw=Nw, δ = Ts)
     n_tot = size(mdl.Cd,2)
 
     # We use Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}, i.e. a total of N_w+1 samples, 
     ZS = [randn(Nw+1, n_tot) for m = 1:M]
-    XW = simulate_noise_process_mangled(mdl, ZS)
+    XW = simulate_noise_process_mangled(mdl, ZS, meta_raw[2])
     XW, get_system_output_mangled(mdl, XW).+ bias, metadata
 end
 
@@ -651,12 +621,12 @@ end
 function get_system_output_mangled(mdl::DT_SS_Model, states::Matrix{Float64}
     )::Matrix{Float64}
     M = size(states, 2)
-    (n_out, n_tot) = size(mdl.Cd)
+    (nw, n_tot) = size(mdl.Cd)
     N = size(states, 1)÷n_tot
-    output = zeros(N*n_out, M)
+    output = zeros(N*nw, M)
     for m=1:M
         for t=1:N
-            output[(t-1)*n_out+1:t*n_out, m] = mdl.Cd*states[(t-1)*n_tot+1:t*n_tot, m]
+            output[(t-1)*nw+1:t*nw, m] = mdl.Cd*states[(t-1)*n_tot+1:t*n_tot, m]
         end
     end
     return output

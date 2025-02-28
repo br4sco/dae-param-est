@@ -4,13 +4,6 @@ import Interpolations
 using DifferentialEquations: DAESolution
 using LinearAlgebra: ⋅  # dot product
 
-# TODO: Make it export everything that the user could potentially need! 
-export Model, Model_ode, AdjointSDEApproxData, pendulum, pendulum_forward_m, pendulum_forward_k
-export get_pendulum_initial, get_pendulum_initial_msens, get_pendulum_initial_Lsens, get_pendulum_initial_ksens, get_pendulum_initial_distsens
-export pendulum_adjoint_m, pendulum_adjoint_k_1dist_ODEdist, pendulum_forward_k_1dist
-
-export delta_robot, delta_forward_γ, delta_adjoint_γ
-
 const func_type = Interpolations.Extrapolation
 
 struct Model
@@ -391,8 +384,8 @@ function pendulum_adjoint_k_1dist(w::Function, pars::Vector{Float64}, T::Float64
         λT, dλT = get_initial_adjoint(dinds, ainds, gₓT, dgₓT, FxT, Fdx(T), dFdxT)
         βT, dβT = get_initial_adjoint_beta(λT, FθT, zeros(1))
         βdistT, dβdistT = get_initial_adjoint_beta_dist(λT, FwT, w(T)[2:2], 1)
-        z0 = vcat(λT, βT, [βdistT])
-        dz0 = vcat(dλT, dβT, [dβdistT])
+        z0 = vcat(λT, βT, βdistT)
+        dz0 = vcat(dλT, dβT, dβdistT)
 
         # Function returning Gθ given adjoint solution
         function get_Gθ(adj_sol::DAESolution)::Vector{Float64}
