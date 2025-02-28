@@ -63,7 +63,7 @@ function Phi(mat_in::Matrix{Float64}, n_tot::Int)::LowerTriangular
 end
 
 # Given index of element in C-matrix, returns row and col of that index
-function get_C_row_and_col(ind::Int64, n_tot::Int64)::Tuple{Int64, Int64}
+function get_C_row_and_col(ind::Int, n_tot::Int)::Tuple{Int, Int}
     Ĩ = (ind-1)÷n_tot
     L̃ = ind-1 - Ĩ*n_tot
     Ĩ+1, L̃+1
@@ -93,7 +93,7 @@ end
 
 # Applies Corollary 5.1 from my thesis. Just computed the resulting matrices (corresponding to discretization before differentiation)
 # and does not return the discrete-time system. Note that the Corollary assumes that B is not parametrized
-function get_disc_then_diff_matrices(mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+function get_disc_then_diff_matrices(mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::Tuple{Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
@@ -151,7 +151,7 @@ end
 
 # Discretizes ct model before differentiation, corresponds to Corollary 5.1 in my Licentiate theisis (i.e. also assumes that B is not parametrized)
 # Obtains disturbance model corresponding to Proposition 5.2 in my Licentiate thesis
-function discretize_ct_noise_model_disc_then_diff(mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::DT_SS_Model
+function discretize_ct_noise_model_disc_then_diff(mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::DT_SS_Model
     Mexp, B̃d, B̃dηa = get_disc_then_diff_matrices(mdl, Ts, sens_inds)
 
     nv = size(mdl.B, 2)
@@ -183,7 +183,7 @@ end
 
 # Differentiates ct model before discretization, corresponds to Proposition 5.1 in my Licentiate thesis. 
 # Assumes that B is not parametrized, but this does not really simplify the function, just makes some elements zero.
-function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::DT_SS_Model
+function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::DT_SS_Model
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
@@ -255,7 +255,7 @@ end
 # approximated by an ODE. Corresponds to Proposition 5.6 in my Licentiate thesis.
 # Assumes that B-matrix is not parametrized, i.e. the version of Proposition 5.6 that uses Corollary 5.1
 function discretize_ct_noise_model_with_adj_SDEApprox_mats(
-    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
@@ -338,7 +338,7 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
 end
 
 function discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(
-    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int64})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 

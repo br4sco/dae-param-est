@@ -50,7 +50,7 @@ function apply_two_outputfun(h1::Function, h2::Function, sol::DE.DAESolution)
     map(h1, sol.u), map(h2, sol.u)
 end
 
-function solve_in_parallel(solve_func::Function, is::UnitRange{Int64}, ny::Int64, N::Int64)::Matrix{Float64}
+function solve_in_parallel(solve_func::Function, is::UnitRange{Int}, ny::Int, N::Int)::Matrix{Float64}
     M = length(is)
     p = ProgressMeter.Progress(M, 1, "Running $(M) simulations...", 50)
     Y = zeros(ny*N, M)
@@ -63,7 +63,7 @@ function solve_in_parallel(solve_func::Function, is::UnitRange{Int64}, ny::Int64
 end
 
 # Handles multivariate outputs by flattening the output
-function solve_in_parallel_sens(solve_func::Function, is::UnitRange{Int64}, ny::Int64, nθ::Int64, N::Int64)::Tuple{Matrix{Float64}, Vector{Matrix{Float64}}}
+function solve_in_parallel_sens(solve_func::Function, is::UnitRange{Int}, ny::Int, nθ::Int, N::Int)::Tuple{Matrix{Float64}, Vector{Matrix{Float64}}}
     M = length(is)
     p = ProgressMeter.Progress(M, 1, "Running $(M) simulations...", 50)
     Ysens = [Matrix{Float64}(undef, ny*(N+1), nθ) for _=1:M]
@@ -78,7 +78,7 @@ function solve_in_parallel_sens(solve_func::Function, is::UnitRange{Int64}, ny::
 end
 
 # Treats the entire state as output
-function solve_in_parallel_stateout(solve_func::Function, is::UnitRange{Int64}, ny::Int64, N::Int64)::Vector{Matrix{Float64}}
+function solve_in_parallel_stateout(solve_func::Function, is::UnitRange{Int}, ny::Int, N::Int)::Vector{Matrix{Float64}}
     M = length(is)
     p = ProgressMeter.Progress(M, 1, "Running $(M) simulations...", 50)
     # the rows of out correspond to different times, and the columns to different state components
@@ -92,7 +92,7 @@ function solve_in_parallel_stateout(solve_func::Function, is::UnitRange{Int64}, 
 end
 
 # Returns matrix, with np rows and M columns
-function solve_adj_in_parallel(solve_func::Function, is::UnitRange{Int64}, np::Int64)::Matrix{Float64}
+function solve_adj_in_parallel(solve_func::Function, is::UnitRange{Int}, np::Int)::Matrix{Float64}
     M = length(is)
     p = ProgressMeter.Progress(M, 1, "Running $(M) simulations...", 50)
     # Gθ1 = solve_func(is[1])

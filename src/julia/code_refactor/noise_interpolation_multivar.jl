@@ -5,15 +5,15 @@ import Random, LinearAlgebra, Future
 mutable struct InterSampleWindow
     containers::Array{Array{Float64,2},1}
     sample_times::Array{Array{Float64,1},1}
-    num_stored::Array{Int64,1}
-    Q::Int64    # Max number of stored samples per interval
-    W::Int64    # Number of containers in the array containers
+    num_stored::Array{Int,1}
+    Q::Int    # Max number of stored samples per interval
+    W::Int    # Number of containers in the array containers
     # TODO: Not sure if this struct is the best place to store use_interpolation
     use_interpolation::Bool # true if linear interpolation of states is used
     # instead of conditional sampling when Q stored samples has been surpassed.
     # It improves smoothness of realization in such a scenario.
-    start::Int64    # The interval index to which the "first" container corresponds
-    ptr::Int64      # The index of the "first" container in the array containers
+    start::Int    # The interval index to which the "first" container corresponds
+    ptr::Int      # The index of the "first" container in the array containers
 end
 
 mutable struct InterSampleData
@@ -24,13 +24,13 @@ mutable struct InterSampleData
     # i:th interval. Also here the number of rows should be dynamically updated
     states::Array{Array{Float64,2},1}
     sample_times::Array{Array{Float64,1},1}
-    Q::Int64    # Max number of stored samples per interval
+    Q::Int    # Max number of stored samples per interval
     use_interpolation::Bool # true if linear interpolation of states is used
     # instead of conditional sampling when Q stored samples has been surpassed.
     # It improves smoothness of realization in such a scenario.
 end
 
-function initialize_isw(Q::Int64, W::Int64, nx::Int64,
+function initialize_isw(Q::Int, W::Int, nx::Int,
      use_interpolation::Bool=true)::InterSampleWindow
      if Q > 0
          containers = [zeros(nx, Q)  for j=1:W]
@@ -57,7 +57,7 @@ function reset_isws!(isws::AbstractArray{InterSampleWindow})
     end
 end
 
-function map_to_container(num::Int64, isw::InterSampleWindow)
+function map_to_container(num::Int, isw::InterSampleWindow)
     return ((num-1)%isw.W) + 1
 end
 
@@ -70,7 +70,7 @@ end
 # a 2D array into a 1D array using the [:]-operator. According to
 # https://stackoverflow.com/questions/63340812/how-to-convert-from-arrayfloat64-2-to-arrayarrayfloat64-1-1-in-julia
 # this doesn't use any additional memory, so it shouldn't impact performance negatively.
-function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
+function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int,
     isw::InterSampleWindow)
 
     if isw.start <= n && n <= isw.start + isw.W - 1
@@ -101,7 +101,7 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
 end
 
 # TODO: SHOULD RLY BE 1D ARRAY OF 1D ARRAYS, instead of just an AbstractArray
-function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
+function get_neighbors(n::Int, t::Float64, x::AbstractArray,
     Ts::Float64, isw::InterSampleWindow)
 
     tl = n*Ts
@@ -163,7 +163,7 @@ function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
     return xu, xl, δu, δl, should_interpolate
 end
 
-function initialize_isd(Q::Int64, N::Int64, nx::Int64, use_interpolation::Bool)::InterSampleData
+function initialize_isd(Q::Int, N::Int, nx::Int, use_interpolation::Bool)::InterSampleData
     if Q > 0
         isd_states = [zeros(0,nx) for j=1:N]
         isd_sample_times = [zeros(0) for j=1:N]

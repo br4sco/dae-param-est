@@ -35,10 +35,10 @@ struct AdjointSDEApproxData
     Č::AbstractMatrix{Float64}
     # TODO: Now that I have introduced Ǎ in here, I don't think we need ρ anymore. But maybe check performance to make sure.
     ρ::Vector{Float64}  # Contains all disturbance parameters, both free and known
-    na::Int64           # Number of the disturbance parameters that correspond to the a-parameters
-    nxw::Int64          # Dimension of xw
-    nw::Int64           # Dimension of w
-    nη::Int64           # Number of unknown disturbance parameters
+    na::Int           # Number of the disturbance parameters that correspond to the a-parameters
+    nxw::Int          # Dimension of xw
+    nw::Int           # Dimension of w
+    nη::Int           # Number of unknown disturbance parameters
 end
 
 # TODO: Now that you make models disturbace model agnostic, you should be more explicit that all models assume B not parametrized! Make comments more helpful, why isn't B in formulas?
@@ -3089,7 +3089,7 @@ function get_pendulum_initial_distsens(kwargs...)::Tuple{Vector{Float64}, Vector
 end
 
 # TODO: There's difference compred to thesis! 1. Check thesis derivation! 2. Check if changing it here affects performance!
-function get_initial_adjoint(dinds::UnitRange{Int64}, ainds::UnitRange{Int64}, gₓT::Matrix{Float64}, dgₓT::Matrix{Float64}, FxT::Matrix{Float64}, FdxT::Matrix{Float64}, dFdxT::Matrix{Float64})::Tuple{Vector{Float64}, Vector{Float64}}
+function get_initial_adjoint(dinds::UnitRange{Int}, ainds::UnitRange{Int}, gₓT::Matrix{Float64}, dgₓT::Matrix{Float64}, FxT::Matrix{Float64}, FdxT::Matrix{Float64}, dFdxT::Matrix{Float64})::Tuple{Vector{Float64}, Vector{Float64}}
     λT  = zeros(length(dinds)+length(ainds))
     dλT = zeros(length(dinds)+length(ainds))
     temp = (-gₓT)/vcat(FdxT[dinds,:], -FxT[ainds,:])
@@ -3103,7 +3103,7 @@ function get_initial_adjoint(dinds::UnitRange{Int64}, ainds::UnitRange{Int64}, g
 end
 
 # This function does a particular improvement, specific for the delta robot, to increase numerical accuracy
-function get_initial_adjoint_deltaversion(dinds::UnitRange{Int64}, ainds::UnitRange{Int64}, gₓT::Matrix{Float64}, dgₓT::Matrix{Float64}, FxT::Matrix{Float64}, FdxT::Matrix{Float64}, dFdxT::Matrix{Float64}, xT::Vector{Float64}, yT::Vector{Float64}, T::Float64)::Tuple{Vector{Float64}, Vector{Float64}}
+function get_initial_adjoint_deltaversion(dinds::UnitRange{Int}, ainds::UnitRange{Int}, gₓT::Matrix{Float64}, dgₓT::Matrix{Float64}, FxT::Matrix{Float64}, FdxT::Matrix{Float64}, dFdxT::Matrix{Float64}, xT::Vector{Float64}, yT::Vector{Float64}, T::Float64)::Tuple{Vector{Float64}, Vector{Float64}}
     λT  = zeros(length(dinds)+length(ainds))
     dλT = zeros(length(dinds)+length(ainds))
     # λT[dinds] = zeros(length(dinds))  # Already are zero, so no need to execute this line
@@ -3140,7 +3140,7 @@ function get_initial_adjoint_beta(λT::Vector{Float64}, FθT::Matrix{Float64}, g
     zeros(length(gθ)), gθ - ((λT')*FθT)[:]
 end
 
-function get_initial_adjoint_ODEdistbeta(λxwT::Vector{Float64}, λwT::Vector{Float64}, ad::AdjointSDEApproxData, T::Float64, nw::Int64)::Tuple{Vector{Float64}, Vector{Float64}}
+function get_initial_adjoint_ODEdistbeta(λxwT::Vector{Float64}, λwT::Vector{Float64}, ad::AdjointSDEApproxData, T::Float64, nw::Int)::Tuple{Vector{Float64}, Vector{Float64}}
     dβ = zeros(ad.nη)
     # dβᵢ = - λₓᵀ(Ǎηᵢ*xw + B̌ηᵢ*v) - λwᵀČηᵢ
     for ind=1:ad.nη
@@ -3159,7 +3159,7 @@ end
 #     0.0, - (λT')*FwT*wθᵢT
 # end
 
-function get_initial_adjoint_beta_dist(λT::Vector{Float64}, FwT::Matrix{Float64}, wηT::Vector{Float64}, nη::Int64)::Tuple{Vector{Float64}, Vector{Float64}}
+function get_initial_adjoint_beta_dist(λT::Vector{Float64}, FwT::Matrix{Float64}, wηT::Vector{Float64}, nη::Int)::Tuple{Vector{Float64}, Vector{Float64}}
     nw = length(wηT)÷nη
     β = zeros(nη)
     dβ = zeros(nη)

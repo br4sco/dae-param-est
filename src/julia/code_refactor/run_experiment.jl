@@ -27,13 +27,13 @@ include("simulation.jl")
 # import ProgressMeter
 
 # === DATA TYPES AND CONSTANTS ===
-const PENDULUM = 1
-const MOH_MDL  = 2
-const DELTA    = 3
+const PENDULUM::Int = 1
+const MOH_MDL::Int  = 2
+const DELTA::Int    = 3
 
-const FOR_SENS = 1
-const ADJ_SENS = 2
-const ADJ_ODEDIST = 3
+const FOR_SENS::Int = 1
+const ADJ_SENS::Int = 2
+const ADJ_ODEDIST::Int = 3
 
 struct ExperimentData
     # Y is the measured output of system, contains N+1 rows and E columns
@@ -54,11 +54,11 @@ end
 model_id::Int = DELTA
 # Number of monte-carlo simulations used for estimation, e.g. samples of the gradient used to estimate the gradient
 # Note that, when two independent estimates are needed, a total of 2M samples is generated, M for each estimate
-const M = Threads.nthreads()÷2
+const M::Int = Threads.nthreads()÷2
 
 # Settings for the InterSampleWindow, only relevant when user_exact_interp in get_experiment_data() is set to true
-const W = 100           # Number of intervals for which isw stores data
-const Q = 1000          # Number of conditional samples stored per interval
+const W::Int = 100           # Number of intervals for which isw stores data
+const Q::Int = 1000          # Number of conditional samples stored per interval
 
 # The initial learning rate for each component for each component of the disturbance parameters ρ
 # The components corresponding to the free disturbance parameters η are picked out later
@@ -102,13 +102,13 @@ h_sens_base(sol,θ) = apply_outputfun(x->md.f_sens_baseline(x,θ), sol)         
 h_all_adj(sol,θ) = apply_outputfun(x->md.f_all_adj(x,θ), sol)                               # For adjoint method, needs to get all nominal states, including model output
 
 # === SOLVER PARAMETERS ===
-const abstol = 1e-8#1e-9
-const reltol = 1e-5#1e-6
-const maxiters_sol = Int64(1e8)
-const maxiters_opt = 100
+const abstol::Float64 = 1e-8#1e-9
+const reltol::Float64 = 1e-5#1e-6
+const maxiters_sol::Int = Int(1e8)
+const maxiters_opt::Int = 100
 
 # === HELPER FUNCTIONS TO READ AND WRITE DATA ===
-const data_dir = joinpath("../data", "experiments")
+const data_dir::String = joinpath("../data", "experiments")
 exp_path(expid) = joinpath(data_dir, expid)
 data_Y_path(expid) = joinpath(exp_path(expid), "Y.csv")
 
@@ -264,7 +264,7 @@ function get_disturbance_metadata(W_meta_raw::Matrix{Float64})::DisturbanceMetaD
     DisturbanceMetaData(nx, nv, nw, η_true, free_par_inds, free_par_bounds, get_all_ηs, num_rel, Nw, δ)
 end
 
-function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData; verbose::Bool = true, E_in::Int64=typemax(Int64))
+function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData; verbose::Bool = true, E_in::Int=typemax(Int))
     let N = size(exp_data.Y, 1)÷md.ny-1, E = min(size(exp_data.Y, 2), E_in), dη = length(exp_data.W_meta.η), W_meta = exp_data.W_meta
 
         opt_pars_baseline = zeros(md.dθ, E)
@@ -322,7 +322,7 @@ function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
 end
 
 function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData, isws::Vector{InterSampleWindow}; 
-    use_exact_interp::Bool = false, maxiters::Int64 = maxiters_opt, verbose::Bool = true, E_in::Int64=typemax(Int64), method_type::Int64 = FOR_SENS, Ainvertible::Bool = false)
+    use_exact_interp::Bool = false, maxiters::Int = maxiters_opt, verbose::Bool = true, E_in::Int=typemax(Int), method_type::Int = FOR_SENS, Ainvertible::Bool = false)
     
     # Tsλ is the sampling period of the forward solution that is then used for the backwards computation for the adjoint method, good to have smaller for better interpolation
     let N = size(exp_data.Y, 1)÷md.ny-1, E = min(size(exp_data.Y, 2), E_in), W_meta = exp_data.W_meta, δ = W_meta.δ, Ts = exp_data.Ts, Tsλ = exp_data.Ts/10
