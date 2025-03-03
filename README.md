@@ -57,6 +57,14 @@ CSV.write("data/experiments/expid/meta_Y.csv", meta_Y)
 ```
 This stores the necessary files in ```src/julia/experiments/expid```. For the experiments in the paper `δ = 0.01`, `E=100`, and `Nw=10*N` was used.
 
+If multisine inputs are used instead, replace the line starting with XU by
+
+```{julia}
+_, meta_U = get_multisine_data(10)
+```
+
+and remove the line ```writedlm("data/experiments/expid/U.csv", U, ',')```.
+
 ### Run the experiment
 To run the experiment do
 ```

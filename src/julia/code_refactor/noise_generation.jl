@@ -508,7 +508,6 @@ function disturbance_model_1(Ts::Float64; scale::Float64=0.6)::Tuple{DT_SS_Model
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
-    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
     return mdl, [nx, nv, nw], η0
 end
 
@@ -529,7 +528,6 @@ function disturbance_model_2(Ts::Float64; scale::Float64=0.2)::Tuple{DT_SS_Model
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
-    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
     return mdl, [nx, nv, nw], η0
 end
 
@@ -548,7 +546,6 @@ function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
-    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
     return mdl, [nx, nv, nw], η0
 end
 
@@ -570,11 +567,10 @@ function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     dη = length(η0)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
-    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
     return mdl, [nx, nv, nw], η0
 end
 
-# Used for new multivariate input for delta-robot
+# Used for new multivariate disturbance for delta-robot
 function disturbance_model_5(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
@@ -591,18 +587,38 @@ function disturbance_model_5(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     η0 = vcat(a_vec, c_vec)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nw), Ts)
-    # return mdl, DataFrame(nx = nx, nv = nv, nw = nw, η = η0, bias=bias)
     return mdl, [nx, nv, nw], η0
 end
 
-function get_multisine(num::Int; min_amp::Float64=1.0, max_amp::Float64=10.0, min_freq::Float64=1.0, max_freq::Float64=50.0)
-    amps = rand(min_amp:0.01:max_amp, num)
-    freqs = rand(min_freq:0.1:max_freq, num)
-    phases = [-k*(k-1)*pi/num for k=1:num]  # Schröder phases
-    t -> sum(
-            amps.*(sin.(freqs*t+phases))
-        )
+# Multisine is represented by amplitudes, frequencies, and number of components. Phases can be computed from this.
+# For delta robot, recommended values are:
+#   ncomp = 50, dim=3
+#   min_amp & max_amp = 0.001 & 0.002
+#   min_freq & max_freq = 200.0 & 20000.0
+function get_multisine_data(ncomp::Int, dim::Int; min_amp::Float64=0.001, max_amp::Float64=0.002, min_freq::Float64=200.0, max_freq::Float64=20000.0)::Tuple{Function, DataFrame}
+    amp_step = (max_amp-min_amp)*0.001
+    freq_step = (max_freq-min_freq)*0.001
+    amps = rand(min_amp:amp_step:max_amp, ncomp, dim)
+    freqs = rand(min_freq:freq_step:max_freq, ncomp, dim)
+    meta_U = DataFrame(amps = amps[:], freqs = freqs[:], dim=dim)
+    get_multisines(amps, freqs), meta_U
 end
+
+function get_multisines(amps::Matrix{Float64}, freqs::Matrix{Float64})::Function
+    ncomp, dim = size(amps)
+    phases = [-k*(k-1)*pi/ncomp for k=1:ncomp]  # Schröder phases
+    t -> [sum(
+            amps[:,ind].*(sin.(freqs[:,ind]*t+phases))
+        ) for ind=1:dim]
+end
+
+# function get_multisine(amps::Vector{Float64}, freqs::Vector{Float64})::Function
+#     ncomp = length(amps)
+#     phases = [-k*(k-1)*pi/ncomp for k=1:ncomp]  # Schröder phases
+#     t -> sum(
+#             amps.*(sin.(freqs*t+phases))
+#         )
+# end
 
 function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     bias::Float64=0.0, scale::Float64=1.0)::Tuple{Matrix{Float64}, Matrix{Float64}, DataFrame}
@@ -612,14 +628,13 @@ function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     n_tot = size(mdl.Cd,2)
 
     # We use Nw+1, since we want samples at t₀, t₁, ..., t_{N_w}, i.e. a total of N_w+1 samples, 
-    ZS = [randn(Nw+1, n_tot) for m = 1:M]
-    XW = simulate_noise_process_mangled(mdl, ZS, meta_raw[2])
+    ZS = [randn(n_tot, Nw+1) for m = 1:M]
+    XW = simulate_noise_process_mangled(mdl, ZS)
     XW, get_system_output_mangled(mdl, XW).+ bias, metadata
 end
 
 # Converts mangled states to an output vector using the provided model
-function get_system_output_mangled(mdl::DT_SS_Model, states::Matrix{Float64}
-    )::Matrix{Float64}
+function get_system_output_mangled(mdl::DT_SS_Model, states::Matrix{Float64})::Matrix{Float64}
     M = size(states, 2)
     (nw, n_tot) = size(mdl.Cd)
     N = size(states, 1)÷n_tot

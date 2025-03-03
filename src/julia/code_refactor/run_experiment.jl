@@ -3,7 +3,7 @@ include("noise_interpolation_multivar.jl")
 # include("minimizers.jl")
 include("models.jl")
 using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_disc_then_diff, simulate_noise_process, simulate_noise_process_mangled, discretize_ct_noise_model_with_adj_SDEApprox_mats
-using .NoiseGeneration: discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible
+using .NoiseGeneration: discretize_ct_noise_model, discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible, get_multisines
 using .NoiseInterpolation: InterSampleWindow, initialize_isw, reset_isws!, noise_inter, mk_newer_noise_interp, mk_noise_interp, linear_interpolation_multivar
 using .DynamicalModels: AdjointSDEApproxData
 using Interpolations: Cubic, BSpline, NoInterp, Line, extrapolate, scale, interpolate, Extrapolation
@@ -177,7 +177,6 @@ end
 
 function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_gen::Integer = 100)::Tuple{ExperimentData, Array{InterSampleWindow, 1}}
 
-    input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')[:]
     U_meta_raw, U_meta_names = 
         readdlm(joinpath(data_dir, expid*"/meta_U.csv"), ',', header=true)
     Y_meta_raw, Y_meta_names =
@@ -186,10 +185,19 @@ function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_ge
     Ts = Y_meta_raw[1,1]
     N = Int(Y_meta_raw[1,2])
     W_meta_raw, W_meta_names =
-        readdlm(joinpath(data_dir, expid*"/meta_W.csv"), ',', header=true)  # Used to open meta_W_new.csv, but it's time for new to become the default
+        readdlm(joinpath(data_dir, expid*"/meta_W.csv"), ',', header=true)
     W_meta = get_disturbance_metadata(W_meta_raw)
 
-    u(t::Float64) = linear_interpolation_multivar(input, W_meta.δ, n_u_out)(t)
+    u = if size(U_meta_raw, 2) == 3
+        # Input is multisine
+        dim = Int(U_meta_raw[1,3])
+        # The first column of U_meta_raw is the amplitudes of the multisines while the other is the frequencies
+        get_multisines(reshape(U_meta_raw[:,1], :, dim), reshape(U_meta_raw[:,2], :, dim))
+    else
+        # Input is from the same model as the disturbance
+        input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')[:]
+        linear_interpolation_multivar(input, W_meta.δ, n_u_out)(t)
+    end
 
     # Makes sure there is a tmp-directory, for future use
     if !isdir(joinpath(data_dir, "tmp/"))
@@ -347,8 +355,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
             function get_gradient_estimate_for(y::Vector{Float64}, free_pars::Vector{Float64}, isws::Vector{InterSampleWindow}, M_mean::Int=1)
                 # --- Generates disturbance signal for the provided parameters ---
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
-                # Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.nv) for _ = 1:2M_mean]    # OLD
-                Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]    # NEW
+                Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
                 # ---_ DEBYG
 
@@ -398,8 +405,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
             function get_gradient_estimate_adj(y::Vector{Float64}, free_pars::Vector{Float64}, isws::Vector{InterSampleWindow}, M_mean::Int=1)
                 # --- Generates disturbance signal for the provided parameters ---
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
-                # Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.nv) for _ = 1:2M_mean]    # OLD
-                Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]    # NEW
+                Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
                 dmdl = discretize_ct_noise_model_disc_then_diff(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
                 wm(m::Int) = if use_exact_interp
@@ -445,8 +451,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 # --- Generates disturbance signal for the provided parameters ---
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
                 # For the discrete-time model, the input is the same size as the state, so we have nx input dimensions for nv subsystems
-                # Zm = [randn(W_meta.Nw+1, W_meta.nx*W_meta.nv) for _ = 1:2M_mean]    # OLD
-                Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]    # NEW
+                Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
                 dmdl, Ǎη, B̌η, Čη, Ǎ = if Ainvertible
                     discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
@@ -532,4 +537,23 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
     end
 end
 
+# ===================== DEBUGGING FUNCTIONS =====================
+function get_disturbance_from_file(expid::String; M::Int=1, use_exact_interp::Bool=false)::Function
+    W_meta_raw, _ =
+        readdlm(joinpath(data_dir, expid*"/meta_W.csv"), ',', header=true)
+    W_meta = get_disturbance_metadata(W_meta_raw)
 
+    Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:M]
+    η = W_meta.η
+    dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), W_meta.δ)
+    wm(m::Int) = if use_exact_interp
+            reset_isws!(isws)
+            XWm = simulate_noise_process(dmdl, Zm)
+            mk_newer_noise_interp(view(η, 1:W_meta.nx), dmdl.Cd, XWm, m, W_meta.nv, W_meta.δ, isws)
+        else
+            XWm = simulate_noise_process_mangled(dmdl, Zm)
+            mk_noise_interp(dmdl.Cd, XWm, m, W_meta.δ)
+        end
+
+    wm
+end
