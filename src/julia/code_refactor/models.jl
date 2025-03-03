@@ -28,9 +28,9 @@ struct AdjointSDEApproxData
     v::Function
     # TODO: Generally, but especially when having many free disturbance parameters, the below matrices will be very sparse.
     # It would be wise to use a sparse matrix implementation instead. That's a future project though.
-    Ǎη::AbstractMatrix{Float64}
-    B̌η::AbstractMatrix{Float64}
-    Čη::AbstractMatrix{Float64}
+    Ǎηa::AbstractMatrix{Float64}
+    B̌ηa::AbstractMatrix{Float64}
+    Čηc::AbstractMatrix{Float64}
     Ǎ::AbstractMatrix{Float64}
     Č::AbstractMatrix{Float64}
     na::Int           # Number of the disturbance parameters that correspond to the a-parameters
@@ -465,7 +465,7 @@ function pendulum_adjoint_k_1dist_ODEdist(w::Function, pars::Vector{Float64}, T:
             # ---------- β-equations ----------
             # 0 = dβᵢ - gθᵢ + λᵀFθᵢ + λₓᵀ(Ǎθᵢ*xw(t) + B̌θᵢ*v(t)) + λwᵀČθᵢxw(t)                                     # Analytical form
             res[nx+ndist+1]  = dz[nx+ndist+1] - z[3]*abs(x(t,4))*x(t,4) - z[4]*abs(x(t,5))*x(t,5)                                 # For parameter k, only dβᵢ + λᵀFθᵢ
-            res[nx+ndist+2]  = dz[nx+ndist+2] + z[8:9]⋅(ad.Ǎη[1:nxw,:]*ad.xw(t) - ad.B̌η[1:nxw,:]*ad.v(t)) + z[10]⋅(ad.Čη*ad.xw(t))        # For disturbance parameter, only  dβᵢ + λₓᵀ(Ǎθᵢ*xw(t) + B̌θᵢ*v(t)) + λwᵀČθᵢxw(t)
+            res[nx+ndist+2]  = dz[nx+ndist+2] + z[8:9]⋅(ad.Ǎηa[1:nxw,:]*ad.xw(t) - ad.B̌ηa[1:nxw,:]*ad.v(t)) + z[10]⋅(ad.Čηc*ad.xw(t))        # For disturbance parameter, only  dβᵢ + λₓᵀ(Ǎθᵢ*xw(t) + B̌θᵢ*v(t)) + λwᵀČθᵢxw(t)
 
             nothing
         end
@@ -1657,10 +1657,15 @@ function delta_adjoint_allpar_alldist_ODEdist(w::Function, pars::Vector{Float64}
             # For ODE disdturbance parameters, only dβᵢ + λₓᵀ(Ǎθᵢ*xw(t) + B̌θᵢ*v(t)) + λwᵀČθᵢxw(t)
             xwt = ad.xw(t)
             vt = ad.v(t)
-            for ind=1:ad.nη
-                # TODO: To avoid having these blocks in A, B, and C that we know are zero, we could simply use the variable na and do a seprate iteration before and after ind=na
+            # For A-parameters, parametrizing only Ǎ and B̌
+            for ind=1:ad.na
                 res[nx+ndist+12+ind] =  # 12 because nθ - nη = 12
-                    dz[nx+ndist+12+ind] + z[nx+1:nx+nxw]⋅(ad.Ǎη[(ind-1)nxw+1:ind*nxw,:]*xwt + ad.B̌η[(ind-1)nxw+1:ind*nxw,:]*vt) + z[nx+nxw+1:nx+ndist]⋅(ad.Čη[(ind-1)nw+1:ind*nw,:]*xwt)
+                    dz[nx+ndist+12+ind] + z[nx+1:nx+nxw]⋅(ad.Ǎηa[(ind-1)nxw+1:ind*nxw,:]*xwt + ad.B̌ηa[(ind-1)nxw+1:ind*nxw,:]*vt)
+            end
+            # For C-parameters, parametrizing only Č
+            for ind=ad.na+1:ad.nη
+                res[nx+ndist+12+ind] =  # 12 because nθ - nη = 12
+                    dz[nx+ndist+12+ind] + z[nx+nxw+1:nx+ndist]⋅(ad.Čηc[(ind-ad.na-1)nw+1:(ind-ad.na)*nw,:]*xwt)
             end
 
             nothing
@@ -3137,12 +3142,18 @@ end
 
 function get_initial_adjoint_ODEdistbeta(λxwT::Vector{Float64}, λwT::Vector{Float64}, ad::AdjointSDEApproxData, T::Float64, nw::Int)::Tuple{Vector{Float64}, Vector{Float64}}
     dβ = zeros(ad.nη)
-    # dβᵢ = - λₓᵀ(Ǎηᵢ*xw + B̌ηᵢ*v) - λwᵀČηᵢ
-    for ind=1:ad.nη
-        Ǎηᵢ = ad.Ǎη[(ind-1)*ad.nxw+1:ind*ad.nxw,:]
-        B̌ηᵢ = ad.B̌η[(ind-1)*ad.nxw+1:ind*ad.nxw,:]
-        Čηᵢ = ad.Čη[(ind-1)*nw+1:ind*nw,:]
-        dβ[ind] = (λxwT')*(Ǎηᵢ*ad.xw(T) + B̌ηᵢ*ad.v(T)) + (λwT')*Čηᵢ*ad.xw(T)
+    # dβᵢ = - λₓᵀ(Ǎηᵢ*xw + Ǎηᵢ*v) - λwᵀČηᵢ
+
+    # For A-parameters, so Čηᵢ = 0
+    for ind=1:ad.na
+            Ǎηᵢ = ad.Ǎηa[(ind-1)*ad.nxw+1:ind*ad.nxw,:]
+            B̌ηᵢ = ad.B̌ηa[(ind-1)*ad.nxw+1:ind*ad.nxw,:]
+            dβ[ind] = (λxwT')*(Ǎηᵢ*ad.xw(T) + B̌ηᵢ*ad.v(T))
+    end
+    # For C-parameters, so Ǎηᵢ=0 and Ǎηᵢ=0
+    for ind=ad.na+1:ad.nη
+        Čηᵢ = ad.Čηc[(ind-ad.na-1)*nw+1:(ind-ad.na)*nw,:]
+        dβ[ind] = (λwT')*Čηᵢ*ad.xw(T)
     end
     zeros(ad.nη), dβ
 end

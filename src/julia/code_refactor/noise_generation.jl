@@ -320,21 +320,17 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
     B̌ηa = kron(Matrix(I,na,na), P) \ (Bdηa - (R/P)*Bd)
     # B̌  = P\Bd
 
-    Čη = zeros(nη*nw, n_tot)
-    # Čη = [Čηa; Čηc] = [0; Čηc]
+    Čηc = zeros((nη-na)*nw, n_tot)
     for ηind = na+1:nη
         # We want to pass the index of the currently considered c-parameter in the C-matrix to get_C_row_and_col
         # sens_inds contains the index of that parameter in η, which contains the additional na
         # parameters corresponding to the A-matrix
         row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
-        Čη[(ηind-1)nw + row, col] = 1.0
+        Čηc[(ηind-na-1)nw + row, col] = 1.0
     end
 
-    Ǎη = vcat(Ǎηa, zeros((nη-na)n_tot, n_tot))
-    B̌η = vcat(B̌ηa, zeros((nη-na)n_tot, n_tot))
-
     # Returns non-sensitivity disturbance model and other matrices needed for adjoint disturbance sensitivity
-    return DT_SS_Model(Ad, Bd, mdl.C, zeros(n_tot), Ts), Ǎη, B̌η, Čη, mdl.A
+    return DT_SS_Model(Ad, Bd, mdl.C, zeros(n_tot), Ts), Ǎηa, B̌ηa, Čηc, mdl.A
 end
 
 function discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(
@@ -351,37 +347,31 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(
 
     # Indices of free parameters corresponding to "a-vector" in disturbance model
     sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
-    # sens_inds_c = sens_inds[findall(sens_inds .> nx)]
     nη   = length(sens_inds)
     na = length(sens_inds_a)
-    # nx_sens = (1+na)*nx
 
-    Aηa = zeros(na*n_tot, n_tot)
+    Ǎηa = zeros(na*n_tot, n_tot)
     for i = 1:na
-        Aηa[(i-1)*n_tot+1, sens_inds_a[i]] = -1.0
+        Ǎηa[(i-1)*n_tot+1, sens_inds_a[i]] = -1.0
     end
 
     Mexp, B̃d, B̃dηa = get_disc_then_diff_matrices(mdl, Ts, sens_inds)
     Ãd = Mexp[1:n_tot, 1:n_tot]
     Ãdηa = Mexp[n_tot+1:n_tot*(1+na), 1:n_tot]
     M = (Ãd - Matrix(1.0I, n_tot, n_tot))\B̃d
-    B̌ηa = Aηa*M + kron(Matrix(I,na,na), mdl.A/(Ãd-Matrix(I,n_tot,n_tot)))*(B̃dηa-Ãdηa*M)
+    B̌ηa = Ǎηa*M + kron(Matrix(I,na,na), mdl.A/(Ãd-Matrix(I,n_tot,n_tot)))*(B̃dηa-Ãdηa*M)
 
-    Čη = zeros(nη*nw, n_tot)
-    # Čη = [Čηa; Čηc] = [0; Čηc]
+    Čηc = zeros((nη-na)*nw, n_tot)
     for ηind = na+1:nη
         # We want to pass the index of the currently considered c-parameter in the C-matrix to get_C_row_and_col
         # sens_inds contains the index of that parameter in η, which contains the additional na
         # parameters corresponding to the A-matrix
         row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
-        Čη[(ηind-1)nw + row, col] = 1.0
+        Čηc[(ηind-na-1)nw + row, col] = 1.0
     end
 
-    Ǎη = vcat(Aηa, zeros((nη-na)n_tot, n_tot))
-    B̌η = vcat(B̌ηa, zeros((nη-na)n_tot, n_tot))
-
     # Returns non-sensitivity disturbance model and other matrices needed for adjoint disturbance sensitivity
-    return DT_SS_Model(Ãd, B̃d, mdl.C, zeros(n_tot), Ts), Ǎη, B̌η, Čη, mdl.A
+    return DT_SS_Model(Ãd, B̃d, mdl.C, zeros(n_tot), Ts), Ǎηa, B̌ηa, Čηc, mdl.A
 end
 
 # ================= Functions simulating disturbance =======================
