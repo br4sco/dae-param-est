@@ -33,15 +33,11 @@ struct AdjointSDEApproxData
     Čη::AbstractMatrix{Float64}
     Ǎ::AbstractMatrix{Float64}
     Č::AbstractMatrix{Float64}
-    # TODO: Now that I have introduced Ǎ in here, I don't think we need ρ anymore. But maybe check performance to make sure.
-    ρ::Vector{Float64}  # Contains all disturbance parameters, both free and known
     na::Int           # Number of the disturbance parameters that correspond to the a-parameters
     nxw::Int          # Dimension of xw
     nw::Int           # Dimension of w
     nη::Int           # Number of unknown disturbance parameters
 end
-
-# TODO: Now that you make models disturbace model agnostic, you should be more explicit that all models assume B not parametrized! Make comments more helpful, why isn't B in formulas?
 
 # Just for delta robot
 struct DeltaInitData
@@ -409,11 +405,10 @@ end
 
 # -------------------- Adjoint sensitivity models with ODE disturbance model ---------------------------
 
-# NOTE: Additional assumptions are nxw=2, nw=1, only relevant in residual function
 function pendulum_adjoint_k_1dist_ODEdist(w::Function, pars::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xθ0::Matrix{Float64}, dx::func_type, dx2::func_type, ad::AdjointSDEApproxData)::Tuple{Model,Function}
     let m = pars[1], L = pars[2], g = pars[3], k = pars[4], nxw = ad.nxw, nw = ad.nw
         nθ = size(xθ0,2)
-        nx = size(xθ0,1)    # TODO: This should be the number of variables/equations in ADJOINT VERSION of system. So 33 in Delta case. Check your implementation, what is the size of x in delta case? Is it 33???
+        nx = size(xθ0,1)
         ndist = nxw + nw
         @assert (nθ == 2) "pendulum_adjoint_k_1dist_ODEdist is hard-coded to only handle parameters k, and one disturbance parameter. Make sure to pass correct xθ0 (currently passing for $nθ parameters)"
 
@@ -459,8 +454,8 @@ function pendulum_adjoint_k_1dist_ODEdist(w::Function, pars::Vector{Float64}, T:
             res[5]  = m*dz[4] + z[2] - 2*k*abs(x(t,5))*z[4] - x(t,2)*z[6]
             res[6]  = 2*x(t,1)*dz[1] + 2*x(t,2)*dz[2] + 2*dx(t,1)*z[1] + 2*dx(t,2)*z[2]
             res[7]  = (2*(x2(t,7) - y(t,1)))/T - z[7]
-            # ---------- Disturbance adjoint system ---------- (This part is hard-coded and assumes nxw=2, nw=1)
-            # 0 = dλₓᵀ + λₓᵀǍ + λwᵀČ                                 # Analytical form
+            # ---------- Disturbance adjoint system ----------
+            # 0 = dλₓᵀ + λₓᵀǍ + λwᵀČ                                # Analytical form
             # 0 = dzₓ' + (zₓ')*Ǎ + (zw')*Č                          # Matrix form
             res[nx+1:nx+nxw] = dz[nx+1:nx+nxw]' + (z[nx+1:nx+nxw]')*ad.Ǎ + (z[nx+nxw+1:nx+ndist]')*ad.Č
             # 0 = λwᵀ + λᵀFw                                        # Analytical form              
@@ -721,7 +716,6 @@ function delta_forward_γ(u::Function, w::Function, pars::Vector{Float64}, model
     end
 end
 
-# NOTE: TODO: f! currently only for specific disturbance model! Make agnostic!
 # Used to be called delta_robot_gc_allpar_alldist
 function delta_forward_allpar_alldist(u::Function, w::Function, pars::Vector{Float64}, model_data::NamedTuple)::Model
     # g = 0 because this is the gravity-compensated model
@@ -934,6 +928,8 @@ function delta_forward_allpar_alldist(u::Function, w::Function, pars::Vector{Flo
             res[30ind+18] +=	z[18]
 
             for ind = 13:24 # wt first contains the 3 elements of w, then derivative of w wrt to first parameter, then second parameter, etc...
+                # Fw wθᵢ
+                # Expressions follow from Fw being all zeros except for -2w(T)[1] on (10,1), -2w(T)[2] on (13,2), and -2w(T)[3] on (16,3)
                 res[30ind + 10] += -2wt[1]*wt[3(ind-12) + 1]
                 res[30ind + 13] += -2wt[2]*wt[3(ind-12) + 2]
                 res[30ind + 16] += -2wt[3]*wt[3(ind-12) + 3]
@@ -1167,7 +1163,6 @@ function delta_adjoint_γ(_::Function, pars::Vector{Float64}, T::Float64, x::fun
     end
 end
 
-# NOTE: TODO: f! currently only for specific disturbance model! Make agnostic!
 # Used to be called delta_robot_gc_foradj_alldist
 function delta_adjoint_allpar_alldist(w::Function, pars::Vector{Float64}, T::Float64, x::func_type, x2::func_type, y::func_type, dy::func_type, xθ0::Matrix{Float64}, dx::func_type, dx2::func_type)::Tuple{Model,Function}
     # g = 0 because this is the gravity-compensated model
@@ -1175,6 +1170,7 @@ function delta_adjoint_allpar_alldist(w::Function, pars::Vector{Float64}, T::Flo
         nx, nθ = size(xθ0)
         @assert (nθ == 24) "delta_adjoint_allpar_alldist is hard-coded to handle 24 parameters (12 dynamical and 12 disturbance), make sure to pass correct xθ0. Currently passing $nθ parameters."
         @assert (nx == 33) "delta_adjoint_allpar_alldist expects the DAE state to have 33 components, the passed state has $nx components instead"
+        nη = 12 # Number of disturbance parameters
 
         FxT = [-L1*cos(x(T,1))*dx(T,26)-L1*cos(x(T,1))*dx(T,29)-L1*sin(x(T,1))*dx(T,27)-L1*sin(x(T,1))*dx(T,30)   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
             0.0   -L2*cos(x(T,2))*dx(T,26)-L2*cos(x(T,2))*dx(T,29)-L2*cos(x(T,3))*sin(x(T,2))*dx(T,27)-L2*cos(x(T,3))*sin(x(T,2))*dx(T,30)-L2*sin(x(T,2))*sin(x(T,3))*dx(T,25)-L2*sin(x(T,2))*sin(x(T,3))*dx(T,28)   L2*cos(x(T,2))*cos(x(T,3))*dx(T,25)+L2*cos(x(T,2))*cos(x(T,3))*dx(T,28)-L2*cos(x(T,2))*sin(x(T,3))*dx(T,27)-L2*cos(x(T,2))*sin(x(T,3))*dx(T,30)   0.0   0.0   0.0   0.0   0.0   0.0   0.0   -1.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
@@ -1277,15 +1273,15 @@ function delta_adjoint_allpar_alldist(w::Function, pars::Vector{Float64}, T::Flo
             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0
             0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0   0.0]
-        # 3 is hard-coded value for nw. TODO: Maybe make disturbance model agnostic???
+        # 3 is hard-coded value for nw.
         FwT = vcat(zeros(9,3), [
             -2w(T)[1]   0.0     0.0
             0.0         0.0     0.0
             0.0         0.0     0.0
             0.0     -2w(T)[2]   0.0
             0.0         0.0     0.0
-            0.0         0.0     -2w(T)[3]
             0.0         0.0     0.0
+            0.0         0.0     -2w(T)[3]
             0.0         0.0     0.0
             0.0         0.0     0.0
         ], zeros(15,3))
@@ -1401,10 +1397,9 @@ function delta_adjoint_allpar_alldist(w::Function, pars::Vector{Float64}, T::Flo
 
         ######################## INITIALIZING ADJOINT SYSTEM (Computing terminal values) ####################
         # Using special initialization function for delta robot, it improves the accuracy of the initial values (values at t=T that is)
-        λT, dλT = get_initial_adjoint_deltaversion(dinds, ainds, gₓT, dgₓT, FxT, Fdx(T), dFdxT, x(T,1:33), y(T,1:3), T) # TODO: Shouldn't we use nx instead of 33 here????
-        βT, dβT = get_initial_adjoint_beta(λT, FθT, zeros(12))  # TODO: 12 because n\theta - n\eta, any way to not hard-code it?
-        # NOTE: Specific for disturbance model, TODO: make agnostic!!!
-        βdistT, dβdistT = get_initial_adjoint_beta_dist(λT, FwT, w(T)[4:end], 12)   # TODO: Make n\eta  not hard-coded!
+        λT, dλT = get_initial_adjoint_deltaversion(dinds, ainds, gₓT, dgₓT, FxT, Fdx(T), dFdxT, x(T,1:nx), y(T,1:3), T)
+        βT, dβT = get_initial_adjoint_beta(λT, FθT, zeros(abs(nθ-nη)))
+        βdistT, dβdistT = get_initial_adjoint_beta_dist(λT, FwT, w(T)[4:end], nη)
         z0 = vcat(λT, βT, βdistT)
         dz0 = vcat(dλT, dβT, dβdistT)
 
@@ -3151,13 +3146,6 @@ function get_initial_adjoint_ODEdistbeta(λxwT::Vector{Float64}, λwT::Vector{Fl
     end
     zeros(ad.nη), dβ
 end
-
-# TODO: Old, for scalar case. Delete if new for multivariate case works well
-# function get_initial_adjoint_beta_dist(λT::Vector{Float64}, FwT::Matrix{Float64}, wθᵢT::Vector{Float64})::Tuple{Float64, Float64}
-#     # Assuming parameter parametrizes ONLY disturbance model, we have:
-#     # dβᵢ = - λᵀ(Fw wθᵢ)
-#     0.0, - (λT')*FwT*wθᵢT
-# end
 
 function get_initial_adjoint_beta_dist(λT::Vector{Float64}, FwT::Matrix{Float64}, wηT::Vector{Float64}, nη::Int)::Tuple{Vector{Float64}, Vector{Float64}}
     nw = length(wηT)÷nη

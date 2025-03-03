@@ -493,7 +493,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 dy_func = get_interpolation(transpose(reshape(dy_est, md.ny, :)), (N-1)*Ts, Ts)
     
                 na = length(findall(W_meta.free_par_inds .<= W_meta.nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
-                ad(m) = AdjointSDEApproxData(xwm(m), vm(m), Ǎη, B̌η, Čη, Ǎ, dmdl.Cd, η, na, W_meta.nx*W_meta.nv, W_meta.nw, length(W_meta.free_par_inds))   # TODO: Copying these matrices is a waste of memory, a reference of some sort would be better
+                ad(m) = AdjointSDEApproxData(xwm(m), vm(m), Ǎη, B̌η, Čη, Ǎ, dmdl.Cd, na, W_meta.nx*W_meta.nv, W_meta.nw, length(W_meta.free_par_inds))   # TODO: Copying these matrices is a waste of memory, a reference of some sort would be better
 
                 Statistics.mean(solve_adj_in_parallel(m -> get_one_grad_rel_adjodedist(y_func, dy_func, Xcomp_m[m], Xcomp_m[M_mean+m], free_pars, wm(m), ad(m)), 1:M_mean, length(free_pars)), dims=2)[:]
             end
