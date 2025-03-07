@@ -44,26 +44,19 @@ To use the same disturbance model as described in the paper, in a julia repl in 
 ```{julia}
 using DelimitedFiles, CSV, DataFrames
 include("noise_generation.jl")
-using .NoiseGeneration: get_filtered_noise, disturbance_model_4
+using .NoiseGeneration: get_filtered_noise, disturbance_model_5, get_multisine_data   # disturbance_model_5 is for delta robot
 
-XW, Wmat, meta_W = get_filtered_noise(disturbance_model_4, δ, E, Nw, scale=0.6)  # Generated process disturbance and meta-data
-XU, U, meta_U = get_filtered_noise(disturbance_model_4, δ, 1, Nw, scale=0.2)  # Generates control input and meta-data
+XW, Wmat, meta_W = get_filtered_noise(disturbance_model_5, δ, E, Nw, scale=0.6)  # Generated process disturbance and meta-data
+# XU, U, meta_U = get_filtered_noise(disturbance_model_5, δ, 1, Nw, scale=0.2)  # OLD: Generates control input and meta-data
+_, meta_U = get_multisine_data(50, 3)  # NEW, with multisine inputs used instead
 meta_Y = DataFrame(Ts=10δ, N=Nw÷10)	# It is convenient to also generate metadata for system output
 writedlm("data/experiments/expid/XW_T.csv", transpose(XW), ',')
-writedlm("data/experiments/expid/U.csv", U, ',')
+# writedlm("data/experiments/expid/U.csv", U, ',') # OLD, only for input generated from disturbance model
 CSV.write("data/experiments/expid/meta_W.csv", meta_W)
 CSV.write("data/experiments/expid/meta_U.csv", meta_U)
 CSV.write("data/experiments/expid/meta_Y.csv", meta_Y)
 ```
-This stores the necessary files in ```src/julia/experiments/expid```. For the experiments in the paper `δ = 0.01`, `E=100`, and `Nw=10*N` was used.
-
-If multisine inputs are used instead, replace the line starting with XU by
-
-```{julia}
-_, meta_U = get_multisine_data(10)
-```
-
-and remove the line ```writedlm("data/experiments/expid/U.csv", U, ',')```.
+This stores the necessary files in ```src/julia/experiments/expid```. For the experiments in the paper `δ = 1e-5` (for delta robot, `δ = 0.01` for pendulum), `E=100`, and `Nw=10*N` were used.
 
 ### Run the experiment
 To run the experiment do

@@ -17,6 +17,7 @@ using .DynamicalModels: pendulum_adjoint_m, pendulum_adjoint_k_1dist_ODEdist, pe
 using .DynamicalModels: delta_robot, delta_forward_γ, delta_adjoint_γ, delta_forward_allpar_alldist, delta_adjoint_allpar_alldist, delta_adjoint_allpar_alldist_ODEdist
 using .DynamicalModels: get_delta_initial_with_mats, get_delta_initial_L0sens, get_delta_initial_L1sens, get_delta_initial_L2sens, get_delta_initial_L3sens, get_delta_initial_LC1sens
 using .DynamicalModels: get_delta_initial_LC2sens, get_delta_initial_M1sens, get_delta_initial_M2sens, get_delta_initial_M3sens, get_delta_initial_J1sens, get_delta_initial_J2sens, get_delta_initial_γsens
+using .DynamicalModels: delta_forward_1dist, delta_adjoint_1dist, delta_adjoint_1dist_ODEdist, delta_adjoint_allpar, delta_adjoint_alldist, delta_adjoint_M3
 
 import CSV, Statistics
 
@@ -196,7 +197,7 @@ function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_ge
     else
         # Input is from the same model as the disturbance
         input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')[:]
-        linear_interpolation_multivar(input, W_meta.δ, n_u_out)(t)
+        linear_interpolation_multivar(input, U_meta_raw[1,8], n_u_out)(t)   # U_meta_raw[1,8] is δ used for input signal. Usually same as W_meta.δ, but doesn't need to be.
     end
 
     # Makes sure there is a tmp-directory, for future use
@@ -556,4 +557,24 @@ function get_disturbance_from_file(expid::String; M::Int=1, use_exact_interp::Bo
         end
 
     wm
+end
+
+function get_input_from_file(expid::String)::Function
+    U_meta_raw, _ = 
+        readdlm(joinpath(data_dir, expid*"/meta_U.csv"), ',', header=true)
+
+    u = if size(U_meta_raw, 2) == 3
+        # Input is multisine
+        dim = Int(U_meta_raw[1,3])
+        # The first column of U_meta_raw is the amplitudes of the multisines while the other is the frequencies
+        get_multisines(reshape(U_meta_raw[:,1], :, dim), reshape(U_meta_raw[:,2], :, dim))
+    else
+        n_u_out = Int(U_meta_raw[1,3])
+        δ = U_meta_raw[1,8]
+        # Needs to load disturbance metadata, since 
+        # Input is from the same model as the disturbance
+        input  = readdlm(joinpath(data_dir, expid*"/U.csv"), ',')[:]
+        linear_interpolation_multivar(input, δ, n_u_out)(t)
+    end
+    u
 end

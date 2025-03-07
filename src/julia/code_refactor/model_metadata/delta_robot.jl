@@ -23,9 +23,8 @@ delta_model_data = let
     # this needs to be set in the get_disturbance_free_pars()-function in run_experiment.jl
 
     # ------- The following fields are part of the informal interface for model metadata -------
-    get_all_pars(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]#Array{Float64}(undef, 0)
+    get_all_pars(pars::Vector{Float64}) = vcat(pars[1:11], [g], pars[12])#[L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, g, γ]
     free_dyn_pars_true = [L0, L1, L2, L3, LC1, LC2, M1, M2, M3, J1, J2, γ]#Array{Float64}(undef, 0)   # True values of free parameters
-    # TODO: This is no good, with them being specified elsewhere............. Change that! Or how did pendulum do it????
     # The initial learning rate for each component of free_dyn_pars_true, as well as for each components of the free disturbance parameters η specified elsewhere
     init_learning_rate = [0.1, 0.1, 0.1, 0.05, 0.05, 0.1, 0.02, 0.02, 0.05, 0.05, 0.05, 0.2]
     # init_learning_rate = init_learning_rate[12]
@@ -37,8 +36,11 @@ delta_model_data = let
     model_adjoint = delta_adjoint_allpar_alldist              # For adjoint sensitivity
     model_adjoint_odedist = delta_adjoint_allpar_alldist_ODEdist             # Adjoint when disturbances are given by an ODE incorporated into the DAE
 
+    @assert (length(init_learning_rate) == length(free_dyn_pars_true)) "The init_learning_rate vector must have same number of elements as there are free dynamical parameters. Currently has $(length(init_learning_rate)) elements for $(length(free_dyn_pars_true)) free dynamical parameters."
+    @assert (size(par_bounds, 1) == length(free_dyn_pars_true)) "The number of rows in par_bounds must have same number of elements as there are free dynamical parameters. Currently has $(size(par_bounds, 1)) rows for $(length(free_dyn_pars_true)) free dynamical parameters."
+
     σ = 0.002                                               # measurement noise variance
-    minimizer = perform_ADAM_deltaversion  
+    minimizer = perform_ADAM_deltaversion     # deltaversion should be used when at least all lengths are part of the free dynamical parameters
 
     # Output function, returns the output (position of end effector) given the state vector x
     f(x::Vector{Float64}, p::Vector{Float64}) = [p[3]*sin(x[2])*sin(x[3])
@@ -89,7 +91,7 @@ delta_model_data = let
     # # Sensitivity wrt to one disturbance parameter
     # f_sens(x::Vector{Float64}, p::Vector{Float64})::Matrix{Float64} = f_sens_base(x, p, 1)+f_sens_other(x)
 
-    # # Sensitivity wrt to all parameters
+    # # Sensitivity wrt to all dynamic parameters
     # f_sens(x::Vector{Float64}, p::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, p, 1)+f_sens_L0(x), f_sens_base(x, p, 2)+f_sens_L1(x), f_sens_base(x, p, 3)+f_sens_L2(x), 
     #     f_sens_base(x, p, 4)+f_sens_L3(x), f_sens_base(x, p, 5)+f_sens_other(x), f_sens_base(x, p, 6)+f_sens_other(x), f_sens_base(x, p, 7)+f_sens_other(x),
     #     f_sens_base(x, p, 8)+f_sens_other(x), f_sens_base(x, p, 9)+f_sens_other(x), f_sens_base(x, p, 10)+f_sens_other(x), f_sens_base(x, p, 11)+f_sens_other(x),
@@ -157,7 +159,10 @@ delta_model_data = let
             vcat(zγ, f_sens_base(z0, θ, 12)+f_sens_other(z0)),
             repeat(z0dist, 1, 12)
         )
+
         # reshape(vcat(zγ, f_sens(z0, θ)), :, 1)
+
+        # reshape(z0dist,:,1)
     end
 
     dθ = length(free_dyn_pars_true)

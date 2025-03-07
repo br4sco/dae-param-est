@@ -62,11 +62,14 @@ function Phi(mat_in::Matrix{Float64}, n_tot::Int)::LowerTriangular
     return mat
 end
 
+# TODO: TEST!
 # Given index of element in C-matrix, returns row and col of that index
-function get_C_row_and_col(ind::Int, n_tot::Int)::Tuple{Int, Int}
-    Ĩ = (ind-1)÷n_tot
-    L̃ = ind-1 - Ĩ*n_tot
-    Ĩ+1, L̃+1
+function get_C_row_and_col(ind::Int, nw::Int, nxw::Int)::Tuple{Int, Int}
+    J̃ = ind÷(nw*nxw)
+    K̃ = (ind-J̃*nw*nxw)÷nw
+    # row = ind - J̃*nw*nxw - K̃*nw+1
+    # col = J̃*nxw + K̃ + 1
+    ind - J̃*nw*nxw - K̃*nw+1,  J̃*nxw + K̃ + 1
 end
 
 function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
@@ -174,7 +177,7 @@ function discretize_ct_noise_model_disc_then_diff(mdl::CT_SS_Model, Ts::Float64,
         # We want to pass the index of the currently considered c-parameter in the C-matrix.
         # sens_inds contains the index of that parameter in η, which contains the additional na
         # parameters corresponding to the A-matrix
-        row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
+        row, col = get_C_row_and_col(sens_inds[ηind]-na, nw, n_tot)  # row and col of the currently considered parameter in mdl.C
         C_mat[ηind*nw + row, col] = 1.0
     end
 
@@ -244,7 +247,7 @@ function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64
         # We want to pass the index of the currently considered c-parameter in the C-matrix.
         # sens_inds contains the index of that parameter in η, which contains the additional na
         # parameters corresponding to the A-matrix
-        row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
+        row, col = get_C_row_and_col(sens_inds[ηind]-na, nw, n_tot)  # row and col of the currently considered parameter in mdl.C
         C_mat[(na+ind)nw + row, col] = 1.0
     end
 
@@ -325,7 +328,7 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
         # We want to pass the index of the currently considered c-parameter in the C-matrix to get_C_row_and_col
         # sens_inds contains the index of that parameter in η, which contains the additional na
         # parameters corresponding to the A-matrix
-        row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
+        row, col = get_C_row_and_col(sens_inds[ηind]-na, nw, n_tot)  # row and col of the currently considered parameter in mdl.C
         Čηc[(ηind-na-1)nw + row, col] = 1.0
     end
 
@@ -366,7 +369,7 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(
         # We want to pass the index of the currently considered c-parameter in the C-matrix to get_C_row_and_col
         # sens_inds contains the index of that parameter in η, which contains the additional na
         # parameters corresponding to the A-matrix
-        row, col = get_C_row_and_col(sens_inds[ηind]-na, n_tot)  # row and col of the currently considered parameter in mdl.C
+        row, col = get_C_row_and_col(sens_inds[ηind]-na, nw, n_tot)  # row and col of the currently considered parameter in mdl.C
         Čηc[(ηind-na-1)nw + row, col] = 1.0
     end
 
@@ -454,6 +457,10 @@ function get_ct_disturbance_model(η::Vector{Float64}, nx::Int, nv::Int)
         B[(ind-1)nx+1, ind] = 1.0
     end
     C = reshape(η[nx+1:end], :, n_tot)
+    @warn "Is the C wrong already here???"
+    println(C)
+    println(η)
+    println("nx: $nx, n_tot: $n_tot ")
     x0 = zeros(n_tot)
     return CT_SS_Model(A, B, C, x0)
     #= With the dimensions we most commonly use, the model becomes
@@ -462,63 +469,6 @@ function get_ct_disturbance_model(η::Vector{Float64}, nx::Int, nv::Int)
     B = [1; 0]
     C = [c1 c2]
     =#
-end
-
-# Parameter values for C-matrix as entered are converted into a single vector
-# more suitable to be used in the code
-function get_c_parameter_vector(c_vals, w_scale, nx::Int, nw::Int, nv::Int)
-    c_vec = zeros(nx*nw*nv)
-    for i = 1:nw
-        for j = 1:nv
-            for k = 1:nx
-                # Multiplying with w_scale[i] here is equivalent to scaling ith
-                # component of the disturbance output (w) with factor w_scale[i]
-                c_vec[(j-1)*nw*nx + (k-1)*nw + i] = w_scale[i]*c_vals[i,j][k]
-            end
-        end
-    end
-    return c_vec
-end
-
-# Used for disturbance
-function disturbance_model_1(Ts::Float64; scale::Float64=0.6)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
-    nx = 2        # model order
-    nw = 2     # number of outputs
-    nv = 2      # number of inputs
-    w_scale = scale*ones(nw)             # noise scale
-    # Denominator of every transfer function is given by p(s), where
-    # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
-    a_vec = [0.8, 4^2]
-    # Transfer function (i,j) has numerator c_[i,j][1]s^{nx-1} + ... + c_[i,j][nx]
-    c_ = [zeros(nx) for i=1:nw, j=1:nv]
-    c_[1,1][nx] = 1 # c_[1,1][:] = vcat(zeros(nx-1), [1])
-    c_[2,2][nx] = 1 # c_[2,2][:] = vcat(zeros(nx-1), [1])
-    c_vec = get_c_parameter_vector(c_, w_scale, nx, nw, nv)
-    η0 = vcat(a_vec, c_vec)
-    dη = length(η0)
-    mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
-    return mdl, [nx, nv, nw], η0
-end
-
-# Used for input
-function disturbance_model_2(Ts::Float64; scale::Float64=0.2)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
-    nx = 2        # model order
-    nw = 1     # number of outputs
-    nv = 2      # number of inputs
-    u_scale = scale # input scale
-    w_scale = scale*ones(nw)             # noise scale
-    # Denominator of every transfer function is given by p(s), where
-    # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
-    a_vec = [0.8, 4^2]
-    c_vec = zeros(nw*nx*nv)
-    # The first state will act as output of the filter
-    c_vec[1] = u_scale
-    η0 = vcat(a_vec, Diagonal(w_scale)*c_vec)
-    dη = length(η0)
-    mdl =
-        discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nv), Ts)
-    return mdl, [nx, nv, nw], η0
 end
 
 # Used for scalar disturbance and input
@@ -552,6 +502,9 @@ function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     # Old a_vec, i.e. for the 2d-model: a_vec = [2*ω*ζ, ω^2]
     a_vec = [2*ω*ζ-p3, ω^2-p3*2*ω*ζ, -p3*ω^2]
+    # C = [c_vec[1]     c_vec[4]    c_vec[7]
+    #      c_vec[2]     c_vec[5]    c_vec[8]
+    #      c_vec[3]     c_vec[6]    c_vec[9]]
     c_vec = [scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale]
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
@@ -572,8 +525,12 @@ function disturbance_model_5(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     # Old a_vec, i.e. for the 2d-model: a_vec = [2*ω*ζ, ω^2]
     a_vec = [2*ω*ζ-p3, ω^2-p3*2*ω*ζ, -p3*ω^2]
+    # C = [c_vec[1]     c_vec[4]    c_vec[7]  |  c_vec[10]     c_vec[13]    c_vec[16]  |  c_vec[19]     c_vec[22]    c_vec[25]
+    #      c_vec[2]     c_vec[5]    c_vec[8]  |  c_vec[11]     c_vec[14]    c_vec[17]  |  c_vec[20]     c_vec[23]    c_vec[26]
+    #      c_vec[3]     c_vec[6]    c_vec[9]  |  c_vec[12]     c_vec[15]    c_vec[18]  |  c_vec[21]     c_vec[24]    c_vec[27]]
+    # So we want indices 1, 11, and 21 to be non-zero
     c_vec = zeros(3*9)
-    c_vec[1] = scale; c_vec[9+4] = scale; c_vec[18+7] = scale
+    c_vec[1] = scale; c_vec[9+2] = scale; c_vec[18+3] = scale
     η0 = vcat(a_vec, c_vec)
     mdl =
         discretize_ct_noise_model(get_ct_disturbance_model(η0, nx, nw), Ts)
@@ -602,13 +559,6 @@ function get_multisines(amps::Matrix{Float64}, freqs::Matrix{Float64})::Function
         ) for ind=1:dim]
 end
 
-# function get_multisine(amps::Vector{Float64}, freqs::Vector{Float64})::Function
-#     ncomp = length(amps)
-#     phases = [-k*(k-1)*pi/ncomp for k=1:ncomp]  # Schröder phases
-#     t -> sum(
-#             amps.*(sin.(freqs*t+phases))
-#         )
-# end
 
 function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
     bias::Float64=0.0, scale::Float64=1.0)::Tuple{Matrix{Float64}, Matrix{Float64}, DataFrame}
