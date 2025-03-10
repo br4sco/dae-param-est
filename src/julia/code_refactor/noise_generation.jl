@@ -62,14 +62,13 @@ function Phi(mat_in::Matrix{Float64}, n_tot::Int)::LowerTriangular
     return mat
 end
 
-# TODO: TEST!
 # Given index of element in C-matrix, returns row and col of that index
 function get_C_row_and_col(ind::Int, nw::Int, nxw::Int)::Tuple{Int, Int}
-    J̃ = ind÷(nw*nxw)
-    K̃ = (ind-J̃*nw*nxw)÷nw
-    # row = ind - J̃*nw*nxw - K̃*nw+1
+    J̃ = (ind-1)÷(nw*nxw)
+    K̃ = (ind-1-J̃*nw*nxw)÷nw
+    # row = (ind-1) - J̃*nw*nxw - K̃*nw+1
     # col = J̃*nxw + K̃ + 1
-    ind - J̃*nw*nxw - K̃*nw+1,  J̃*nxw + K̃ + 1
+    ind - J̃*nw*nxw - K̃*nw,  J̃*nxw + K̃ + 1
 end
 
 function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
@@ -208,7 +207,7 @@ function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64
 
     # Working under the assumption B_θ = 0
     M = [mdl.A                  zeros(n_tot, na*n_tot)                  mdl.B*(mdl.B')          zeros(n_tot, n_tot*na);
-         Aηa                kron(Matrix(1.0I, na, na), mdl.A)           zeros(nx*na, nx)       zeros(n_tot*na, n_tot*na);
+         Aηa                kron(Matrix(1.0I, na, na), mdl.A)           zeros(n_tot*na, n_tot)       zeros(n_tot*na, n_tot*na);
          zeros(n_tot, n_tot)     zeros(n_tot, n_tot*na)                         -mdl.A'              -Aηa';
          zeros(n_tot*na, n_tot)    zeros(n_tot*na, n_tot*na)           zeros(n_tot*na, n_tot)      kron(Matrix(1.0I, na, na), -mdl.A')]
     Mexp = exp(M*Ts)
@@ -457,10 +456,6 @@ function get_ct_disturbance_model(η::Vector{Float64}, nx::Int, nv::Int)
         B[(ind-1)nx+1, ind] = 1.0
     end
     C = reshape(η[nx+1:end], :, n_tot)
-    @warn "Is the C wrong already here???"
-    println(C)
-    println(η)
-    println("nx: $nx, n_tot: $n_tot ")
     x0 = zeros(n_tot)
     return CT_SS_Model(A, B, C, x0)
     #= With the dimensions we most commonly use, the model becomes
@@ -472,7 +467,7 @@ function get_ct_disturbance_model(η::Vector{Float64}, nx::Int, nv::Int)
 end
 
 # Used for scalar disturbance and input
-function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
+function disturbance_model_3(Ts::Float64; scale::Float64=1.0, p_scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
     nx = 2        # model order
@@ -480,7 +475,7 @@ function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     nv = 1      # number of inputs
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
-    a_vec = [2*ω*ζ, ω^2]
+    a_vec = [p_scale*2*ω*ζ, (p_scale*ω)^2]
     c_vec = [0, scale]
     η0 = vcat(a_vec, c_vec)
     dη = length(η0)
@@ -490,7 +485,7 @@ function disturbance_model_3(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
 end
 
 # Used for multivariate input for delta-robot
-function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
+function disturbance_model_4(Ts::Float64; scale::Float64=1.0, p_scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
     p3 = -2       # The additional pole that is added
@@ -501,7 +496,7 @@ function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     # Old a_vec, i.e. for the 2d-model: a_vec = [2*ω*ζ, ω^2]
-    a_vec = [2*ω*ζ-p3, ω^2-p3*2*ω*ζ, -p3*ω^2]
+    a_vec = [p_scale*(2*ω*ζ-p3), (p_scale^2)*(ω^2-p3*2*ω*ζ), -p3*(ω^2)*(p_scale^3)]
     # C = [c_vec[1]     c_vec[4]    c_vec[7]
     #      c_vec[2]     c_vec[5]    c_vec[8]
     #      c_vec[3]     c_vec[6]    c_vec[9]]
@@ -514,7 +509,7 @@ function disturbance_model_4(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
 end
 
 # Used for new multivariate disturbance for delta-robot
-function disturbance_model_5(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
+function disturbance_model_5(Ts::Float64; scale::Float64=1.0, p_scale::Float64=1.0)::Tuple{DT_SS_Model, Vector{Int}, Vector{Float64}}
     ω = 4         # natural freq. in rad/s (tunes freq. contents/fluctuations)
     ζ = 0.1       # damping coefficient (tunes damping)
     p3 = -2       # The additional pole that is added
@@ -524,7 +519,8 @@ function disturbance_model_5(Ts::Float64; scale::Float64=1.0)::Tuple{DT_SS_Model
     # Denominator of every transfer function is given by p(s), where
     # p(s) = s^n + a[1]*s^(n-1) + ... + a[n-1]*s + a[n]
     # Old a_vec, i.e. for the 2d-model: a_vec = [2*ω*ζ, ω^2]
-    a_vec = [2*ω*ζ-p3, ω^2-p3*2*ω*ζ, -p3*ω^2]
+    # p_scale is a factor mulitplying all original poles
+    a_vec = [p_scale*(2*ω*ζ-p3), (p_scale^2)*(ω^2-p3*2*ω*ζ), -p3*(ω^2)*(p_scale^3)]
     # C = [c_vec[1]     c_vec[4]    c_vec[7]  |  c_vec[10]     c_vec[13]    c_vec[16]  |  c_vec[19]     c_vec[22]    c_vec[25]
     #      c_vec[2]     c_vec[5]    c_vec[8]  |  c_vec[11]     c_vec[14]    c_vec[17]  |  c_vec[20]     c_vec[23]    c_vec[26]
     #      c_vec[3]     c_vec[6]    c_vec[9]  |  c_vec[12]     c_vec[15]    c_vec[18]  |  c_vec[21]     c_vec[24]    c_vec[27]]
@@ -540,9 +536,9 @@ end
 # Multisine is represented by amplitudes, frequencies, and number of components. Phases can be computed from this.
 # For delta robot, recommended values are:
 #   ncomp = 50, dim=3
-#   min_amp & max_amp = 0.001 & 0.002
+#   min_amp & max_amp = 0.0005 & 0.001
 #   min_freq & max_freq = 200.0 & 20000.0
-function get_multisine_data(ncomp::Int, dim::Int; min_amp::Float64=0.001, max_amp::Float64=0.002, min_freq::Float64=200.0, max_freq::Float64=20000.0)::Tuple{Function, DataFrame}
+function get_multisine_data(ncomp::Int, dim::Int; min_amp::Float64=0.0005, max_amp::Float64=0.001, min_freq::Float64=200.0, max_freq::Float64=20000.0)::Tuple{Function, DataFrame}
     amp_step = (max_amp-min_amp)*0.001
     freq_step = (max_freq-min_freq)*0.001
     amps = rand(min_amp:amp_step:max_amp, ncomp, dim)
@@ -561,9 +557,9 @@ end
 
 
 function get_filtered_noise(gen::Function, Ts::Float64, M::Int, Nw::Int;
-    bias::Float64=0.0, scale::Float64=1.0)::Tuple{Matrix{Float64}, Matrix{Float64}, DataFrame}
+    bias::Float64=0.0, scale::Float64=1.0, p_scale::Float64=1.0)::Tuple{Matrix{Float64}, Matrix{Float64}, DataFrame}
 
-    mdl, meta_raw, η0 = gen(Ts, scale=scale)
+    mdl, meta_raw, η0 = gen(Ts, scale=scale, p_scale=p_scale)
     metadata = DataFrame(nx = meta_raw[1], nv = meta_raw[2], nw = meta_raw[3], η = η0, bias=bias, num_rel = M, Nw=Nw, δ = Ts)
     n_tot = size(mdl.Cd,2)
 

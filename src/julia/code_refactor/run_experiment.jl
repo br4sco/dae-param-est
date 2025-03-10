@@ -3,7 +3,7 @@ include("noise_interpolation_multivar.jl")
 # include("minimizers.jl")
 include("models.jl")
 using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_disc_then_diff, simulate_noise_process, simulate_noise_process_mangled, discretize_ct_noise_model_with_adj_SDEApprox_mats
-using .NoiseGeneration: discretize_ct_noise_model, discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible, get_multisines
+using .NoiseGeneration: discretize_ct_noise_model, discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible, get_multisines, discretize_ct_noise_model_diff_then_disc
 using .NoiseInterpolation: InterSampleWindow, initialize_isw, reset_isws!, noise_inter, mk_newer_noise_interp, mk_noise_interp, linear_interpolation_multivar
 using .DynamicalModels: AdjointSDEApproxData
 using Interpolations: Cubic, BSpline, NoInterp, Line, extrapolate, scale, interpolate, Extrapolation
@@ -76,9 +76,12 @@ function get_disturbance_free_pars(nx::Int, nw::Int, n_tot::Int)::Vector{Bool}
     # free_dist_pars = fill(false, nx + n_tot*nw)                                             # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), fill(false, nw), fill(true, (n_tot-1)*nw))     # Whole a-vector and all but first nw elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY (PENDULUM))
     # free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*nw))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
-    free_dist_pars = vcat(fill(true, nx), 
-        fill(true, nx), fill(false, n_tot),
-        fill(true, nx), fill(false, n_tot), fill(true, nx))                            # New disturbance model but corresponding same free parameter as old disturbance model all parameters, delta case
+    free_dist_pars = begin
+        tmp = fill(false, nx + n_tot*nw)
+        tmp[1:nx] .= true   # a-parameters
+        tmp[[1,4,7,11,14,17,21,24,27].+nx] .= true  # c-parameters
+        tmp
+    end                 # New disturbance model but corresponding same free parameter as old disturbance model all parameters, delta case
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_tot*nw))                    # Whole a-vector unknown
     # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*nw))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*nw))    # Second parameter of a-vector unknown
@@ -358,10 +361,7 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
                 Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
-                # ---_ DEBYG
-
-                # ----- DEBUG
-                dmdl = discretize_ct_noise_model_disc_then_diff(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
+                dmdl = discretize_ct_noise_model_diff_then_disc(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
                 wmm(m::Int) = if use_exact_interp
                         reset_isws!(isws)
                         XWm = simulate_noise_process(dmdl, Zm)
@@ -406,9 +406,11 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
             function get_gradient_estimate_adj(y::Vector{Float64}, free_pars::Vector{Float64}, isws::Vector{InterSampleWindow}, M_mean::Int=1)
                 # --- Generates disturbance signal for the provided parameters ---
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
-                Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]
+                # Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]    # Size of input when disturbance model is discretized before differentiation
+                na = length(findall(W_meta.free_par_inds .<= W_meta.nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
+                Zm = [randn(W_meta.nx*W_meta.nv*(1+na), W_meta.Nw+1) for _ = 1:2M_mean]   # Size of input when disturbance model is differentiated before discretization
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
-                dmdl = discretize_ct_noise_model_disc_then_diff(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
+                dmdl = discretize_ct_noise_model_diff_then_disc(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
                 wm(m::Int) = if use_exact_interp
                         reset_isws!(isws)
                         XWm = simulate_noise_process(dmdl, Zm)

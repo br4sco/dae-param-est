@@ -46,7 +46,7 @@ using DelimitedFiles, CSV, DataFrames
 include("noise_generation.jl")
 using .NoiseGeneration: get_filtered_noise, disturbance_model_5, get_multisine_data   # disturbance_model_5 is for delta robot
 
-XW, Wmat, meta_W = get_filtered_noise(disturbance_model_5, δ, E, Nw, scale=0.6)  # Generated process disturbance and meta-data
+XW, Wmat, meta_W = get_filtered_noise(disturbance_model_5, δ, E, Nw, scale=0.6, p_scale=500.0)  # Generated process disturbance and meta-data
 # XU, U, meta_U = get_filtered_noise(disturbance_model_5, δ, 1, Nw, scale=0.2)  # OLD: Generates control input and meta-data
 _, meta_U = get_multisine_data(50, 3)  # NEW, with multisine inputs used instead
 meta_Y = DataFrame(Ts=10δ, N=Nw÷10)	# It is convenient to also generate metadata for system output
