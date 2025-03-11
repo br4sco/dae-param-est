@@ -16,11 +16,17 @@ multiple threads (recommended), start julia with the following command `julia
 --threads n`, where `n` is the number of threads you want to use.
 
 ## Run the experiment
+Before running your first ever experiment, it is important to install the necessary packages, or the code will crash. One can attempt to run the code and from the error message see which package needs to be installed, but you can also simply upfront run
+```{julia}
+using Pkg
+pkg_list = ["LsqFit", "DataFrames", "ControlSystems", "Interpolations", "DifferentialEquations", "CSV", "Sundials", "ProgressMeter", "DelimitedFiles", "LinearAlgebra"];
+Pkg.add(pkg_list)
+```
 The main experiment is defined in
 [src/julia/run_experiment.jl](src/julia/run_experiment.jl). Additionally, the
 noise model and noise generation is defined in
-[src/julia/noise_generation.jl](src/julia/noise_generation.jl). The simulation scripts and
-physical model is defined in [src/julia/simulation.jl](src/julia/simulation.jl).
+[src/julia/noise_generation.jl](src/julia/noise_generation.jl). The DAE models can be found in [src/julia/models.jl](src/julia/models.jl), while 
+the user selects which of those models to use in the corresponding model metadata-file, found in the [src/julia/model_metadata](src/julia/model_metadata).
 
 ### Download or generate noise
 You can either generate the data yourself or download the data used in our experiment from
@@ -43,15 +49,13 @@ To use the same disturbance model as described in the paper, in a julia repl in 
 
 ```{julia}
 using DelimitedFiles, CSV, DataFrames
-include("noise_generation.jl")
+include("run_experiment.jl")
 using .NoiseGeneration: get_filtered_noise, disturbance_model_5, get_multisine_data   # disturbance_model_5 is for delta robot
 
 XW, Wmat, meta_W = get_filtered_noise(disturbance_model_5, δ, E, Nw, scale=0.6, p_scale=500.0)  # Generated process disturbance and meta-data
-# XU, U, meta_U = get_filtered_noise(disturbance_model_5, δ, 1, Nw, scale=0.2)  # OLD: Generates control input and meta-data
-_, meta_U = get_multisine_data(50, 3)  # NEW, with multisine inputs used instead
+_, meta_U = get_multisine_data(50, 3)
 meta_Y = DataFrame(Ts=10δ, N=Nw÷10)	# It is convenient to also generate metadata for system output
 writedlm("data/experiments/expid/XW_T.csv", transpose(XW), ',')
-# writedlm("data/experiments/expid/U.csv", U, ',') # OLD, only for input generated from disturbance model
 CSV.write("data/experiments/expid/meta_W.csv", meta_W)
 CSV.write("data/experiments/expid/meta_U.csv", meta_U)
 CSV.write("data/experiments/expid/meta_Y.csv", meta_Y)
@@ -75,7 +79,9 @@ You will probably have to install a number of dependencies pointed out by julia.
 After that, you can run the estimation experiment over the `E` data-sets found in the folder ```src/julia/experiments/expid```, by writing
 
 ```{julia}
-opt_pars_baseline, opt_pars_proposed, avg_pars_proposed, trace_base, trace_proposed, trace_gradient, durations = get_estimates("expid", [0.5, 4.25, 4.25], 500)
+exp_data, isws = get_experiment_data("expid")
+opt_pars_proposed, trace_proposed, trace_gradient = get_estimates(free_pars, exp_id, isws)
+# TODO: Add line for computing baseline results too
 ```
 
-The results can be interpreted as follows. ```opt_pars_baseline[i,e]``` is the optimal value of parameter `i` found by the output error method for the data-set `e`. Similarly, ```avg_pars_proposed[i,e]``` is the optimal value of parameter `i` found by the proposed method for the data-set `e`.
+The results can be interpreted as follows. ```opt_pars_proposed[i,e]``` is the optimal value of parameter `i` found by the proposed method for the data-set `e`.

@@ -1,17 +1,19 @@
-using Random, LinearAlgebra, Future
+module NoiseInterpolation
+
+import Random, LinearAlgebra, Future
 
 mutable struct InterSampleWindow
     containers::Array{Array{Float64,2},1}
     sample_times::Array{Array{Float64,1},1}
-    num_stored::Array{Int64,1}
-    Q::Int64    # Max number of stored samples per interval
-    W::Int64    # Number of containers in the array containers
+    num_stored::Array{Int,1}
+    Q::Int    # Max number of stored samples per interval
+    W::Int    # Number of containers in the array containers
     # TODO: Not sure if this struct is the best place to store use_interpolation
     use_interpolation::Bool # true if linear interpolation of states is used
     # instead of conditional sampling when Q stored samples has been surpassed.
     # It improves smoothness of realization in such a scenario.
-    start::Int64    # The interval index to which the "first" container corresponds
-    ptr::Int64      # The index of the "first" container in the array containers
+    start::Int    # The interval index to which the "first" container corresponds
+    ptr::Int      # The index of the "first" container in the array containers
 end
 
 mutable struct InterSampleData
@@ -22,13 +24,13 @@ mutable struct InterSampleData
     # i:th interval. Also here the number of rows should be dynamically updated
     states::Array{Array{Float64,2},1}
     sample_times::Array{Array{Float64,1},1}
-    Q::Int64    # Max number of stored samples per interval
+    Q::Int    # Max number of stored samples per interval
     use_interpolation::Bool # true if linear interpolation of states is used
     # instead of conditional sampling when Q stored samples has been surpassed.
     # It improves smoothness of realization in such a scenario.
 end
 
-function initialize_isw(Q::Int64, W::Int64, nx::Int64,
+function initialize_isw(Q::Int, W::Int, nx::Int,
      use_interpolation::Bool=true)::InterSampleWindow
      if Q > 0
          containers = [zeros(nx, Q)  for j=1:W]
@@ -55,7 +57,7 @@ function reset_isws!(isws::AbstractArray{InterSampleWindow})
     end
 end
 
-function map_to_container(num::Int64, isw::InterSampleWindow)
+function map_to_container(num::Int, isw::InterSampleWindow)
     return ((num-1)%isw.W) + 1
 end
 
@@ -68,7 +70,7 @@ end
 # a 2D array into a 1D array using the [:]-operator. According to
 # https://stackoverflow.com/questions/63340812/how-to-convert-from-arrayfloat64-2-to-arrayarrayfloat64-1-1-in-julia
 # this doesn't use any additional memory, so it shouldn't impact performance negatively.
-function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
+function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int,
     isw::InterSampleWindow)
 
     if isw.start <= n && n <= isw.start + isw.W - 1
@@ -84,7 +86,7 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
         isw.ptr = map_to_container(isw.ptr+num_steps, isw)
         isw.start += num_steps
     else # n < isw.start
-        @warn "Tried to add sample outside of inter-sample window (adding $n to window $(isw.start) -- $(isw.start+isw.W-1))"
+        # @warn "Tried to add sample outside of inter-sample window (adding $n to window $(isw.start) -- $(isw.start+isw.W-1))"
         return
     end
     num_stored = isw.num_stored[container_id]
@@ -99,7 +101,7 @@ function add_sample!(x_new::AbstractArray, sample_time::Float64, n::Int64,
 end
 
 # TODO: SHOULD RLY BE 1D ARRAY OF 1D ARRAYS, instead of just an AbstractArray
-function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
+function get_neighbors(n::Int, t::Float64, x::AbstractArray,
     Ts::Float64, isw::InterSampleWindow)
 
     tl = n*Ts
@@ -161,7 +163,7 @@ function get_neighbors(n::Int64, t::Float64, x::AbstractArray,
     return xu, xl, δu, δl, should_interpolate
 end
 
-function initialize_isd(Q::Int64, N::Int64, nx::Int64, use_interpolation::Bool)::InterSampleData
+function initialize_isd(Q::Int, N::Int, nx::Int, use_interpolation::Bool)::InterSampleData
     if Q > 0
         isd_states = [zeros(0,nx) for j=1:N]
         isd_sample_times = [zeros(0) for j=1:N]
@@ -172,6 +174,7 @@ function initialize_isd(Q::Int64, N::Int64, nx::Int64, use_interpolation::Bool):
     return InterSampleData(isd_states, isd_sample_times, Q, use_interpolation)
 end
 
+# TODO: This one is not generalized to disturbance sensitivity yet! I guess nx should change?
 function noise_inter(t::Float64,
                      Ts::Float64,       # Sampling time of noise process
                      a_vec::AbstractArray{Float64, 1},
@@ -181,13 +184,13 @@ function noise_inter(t::Float64,
                      # num_sampled_per_interval::AbstractArray,
                      # num_times_visited::AbstractArray,
                      ϵ::Float64=10e-8,
-                     rng::TaskLocalRNG=Random.default_rng())
+                     rng::Random.TaskLocalRNG=Random.default_rng())::Vector{Float64}
                      # rng::MersenneTwister=Random.default_rng())   # VERSION
 
     n = Int(t÷Ts)           # t lies between t0 + n*Ts and t0 + (n+1)*Ts
     # num_sampled_per_interval[n+1] += 1
-    δ = t - n*Ts
-    nx = length(a_vec)
+    nx = length(a_vec) # DEBUG: JUST TRYING
+    # @warn "Indeed got nx=$nx"
     n_out = Int(length(x[1])÷nx)
     Q = isw.Q
     # P = size(z_inter[1])[1]
@@ -196,7 +199,7 @@ function noise_inter(t::Float64,
     use_interpolation = isw.use_interpolation
 
     # TODO: Update to more efficient use of matrices. Pass C for returning stuff?
-    xl = x[n+1]     # x[1] == x0
+    xl = x[n+1]     # x[1] == x0 --> x[n+1] == x(t_0+n*Ts)
     xu = x[n+2]
     tl = n*Ts
     tu = (n+1)*Ts
@@ -212,6 +215,7 @@ function noise_inter(t::Float64,
     #TODO: Q = 0, WE DON'T RLY PRE-ALLOCATE, SO get_neighbors FAILS!!!!!!!!
 
     xu, xl, δu, δl, should_interpolate = get_neighbors(n, t, x, Ts, isw)
+    # @warn "And here xl is $(size(xl))"
 
     # If it's not possible to store any more samples for this interval, and
     # use_interpolation == True, the get_neighbors()-functions tells us to use
@@ -241,7 +245,7 @@ function noise_inter(t::Float64,
         return xu
     end
 
-    As = diagm(-1 => ones(nx-1,))
+    As = LinearAlgebra.diagm(-1 => ones(nx-1,))
     As[1,:] = -a_vec
     BBsT = zeros(nx, nx)            # Bs*(Bs'), independent of parameters
     BBsT[1] = 1
@@ -256,8 +260,8 @@ function noise_inter(t::Float64,
     # Adl     = view(Ml, nx+1:2*nx, nx+1:2*nx)'
     # Adu     = view(Mu, nx+1:2*nx, nx+1:2*nx)'
     AdΔ     = Adu*Adl
-    σ_l     = Hermitian(Adl*Ml[1:nx, nx+1:end])     # = B2dl
-    σ_u     = Hermitian(Adu*Mu[1:nx, nx+1:end])     # = B2du
+    σ_l     = LinearAlgebra.Hermitian(Adl*Ml[1:nx, nx+1:end])     # = B2dl
+    σ_u     = LinearAlgebra.Hermitian(Adu*Mu[1:nx, nx+1:end])     # = B2du
 
     # σ_l = B2dl#(Bdl*(Bdl'))
     # σ_u = B2du#(Bdu*(Bdu'))
@@ -265,10 +269,10 @@ function noise_inter(t::Float64,
     σ_Δ_l = Adu*σ_l
     # Hermitian()-call might not be necessary, but it probably depends on the
     # model, so I leave it in to ensure that cholesky decomposition will work
-    Σ = Hermitian(σ_l - (σ_Δ_l')*(σ_Δ\(σ_Δ_l)))
+    Σ = LinearAlgebra.Hermitian(σ_l - (σ_Δ_l')*(σ_Δ\(σ_Δ_l)))
     CΣ = zeros(size(Σ))
     try
-        CΣ = cholesky(Σ)
+        CΣ = LinearAlgebra.cholesky(Σ)
     catch e
         @warn "Cholesky decomposition failed with δ=$(min(δu, δl))"
         println("$e")
@@ -281,8 +285,9 @@ function noise_inter(t::Float64,
             return xu
         end
     end
-    Σr = kron(Diagonal(ones(n_in)), CΣ.L)
-    v_Δ = xu - kron(Diagonal(ones(n_in)), AdΔ)*xl
+    Σr = kron(LinearAlgebra.Diagonal(ones(n_in)), CΣ.L)
+    # @warn "Somehting funky: $(size(AdΔ)), $(size(xl))"
+    v_Δ = xu - kron(LinearAlgebra.Diagonal(ones(n_in)), AdΔ)*xl
     μ = zeros(n_out*nx,1)
     for ind = 1:n_out
         rows = (ind-1)*nx+1:ind*nx
@@ -304,6 +309,60 @@ function noise_inter(t::Float64,
     end
     # println("base5")
     # num_times_visited[5] += 1
-    return x_new
+    return x_new[:]
+end
+
+# Function for using conditional interpolation
+function mk_newer_noise_interp(a_vec::AbstractVector{Float64},
+                                C::Matrix{Float64},
+                                XW::Matrix{Vector{Float64}},
+                                m::Int,
+                                n_in::Int,
+                                δ::Float64,
+                                isws::Array{InterSampleWindow, 1})
+    # Conditional sampling depends on noise model, which is why a value of
+    # a_vec has to be passed. a_vec contains parameters corresponding to the
+    # A-matric of the noise model
+    let
+        function w(t::Float64)
+            xw_temp = noise_inter(t, δ, a_vec, n_in, view(XW, :, m), isws[m])
+            return C*xw_temp
+        end
+    end
+end
+
+function mk_noise_interp(C::Matrix{Float64},
+                        XW::AbstractMatrix{Float64},
+                        m::Int,
+                        δ::Float64)
+    let
+        n_tot = size(C, 2)
+        n_max = size(XW,1)÷n_tot-1
+        function xw(t::Float64)
+            # n*δ <= t <= (n+1)*δ
+            n = Int(t÷δ)
+            if n >= n_max
+                # The disturbance only has samples from t=0.0 to t=N*Ts-δ. 
+                # The requested t was large enough to t=N*Ts that we must return last sample of disturbance instead of interpolating
+                return C*XW[end-n_tot+1:end, m]
+            else
+                # row of x_1(t_n) in XW is given by k. Note that t=0 is given by row 1
+                k = n * n_tot + 1
+
+                xl = XW[k:(k + n_tot - 1), m]
+                xu = XW[(k + n_tot):(k + 2n_tot - 1), m]
+                return C*(xl + (t-n*δ)*(xu-xl)/δ)
+            end
+        end
+    end
+end
+
+function linear_interpolation_multivar(y::AbstractVector, Ts::Float64, ny::Int)
+    max_n = length(y)÷ny-2
+    function y_func(t::Float64)
+        n = min(Int(t÷Ts), max_n)
+        return ( ((n+1)*Ts-t)*y[n*ny+1:(n+1)*ny] .+ (t-n*Ts)*y[(n+1)*ny+1:(n+2)*ny])./Ts
+    end
+end
 
 end
