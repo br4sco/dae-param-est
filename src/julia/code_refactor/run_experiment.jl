@@ -359,7 +359,9 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
             function get_gradient_estimate_for(y::Vector{Float64}, free_pars::Vector{Float64}, isws::Vector{InterSampleWindow}, M_mean::Int=1)
                 # --- Generates disturbance signal for the provided parameters ---
                 # (Assumes that disturbance model is parametrized, in theory doing this multiple times could be avoided if the disturbance model is known)
-                Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]
+                # Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:2M_mean]    # Size of input when disturbance model is discretized before differentiation
+                na = length(findall(W_meta.free_par_inds .<= W_meta.nx))   # Number of the disturbance parameters that corresponds to A-matrix. Rest will correspond to C-matrix
+                Zm = [randn(W_meta.nx*W_meta.nv*(1+na), W_meta.Nw+1) for _ = 1:2M_mean]   # Size of input when disturbance model is differentiated before discretization
                 η = W_meta.get_all_ηs(free_pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
                 dmdl = discretize_ct_noise_model_diff_then_disc(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
                 wmm(m::Int) = if use_exact_interp
