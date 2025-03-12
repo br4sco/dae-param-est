@@ -65,7 +65,10 @@ const Q::Int = 1000          # Number of conditional samples stored per interval
 # The components corresponding to the free disturbance parameters η are picked out later
 # using a call to get_disturbance_free_pars
 # dist_init_learning_rate = [0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # Small disturbance model
-dist_init_learning_rate = vcat([500*0.1, (500^2)*0.2, (500^3)*0.2, 0.05, 0.05, 0.05], zeros(9), [0.05, 0.05, 0.05], zeros(9), [0.05, 0.05, 0.05]) # Large disturbance model
+a_learning_rate = [500*0.1, (500^2)*0.2, (500^3)*0.2]
+c_learning_rate = zeros(27)
+c_learning_rate[[1,4,7,11,14,17,21,24,27]] .= 0.05
+dist_init_learning_rate = vcat(a_learning_rate, c_learning_rate) # Large disturbance model
 # Similarly for disturbance parameter bounds
 dist_bounds = repeat([-Inf Inf], 30)
 
