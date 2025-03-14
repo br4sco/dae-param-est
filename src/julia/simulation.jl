@@ -53,7 +53,7 @@ end
 function solve_in_parallel(solve_func::Function, is::UnitRange{Int}, ny::Int, N::Int)::Matrix{Float64}
     M = length(is)
     p = ProgressMeter.Progress(M, 1, "Running $(M) simulations...", 50)
-    Y = zeros(ny*N, M)
+    Y = zeros(ny*(N+1), M)
     Threads.@threads for m = 1:M
         y = solve_func(is[m])
         Y[:, m] += vcat(y...)

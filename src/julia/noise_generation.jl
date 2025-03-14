@@ -71,17 +71,6 @@ function get_C_row_and_col(ind::Int, nw::Int, nxw::Int)::Tuple{Int, Int}
     ind - J̃*nw*nxw - K̃*nw,  J̃*nxw + K̃ + 1
 end
 
-function discretize_ct_noise_model(A, B, C, Ts, x0)::DT_SS_Model
-    nx      = size(A,1)
-    Mexp    = [-A B*(B'); zeros(size(A)) A']
-    MTs     = exp(Mexp*Ts)
-    AdTs    = MTs[nx+1:end, nx+1:end]'
-    Bd2Ts   = Hermitian(AdTs*MTs[1:nx, nx+1:end])
-    CholTs  = cholesky(Bd2Ts)
-    BdTs    = CholTs.L
-    return DT_SS_Model(AdTs, BdTs, C, x0, Ts)
-end
-
 function discretize_ct_noise_model(mdl::CT_SS_Model, Ts::Float64)::DT_SS_Model
     nx = size(mdl.A,1)
     Mexp    = [-mdl.A mdl.B*(mdl.B'); zeros(size(mdl.A)) mdl.A']

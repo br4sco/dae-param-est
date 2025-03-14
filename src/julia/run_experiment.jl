@@ -181,7 +181,6 @@ begin
     ), get_Gθ
 end
 
-
 function get_experiment_data(expid::String; use_exact_interp::Bool = false, E_gen::Integer = 100)::Tuple{ExperimentData, Array{InterSampleWindow, 1}}
 
     U_meta_raw, U_meta_names = 
@@ -584,4 +583,107 @@ function get_input_from_file(expid::String)::Function
         linear_interpolation_multivar(input, δ, n_u_out)(t)
     end
     u
+end
+
+function get_1dynpar_cost_values(exp_data::ExperimentData, isws::Vector{InterSampleWindow}, par_values::AbstractVector{Float64}; M_mean::Int=100, use_exact_interp::Bool=false, e::Int=1)::Vector{Float64}
+    let N = size(exp_data.Y, 1)÷md.ny-1, W_meta = exp_data.W_meta, δ = W_meta.δ, Ts = exp_data.Ts
+    
+        @assert (md.dθ+length(W_meta.free_par_inds) == 1) "This function is only applicable for one free parameter, currently called with $(md.dθ+length(W_meta.free_par_inds)) free parameters."
+        @assert (length(W_meta.free_par_inds) == 0) "This function is only for computing cost with respect to parameters of the dynamical model, now a parameter of the disturbance model is used"
+
+        # Helper function to improve readability. Instead of calling solve_wrapper with lots of arguments and then transforming
+        # the solution to samples of the output, this function can be called instead
+        function get_one_out_rel(w_func::Function, pars::Vector{Float64})
+            sol = solve_wrapper(md.model_nominal, exp_data.u, w_func, pars, N*Ts, Ts)
+            h(sol, md.get_all_pars(pars))
+        end
+
+        Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:M_mean]   # Input to DT disturbance model
+        # η = W_meta.get_all_ηs(Vector{Float64}(undef, 0))  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
+        η = W_meta.get_all_ηs(Float64[])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
+        dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ)
+        wmm(m::Int) = if use_exact_interp
+                reset_isws!(isws)
+                XWm = simulate_noise_process(dmdl, Zm)
+                mk_newer_noise_interp(view(η, 1:W_meta.nx), dmdl.Cd, XWm, m, W_meta.nv, δ, isws)
+            else
+                XWm = simulate_noise_process_mangled(dmdl, Zm)
+                mk_noise_interp(dmdl.Cd, XWm, m, δ)
+            end
+
+        costs = zeros(length(par_values))
+        for (ind, par) = enumerate(par_values)
+            Ym = solve_in_parallel(m->get_one_out_rel(wmm(m),[par]), 1:M_mean, md.ny, N)
+            costs[ind] = (1/N) * sum(Statistics.mean(exp_data.Y[:,e].-Ym, dims=2).^2)
+            writedlm(joinpath(data_dir, "tmp/backup_cost_ind$ind.csv"), costs[ind], ',')
+            @info "Finished for parameter $ind out of $(length(par_values))"
+        end
+
+        costs
+    end
+end
+
+function get_1distpar_cost_values(exp_data::ExperimentData, isws::Vector{InterSampleWindow}, par_values::AbstractVector{Float64}; M_mean::Int=100, use_exact_interp::Bool=false, e::Int=1)::Vector{Float64}
+    let N = size(exp_data.Y, 1)÷md.ny-1, W_meta = exp_data.W_meta, δ = W_meta.δ, Ts = exp_data.Ts
+    
+        @assert (md.dθ+length(W_meta.free_par_inds) == 1) "This function is only applicable for one free parameter, currently called with $(md.dθ+length(W_meta.free_par_inds)) free parameters."
+        @assert (md.dθ == 0) "This function is only for computing cost with respect to parameters of the disturbance model, now a parameter of the dynamical model is used"
+
+        # Helper function to improve readability. Instead of calling solve_wrapper with lots of arguments and then transforming
+        # the solution to samples of the output, this function can be called instead
+        function get_one_out_rel(w_func::Function, pars::Vector{Float64})
+            sol = solve_wrapper(md.model_nominal, exp_data.u, w_func, pars, N*Ts, Ts)
+            h(sol, md.get_all_pars(pars))
+        end
+
+        Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:M_mean]   # Input to DT disturbance model
+
+        costs = zeros(length(par_values))
+        for (ind, par) = enumerate(par_values)
+            η = W_meta.get_all_ηs([par])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
+            dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ)
+            wmm(m::Int) = if use_exact_interp
+                    reset_isws!(isws)
+                    XWm = simulate_noise_process(dmdl, Zm)
+                    mk_newer_noise_interp(view(η, 1:W_meta.nx), dmdl.Cd, XWm, m, W_meta.nv, δ, isws)
+                else
+                    XWm = simulate_noise_process_mangled(dmdl, Zm)
+                    mk_noise_interp(dmdl.Cd, XWm, m, δ)
+                end
+
+            Ym = solve_in_parallel(m->get_one_out_rel(wmm(m),[par]), 1:M_mean, md.ny, N)
+            costs[ind] = (1/N) * sum(Statistics.mean(exp_data.Y[:,e].-Ym, dims=2).^2)
+            writedlm(joinpath(data_dir, "tmp/backup_cost_ind$ind.csv"), costs[ind], ',')
+            @info "Finished for parameter $ind out of $(length(par_values))"
+        end
+
+        costs
+    end
+end
+
+# Generates output of the model without applying any measurement noise
+function get_model_output(exp_data::ExperimentData, isws::Vector{InterSampleWindow}, pars::Vector{Float64}; M::Int=100, use_exact_interp::Bool=false)::Matrix{Float64}
+    let N = size(exp_data.Y, 1)÷md.ny-1, W_meta = exp_data.W_meta, δ = W_meta.δ, Ts = exp_data.Ts
+        
+        # Helper function to improve readability. Instead of calling solve_wrapper with lots of arguments and then transforming
+        # the solution to samples of the output, this function can be called instead
+        function get_one_out_rel(w_func::Function, pars::Vector{Float64})
+            sol = solve_wrapper(md.model_nominal, exp_data.u, w_func, pars, N*Ts, Ts)
+            h(sol, md.get_all_pars(pars))
+        end
+
+        Zm = [randn(W_meta.nx*W_meta.nv, W_meta.Nw+1) for _ = 1:M]
+        η = W_meta.get_all_ηs(pars[md.dθ+1:end])  # NOTE: Assumes that the disturbance parameters always come after the dynamical parameters.
+        dmdl = discretize_ct_noise_model(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ)
+        wmm(m::Int) = if use_exact_interp
+                reset_isws!(isws)
+                XWm = simulate_noise_process(dmdl, Zm)
+                mk_newer_noise_interp(view(η, 1:W_meta.nx), dmdl.Cd, XWm, m, W_meta.nv, δ, isws)
+            else
+                XWm = simulate_noise_process_mangled(dmdl, Zm)
+                mk_noise_interp(dmdl.Cd, XWm, m, δ)
+            end
+
+        solve_in_parallel(m->get_one_out_rel(wmm(m),pars), 1:M, md.ny, N)
+    end
 end
