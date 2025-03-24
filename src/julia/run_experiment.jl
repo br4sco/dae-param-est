@@ -629,7 +629,7 @@ function get_1dynpar_cost_values(exp_data::ExperimentData, isws::Vector{InterSam
 
         costs = zeros(length(par_values))
         for (ind, par) = enumerate(par_values)
-            Ym = solve_in_parallel(m->get_one_out_rel(wmm(m),[par]), 1:M_mean, md.ny, N)
+            Ym = solve_in_parallel(m->get_one_out_rel(wmm(m),[par]), 1:M_mean, md.ny, N+1)
             costs[ind] = (1/N) * sum(Statistics.mean(exp_data.Y[:,e].-Ym, dims=2).^2)
             writedlm(joinpath(data_dir, "tmp/backup_cost_ind$ind.csv"), costs[ind], ',')
             @info "Finished for parameter $ind out of $(length(par_values))"
@@ -667,7 +667,7 @@ function get_1distpar_cost_values(exp_data::ExperimentData, isws::Vector{InterSa
                     mk_noise_interp(dmdl.Cd, XWm, m, δ)
                 end
 
-            Ym = solve_in_parallel(m->get_one_out_rel(wmm(m),[par]), 1:M_mean, md.ny, N)
+            Ym = solve_in_parallel(m->get_one_out_rel(wmm(m),[par]), 1:M_mean, md.ny, N+1)
             costs[ind] = (1/N) * sum(Statistics.mean(exp_data.Y[:,e].-Ym, dims=2).^2)
             writedlm(joinpath(data_dir, "tmp/backup_cost_ind$ind.csv"), costs[ind], ',')
             @info "Finished for parameter $ind out of $(length(par_values))"
@@ -700,6 +700,6 @@ function get_model_output(exp_data::ExperimentData, isws::Vector{InterSampleWind
                 mk_noise_interp(dmdl.Cd, XWm, m, δ)
             end
 
-        solve_in_parallel(m->get_one_out_rel(wmm(m),pars), 1:M, md.ny, N)
+        solve_in_parallel(m->get_one_out_rel(wmm(m),pars), 1:M, md.ny, N+1)
     end
 end

@@ -48,7 +48,7 @@ The parameter `Nw` defines the number of steps of the noise sequence, and which 
 To use the same disturbance model as described in the paper, in a julia repl in [src/julia](src/julia) run:
 
 ```{julia}
-using DelimitedFiles, CSV, DataFrames
+using DataFrames
 include("run_experiment.jl")
 using .NoiseGeneration: get_filtered_noise, disturbance_model_5, get_multisine_data   # disturbance_model_5 is for delta robot
 
