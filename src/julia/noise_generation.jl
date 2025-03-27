@@ -103,8 +103,8 @@ function get_disc_then_diff_matrices(mdl::CT_SS_Model, Ts::Float64, sens_inds::V
     end
 
     M = [mdl.A                    zeros(n_tot, na*n_tot)                mdl.B*(mdl.B');
-         Aηa                kron(Matrix(1.0I, na, na), mdl.A)   zeros(n_tot*na, n_tot);
-         zeros(n_tot, n_tot)     zeros(n_tot, n_tot*na)                -mdl.A' ]
+         Aηa                kron(Matrix(1.0I, na, na), mdl.A)   zeros(na*n_tot, n_tot);
+         zeros(n_tot, n_tot)     zeros(n_tot, na*n_tot)                -mdl.A' ]
     Mexp = exp(M*Ts)
     Ãd   = Mexp[1:n_tot, 1:n_tot]   # Ãd = e^(A*Ts)
     Dd   = Hermitian(Mexp[1:n_tot, (na+1)*n_tot+1:(na+2)*n_tot]*(Ãd'))
@@ -174,6 +174,7 @@ end
 
 # Differentiates ct model before discretization, corresponds to Proposition 5.1 in my Licentiate thesis. 
 # Assumes that B is not parametrized, but this does not really simplify the function, just makes some elements zero.
+# In case of adjoint method, corresponds to case 1 in Table 5.2 (pg. 128) in my Licentiate thesis (I THINK!)
 function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::DT_SS_Model
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
@@ -195,10 +196,10 @@ function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64
     end
 
     # Working under the assumption B_θ = 0
-    M = [mdl.A                  zeros(n_tot, na*n_tot)                  mdl.B*(mdl.B')          zeros(n_tot, n_tot*na);
-         Aηa                kron(Matrix(1.0I, na, na), mdl.A)           zeros(n_tot*na, n_tot)       zeros(n_tot*na, n_tot*na);
-         zeros(n_tot, n_tot)     zeros(n_tot, n_tot*na)                         -mdl.A'              -Aηa';
-         zeros(n_tot*na, n_tot)    zeros(n_tot*na, n_tot*na)           zeros(n_tot*na, n_tot)      kron(Matrix(1.0I, na, na), -mdl.A')]
+    M = [mdl.A                  zeros(n_tot, na*n_tot)                  mdl.B*(mdl.B')          zeros(n_tot, na*n_tot);
+         Aηa                kron(Matrix(1.0I, na, na), mdl.A)           zeros(na*n_tot, n_tot)       zeros(na*n_tot, na*n_tot);
+         zeros(n_tot, n_tot)     zeros(n_tot, na*n_tot)                         -mdl.A'              -Aηa';
+         zeros(na*n_tot, n_tot)    zeros(na*n_tot, na*n_tot)           zeros(na*n_tot, n_tot)      kron(Matrix(1.0I, na, na), -mdl.A')]
     Mexp = exp(M*Ts)
 
     Ad = Mexp[1:n_tot*(na+1), 1:n_tot*(na+1)]
@@ -245,6 +246,7 @@ end
 # Discretizes nominal disturbance model and provides matrices necessary for adjoint method where the disturbance model is 
 # approximated by an ODE. Corresponds to Proposition 5.6 in my Licentiate thesis.
 # Assumes that B-matrix is not parametrized, i.e. the version of Proposition 5.6 that uses Corollary 5.1
+# Corresponds to case 2.1b in Table 5.2 (pg. 128) in my Licentiate thesis (I THINK!)
 function discretize_ct_noise_model_with_adj_SDEApprox_mats(
     mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
@@ -271,13 +273,13 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
     M = [zeros(n_tot, (na+1)*n_tot)      Matrix(I, n_tot, n_tot)      zeros(n_tot, na*n_tot)                zeros(n_tot, n_tot)
          zeros(na*n_tot, (na+1)*n_tot)    zeros(na*n_tot, n_tot)    Matrix(I, na*n_tot, na*n_tot)            zeros(na*n_tot, n_tot)
          zeros(n_tot, (na+1)*n_tot)           mdl.A                 zeros(n_tot, na*n_tot)                mdl.B*(mdl.B');
-         zeros(na*n_tot, (na+1)*n_tot)         Ǎηa                  kron(Matrix(1.0I, na, na), mdl.A)   zeros(n_tot*na, n_tot);
-         zeros(n_tot, (na+1)*n_tot)          zeros(n_tot, n_tot)        zeros(n_tot, n_tot*na)                -mdl.A' ]
+         zeros(na*n_tot, (na+1)*n_tot)         Ǎηa                  kron(Matrix(1.0I, na, na), mdl.A)   zeros(na*n_tot, n_tot);
+         zeros(n_tot, (na+1)*n_tot)          zeros(n_tot, n_tot)        zeros(n_tot, na*n_tot)                -mdl.A' ]
 
     Mexp = exp(M*Ts)
-    Ad   = Mexp[(na+1)*n_tot + 1:(na+2)*n_tot, (na+1)*n_tot + 1:(na+2)*n_tot]
-    Dd   = Hermitian(Mexp[(na+1)*n_tot + 1:(na+2)*n_tot, (2na+2)*n_tot + 1:(2na+3)*n_tot]*(Ad'))
-    Bd = try
+    Ãd   = Mexp[(na+1)*n_tot + 1:(na+2)*n_tot, (na+1)*n_tot + 1:(na+2)*n_tot]
+    Dd   = Hermitian(Mexp[(na+1)*n_tot + 1:(na+2)*n_tot, (2na+2)*n_tot + 1:(2na+3)*n_tot]*(Ãd'))
+    B̃d = try
         cholesky(Dd).L
     catch PosDefException
         # Due to numerical inaccuracies, Dd can occasionally become indefinite, 
@@ -297,18 +299,18 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
         end
     end
 
-    Bdηa = zeros(na*n_tot, n_tot)
+    B̃dηa = zeros(na*n_tot, n_tot)
     for i = 1:na
         # H = Mexp[(na+i+1)*nx + 1:(na+i+2)*nx, (2na+2)*nx + 1:(2na+3)*nx]
-        Ddηai = Mexp[(na+i+1)*n_tot + 1:(na+i+2)*n_tot, (2na+2)*n_tot + 1:(2na+3)*n_tot]*(Ad')
+        Ddηai = Mexp[(na+i+1)*n_tot + 1:(na+i+2)*n_tot, (2na+2)*n_tot + 1:(2na+3)*n_tot]*(Ãd')
         Ddηai += Ddηai'
-        Bdηa[(i-1)*n_tot+1:i*n_tot,:] = Bd*Phi((Bd\Ddηai)/(Bd'), n_tot)
+        B̃dηa[(i-1)*n_tot+1:i*n_tot,:] = B̃d*Phi((B̃d\Ddηai)/(B̃d'), n_tot)
     end
 
     # Matrices needed for adjoint disturbance estimation
     P = Mexp[1:n_tot, (na+1)*n_tot + 1:(na+2)*n_tot]
     R = Mexp[n_tot+1:(na+1)*n_tot, (na+1)*n_tot + 1: (na+2)*n_tot]
-    B̌ηa = kron(Matrix(I,na,na), P) \ (Bdηa - (R/P)*Bd)
+    B̌ηa = kron(Matrix(I,na,na), P) \ (B̃dηa - (R/P)*B̃d)
     # B̌  = P\Bd
 
     Čηc = zeros((nη-na)*nw, n_tot)
@@ -321,9 +323,12 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats(
     end
 
     # Returns non-sensitivity disturbance model and other matrices needed for adjoint disturbance sensitivity
-    return DT_SS_Model(Ad, Bd, mdl.C, zeros(n_tot), Ts), Ǎηa, B̌ηa, Čηc, mdl.A
+    return DT_SS_Model(Ãd, B̃d, mdl.C, zeros(n_tot), Ts), Ǎηa, B̌ηa, Čηc, mdl.A
 end
 
+# Similar to discretize_ct_noise_model_with_adj_SDEApprox_mats, but by assuming that the A-matrix in the disturbance model
+# is invertible, avoids using Proposition 5.6 from my Licentiate thesis, instead using Proposition 5.7.
+# Corresponds to case 2.2b in Table 5.2 (pg. 128) in my Licentiate thesis
 function discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(
     mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
@@ -363,6 +368,94 @@ function discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible(
 
     # Returns non-sensitivity disturbance model and other matrices needed for adjoint disturbance sensitivity
     return DT_SS_Model(Ãd, B̃d, mdl.C, zeros(n_tot), Ts), Ǎηa, B̌ηa, Čηc, mdl.A
+end
+
+# Discretizes nominal disturbance model and provides matrices necessary for adjoint method where the disturbance model
+# together with sensitivity equations is approximated by an ODE. Corresponds to Corollary 5.3 in my Licentiate thesis.
+# Corresponds to case 3.1 in Table 5.2 (pg. 128) in my Licentiate thesis
+function discretize_ct_noise_model_with_adj_sensSDEApprox_mats(
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+    # sens_inds: indices of parameter with respect to which we compute the
+    # sensitivity of disturbance output w
+
+    @assert (length(sens_inds) > 0) "Make sure at least one disturbance parameter is marked for identification. Can't create model for sensitivity with respect to no parameters."
+
+    nv = size(mdl.B, 2)
+    nw = size(mdl.C, 1)
+    n_tot = size(mdl.A, 1)
+    nx = n_tot÷nv
+
+    # Indices of free parameters corresponding to "a-vector" in disturbance model
+    sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
+    # sens_inds_c = sens_inds[findall(sens_inds .> nx)]
+    nη   = length(sens_inds)
+    na = length(sens_inds_a)
+
+    Aηa = zeros(na*n_tot, n_tot)
+    for i = 1:na
+        Aηa[(i-1)*n_tot+1, sens_inds_a[i]] = -1.0
+    end
+
+    # Working under the assumption B_θ = 0
+    # Except for the first column, each 2x2 block in M corresponds to one submatrix in G in Corollary 5.3
+    M = [zeros(n_tot, (na+1)*n_tot)            Matrix(1.0I, n_tot, n_tot)  zeros(n_tot, na*n_tot)                zeros(n_tot, n_tot)     zeros(n_tot, na*n_tot)
+         zeros(na*n_tot, (na+1)*n_tot)         zeros(na*n_tot, n_tot)    Matrix(1.0I, na*n_tot, na*n_tot)        zeros(na*n_tot, n_tot)  zeros(na*n_tot, na*n_tot)
+
+         zeros(n_tot, (na+1)*n_tot)            mdl.A                      zeros(n_tot, na*n_tot)                    mdl.B*(mdl.B')       zeros(n_tot, na*n_tot);
+         zeros(na*n_tot, (na+1)*n_tot)         Aηa                     kron(Matrix(1.0I, na, na), mdl.A)        zeros(na*n_tot, n_tot)   zeros(na*n_tot, na*n_tot);
+
+         zeros(n_tot, (na+1)*n_tot)            zeros(n_tot, n_tot)        zeros(n_tot, na*n_tot)                       -mdl.A'                       -Aηa';
+         zeros(na*n_tot, (na+1)*n_tot)         zeros(na*n_tot, n_tot)     zeros(na*n_tot, na*n_tot)             zeros(na*n_tot, n_tot)   kron(Matrix(1.0I, na, na), -mdl.A')]
+    Mexp = exp(M*Ts)
+
+    Ad = Mexp[(na+1)n_tot+1:2(na+1)n_tot, (na+1)n_tot+1:2(na+1)n_tot]
+    Dd = Hermitian(Mexp[(na+1)n_tot+1:2(na+1)n_tot, 2(na+1)n_tot+1:3(na+1)n_tot]*(Ad'))
+    Bd = try
+        cholesky(Dd).L
+    catch PosDefException
+        # Due to numerical inaccuracies, Dd can occasionally become indefinite, 
+        # at which point we modify the diagonal elements as little as possible
+        # but enough to make it positive definite
+        eigs = eigen(Dd).values
+        @warn "Had to modify Dd with $(-eigs[1])"
+        # eigs[1] is the lowest (in this case negative) eigenvale. By subtracting it, 
+        # in theory the matrix should become positive SEMIDEFINITE, but because of numerical
+        # inaccuracies it has so far become positive definite when I have tested. If it ever
+        # throws another PosDefException, it might be worth subtracting twice as much
+        try
+            cholesky(Dd - eigs[1]*I).L
+        catch PosDefException
+            @warn "Actually had to increase by even 1e-20"
+            cholesky(Dd + (1e-20)*I).L
+        end
+    end
+
+    Cηc = zeros((nη-na)*nw, n_tot)
+    for ηind = na+1:nη
+        # We want to pass the index of the currently considered c-parameter in the C-matrix to get_C_row_and_col
+        # sens_inds contains the index of that parameter in η, which contains the additional na
+        # parameters corresponding to the A-matrix
+        row, col = get_C_row_and_col(sens_inds[ηind]-na, nw, n_tot)  # row and col of the currently considered parameter in mdl.C
+        Cηc[(ηind-na-1)nw + row, col] = 1.0
+    end
+
+    P = Mexp[1:n_tot, (na+1)n_tot+1:(na+2)n_tot]
+    R = Mexp[n_tot+1:(na+1)n_tot, (na+1)n_tot+1:(na+2)n_tot]
+    tmp1 = P\Bd[1:n_tot, 1:end]            # tmp1 =  P^-1 Bd_1
+    tmp2 = zeros(na*n_tot, na*n_tot)       # tmp2 = (I⊗P^-1)R
+    tmp3 = zeros(na*n_tot, (na+1)n_tot)    # tmp3 = (I⊗P^-1)Bd_2
+    for ind=1:na
+        tmp2[(ind-1)n_tot+1:ind*n_tot, :] = P\R[(ind-1)n_tot+1:ind*n_tot, 1:end]
+        tmp3[(ind-1)n_tot+1:ind*n_tot, :] = P\Bd[ind*n_tot+1:(ind+1)*n_tot, 1:end]
+    end
+
+    # B̌̌ = vcat(tmp1, -tmp2*tmp1 + tmp3), but we should only return second block of B̌̌
+
+    # Returns non-sensitivity disturbance model and other matrices needed for adjoint disturbance sensitivity
+    # The non-sensitivity disturbance model matrices are (elsewhere and in my licentiate thesis) called
+    # Ãd and B̃d. On page 104 of the licentiate thesis I show that the 1,1-block of Bd is equal to B̃d, and the corresponding
+    # result for Ad and Ãd is given by Lemma 5.2 in the licentiate thesis.
+    return DT_SS_Model(Ad[1:n_tot, 1:n_tot], Bd[1:n_tot, 1:n_tot], mdl.C, zeros(n_tot), Ts), Aηa, -tmp2*tmp1 + tmp3, Cηc, mdl.A
 end
 
 # ================= Functions simulating disturbance =======================

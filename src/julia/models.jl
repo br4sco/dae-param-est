@@ -465,7 +465,11 @@ function pendulum_adjoint_k_1dist_ODEdist(w::Function, pars::Vector{Float64}, T:
             # ---------- β-equations ----------
             # 0 = dβᵢ - gθᵢ + λᵀFθᵢ + λₓᵀ(Ǎθᵢ*xw(t) + B̌θᵢ*v(t)) + λwᵀČθᵢxw(t)                                     # Analytical form
             res[nx+ndist+1]  = dz[nx+ndist+1] - z[3]*abs(x(t,4))*x(t,4) - z[4]*abs(x(t,5))*x(t,5)                                 # For parameter k, only dβᵢ + λᵀFθᵢ
-            res[nx+ndist+2]  = dz[nx+ndist+2] + z[8:9]⋅(ad.Ǎηa[1:nxw,:]*ad.xw(t) - ad.B̌ηa[1:nxw,:]*ad.v(t)) + z[10]⋅(ad.Čηc*ad.xw(t))        # For disturbance parameter, only  dβᵢ + λₓᵀ(Ǎθᵢ*xw(t) + B̌θᵢ*v(t)) + λwᵀČθᵢxw(t)
+            if ad.na == 1
+                res[nx+ndist+2]  = dz[nx+ndist+2] + z[8:9]⋅(ad.Ǎηa[1:nxw,:]*ad.xw(t) - ad.B̌ηa[1:nxw,:]*ad.v(t))        # For disturbance a-parameter, only  dβᵢ + λₓᵀ(Ǎθᵢ*xw(t) + B̌θᵢ*v(t))
+            else # ad.na == 0
+                res[nx+ndist+2]  = dz[nx+ndist+2] + z[10]⋅(ad.Čηc*ad.xw(t))        # For disturbance c-parameter, only  dβᵢ + λwᵀČθᵢxw(t)
+            end
 
             nothing
         end
