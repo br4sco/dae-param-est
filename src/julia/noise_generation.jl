@@ -175,7 +175,7 @@ end
 # Differentiates ct model before discretization, corresponds to Proposition 5.1 in my Licentiate thesis. 
 # Assumes that B is not parametrized, but this does not really simplify the function, just makes some elements zero.
 # In case of adjoint method, corresponds to case 1 in Table 5.2 (pg. 128) in my Licentiate thesis (I THINK!)
-function discretize_ct_noise_model_diff_then_disc( mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::DT_SS_Model
+function discretize_ct_noise_model_diff_then_disc(mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::DT_SS_Model
     # sens_inds: indices of parameter with respect to which we compute the
     # sensitivity of disturbance output w
 
@@ -246,7 +246,7 @@ end
 # Discretizes nominal disturbance model and provides matrices necessary for adjoint method where the disturbance model is 
 # approximated by an ODE. Corresponds to Proposition 5.6 in my Licentiate thesis.
 # Assumes that B-matrix is not parametrized, i.e. the version of Proposition 5.6 that uses Corollary 5.1
-# Corresponds to case 2.1b in Table 5.2 (pg. 128) in my Licentiate thesis (I THINK!)
+# Corresponds to case 2.1b in Table 5.2 (pg. 128) in my Licentiate thesis
 function discretize_ct_noise_model_with_adj_SDEApprox_mats(
     mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
     # sens_inds: indices of parameter with respect to which we compute the
@@ -456,6 +456,60 @@ function discretize_ct_noise_model_with_adj_sensSDEApprox_mats(
     # Ãd and B̃d. On page 104 of the licentiate thesis I show that the 1,1-block of Bd is equal to B̃d, and the corresponding
     # result for Ad and Ãd is given by Lemma 5.2 in the licentiate thesis.
     return DT_SS_Model(Ad[1:n_tot, 1:n_tot], Bd[1:n_tot, 1:n_tot], mdl.C, zeros(n_tot), Ts), Aηa, -tmp2*tmp1 + tmp3, Cηc, mdl.A
+end
+
+# Similar to discretize_ct_noise_model_with_adj_sensSDEApprox_mats, but by assuming that the A-matrix in the disturbance model
+# is invertible, avoids using Corollary 5.3 from my Licentiate thesis, so that Proposition 5.1 suffices
+# Corresponds to case 3.2 in Table 5.2 (pg. 128) in my Licentiate thesis
+function discretize_ct_noise_model_with_adj_sensSDEApprox_mats_Ainvertible(
+    mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})::Tuple{DT_SS_Model, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}, Matrix{Float64}}
+    # sens_inds: indices of parameter with respect to which we compute the
+    # sensitivity of disturbance output w
+
+    @assert (length(sens_inds) > 0) "Make sure at least one disturbance parameter is marked for identification. Can't create model for sensitivity with respect to no parameters."
+
+    nv = size(mdl.B, 2)
+    nw = size(mdl.C, 1)
+    n_tot = size(mdl.A, 1)
+    nx = n_tot÷nv
+
+    # Indices of free parameters corresponding to "a-vector" in disturbance model
+    sens_inds_a = sens_inds[findall(sens_inds .<= nx)]
+    # sens_inds_c = sens_inds[findall(sens_inds .> nx)]
+    nη   = length(sens_inds)
+    na = length(sens_inds_a)
+
+    Aηa = zeros(na*n_tot, n_tot)
+    for i = 1:na
+        Aηa[(i-1)*n_tot+1, sens_inds_a[i]] = -1.0
+    end
+
+    dmdl = discretize_ct_noise_model_diff_then_disc(mdl::CT_SS_Model, Ts::Float64, sens_inds::Vector{Int})
+
+    # Ãd = dmdl.Ad[1:n_tot, 1:n_tot]
+    # dÃd/dηa = dmdl.Ad[n_tot+1:end, 1:n_tot]
+    tmp1 = mdl.A/(dmdl.Ad[1:n_tot, 1:n_tot] - Matrix(1.0I, n_tot, n_tot))
+    tmp2 = Aηa/(dmdl.Ad[1:n_tot, 1:n_tot] - Matrix(1.0I, n_tot, n_tot))
+    tmp3 = dmdl.Ad[n_tot+1:end, 1:n_tot]/(dmdl.Ad[1:n_tot, 1:n_tot] - Matrix(1.0I, n_tot, n_tot))
+
+    B̌̌_2ndblockrow = [tmp2 - kron(Matrix(1.0I, na, na), tmp1)*tmp3   kron(Matrix(1.0I, na, na), tmp1)]*dmdl.Bd
+    # B̌̌ = [tmp1                                           zeros(n_tot, (na+1)n_tot)
+    #      tmp2 - kron(Matrix(1.0I, na, na), tmp1)*tmp3   kron(Matrix(1.0I, na, na), tmp1)]*dmdl.Bd
+
+    Cηc = zeros((nη-na)*nw, n_tot)
+    for ηind = na+1:nη
+        # We want to pass the index of the currently considered c-parameter in the C-matrix to get_C_row_and_col
+        # sens_inds contains the index of that parameter in η, which contains the additional na
+        # parameters corresponding to the A-matrix
+        row, col = get_C_row_and_col(sens_inds[ηind]-na, nw, n_tot)  # row and col of the currently considered parameter in mdl.C
+        Cηc[(ηind-na-1)nw + row, col] = 1.0
+    end
+
+    # Returns non-sensitivity disturbance model and other matrices needed for adjoint disturbance sensitivity
+    # The non-sensitivity disturbance model matrices are (elsewhere and in my licentiate thesis) called
+    # Ãd and B̃d. On page 104 of the licentiate thesis I show that the 1,1-block of Bd is equal to B̃d, and the corresponding
+    # result for Ad and Ãd is given by Lemma 5.2 in the licentiate thesis.
+    return DT_SS_Model(dmdl.Ad[1:n_tot, 1:n_tot], dmdl.Bd[1:n_tot, 1:n_tot], mdl.C, zeros(n_tot), Ts), Aηa, B̌̌_2ndblockrow, Cηc, mdl.A
 end
 
 # ================= Functions simulating disturbance =======================

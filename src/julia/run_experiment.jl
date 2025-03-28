@@ -3,7 +3,7 @@ include("noise_interpolation_multivar.jl")
 # include("minimizers.jl")
 include("models.jl")
 using .NoiseGeneration: DisturbanceMetaData, demangle_XW, get_ct_disturbance_model, discretize_ct_noise_model_disc_then_diff, simulate_noise_process, simulate_noise_process_mangled
-using .NoiseGeneration: discretize_ct_noise_model_with_adj_SDEApprox_mats, discretize_ct_noise_model_with_adj_sensSDEApprox_mats
+using .NoiseGeneration: discretize_ct_noise_model_with_adj_SDEApprox_mats, discretize_ct_noise_model_with_adj_sensSDEApprox_mats, discretize_ct_noise_model_with_adj_sensSDEApprox_mats_Ainvertible
 using .NoiseGeneration: discretize_ct_noise_model, discretize_ct_noise_model_with_adj_SDEApprox_mats_Ainvertible, get_multisines, discretize_ct_noise_model_diff_then_disc, DT_SS_Model
 using .NoiseInterpolation: InterSampleWindow, initialize_isw, reset_isws!, noise_inter, mk_newer_noise_interp, mk_noise_interp, linear_interpolation_multivar
 using .DynamicalModels: AdjointSDEApproxData
@@ -494,7 +494,11 @@ function get_proposed_estimates(pars0::Vector{Float64}, exp_data::ExperimentData
                     #  B̌ηa -> B̌̌[nxw+1:end, 1:end]
                     #  Čηc -> Cηc
                     #  Ǎ   -> A
-                    discretize_ct_noise_model_with_adj_sensSDEApprox_mats(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
+                    if Ainvertible
+                        discretize_ct_noise_model_with_adj_sensSDEApprox_mats_Ainvertible(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
+                    else
+                        discretize_ct_noise_model_with_adj_sensSDEApprox_mats(get_ct_disturbance_model(η, W_meta.nx, W_meta.nv), δ, W_meta.free_par_inds)
+                    end
                 end
                 
                 wm(m::Int) = if use_exact_interp
