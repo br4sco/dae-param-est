@@ -30,7 +30,7 @@ delta_model_data = let
     # init_learning_rate = init_learning_rate[12]
     # Left column contains lower bound for parameters, right column contains upper bound
     par_bounds = hcat(fill(0.01, 12, 1), fill(1e4, 12, 1)) #Array{Float64}(undef, 0, 2)
-    # par_bounds[3,1] = 1.0 # Setting lower bound for L2
+    par_bounds[3,1] = 1.0 # Setting lower bound for L2
     model_nominal = delta_robot
     model_sens = delta_forward_allpar_alldist                        # For forward sensitivity
     model_adjoint = delta_adjoint_allpar_alldist              # For adjoint sensitivity

@@ -54,7 +54,7 @@ end
 # ============================== Values that can be set by user =====================================
 # ===================================================================================================
 # Selects which model to use/simulate
-model_id::Int = PENDULUM
+model_id::Int = DELTA
 # Number of monte-carlo simulations used for estimation, e.g. samples of the gradient used to estimate the gradient
 # Note that, when two independent estimates are needed, a total of 2M samples is generated, M for each estimate
 const M::Int = Threads.nthreads()÷2
@@ -66,11 +66,11 @@ const Q::Int = 1000          # Number of conditional samples stored per interval
 # The initial learning rate for each component for each component of the disturbance parameters ρ
 # The components corresponding to the free disturbance parameters η are picked out later
 # using a call to get_disturbance_free_pars
-dist_init_learning_rate = [0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # Small disturbance model
-# a_learning_rate = [500*0.1, (500^2)*0.2, (500^3)*0.2]
-# c_learning_rate = zeros(27)
-# c_learning_rate[[1,4,7,11,14,17,21,24,27]] .= 0.05
-# dist_init_learning_rate = vcat(a_learning_rate, c_learning_rate) # Large disturbance model
+# dist_init_learning_rate = [0.1, 0.2, 0.2, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05] # Small disturbance model
+a_learning_rate = [500*0.1, (500^2)*0.2, (500^3)*0.2]
+c_learning_rate = zeros(27)
+c_learning_rate[[1,4,7,11,14,17,21,24,27]] .= 0.05
+dist_init_learning_rate = vcat(a_learning_rate, c_learning_rate) # Large disturbance model
 # Similarly for disturbance parameter bounds
 dist_bounds = repeat([-Inf Inf], 30)
 
@@ -81,14 +81,14 @@ function get_disturbance_free_pars(nx::Int, nw::Int, n_tot::Int)::Vector{Bool}
     # free_dist_pars = fill(false, nx + n_tot*nw)                                             # Known disturbance model
     # free_dist_pars = vcat(fill(true, nx), fill(false, nw), fill(true, (n_tot-1)*nw))     # Whole a-vector and all but first nw elements of c-vector unknown (MAXIMUM UNKNOWN PARAMETERS FOR SINGLE DIFFERENTIABILITY (PENDULUM))
     # free_dist_pars = vcat(fill(true, nx), fill(true, n_tot*nw))                     # All parameters unknown (MAXIMUM UNKNOWN PARAMETERS, NO DIFFERENTIABILITY (DELTA))
-    # free_dist_pars = begin
-    #     tmp = fill(false, nx + n_tot*nw)
-    #     tmp[1:nx] .= true   # a-parameters
-    #     tmp[[1,4,7,11,14,17,21,24,27].+nx] .= true  # c-parameters
-    #     tmp
-    # end                 # New disturbance model but corresponding same free parameter as old disturbance model all parameters, delta case
+    free_dist_pars = begin
+        tmp = fill(false, nx + n_tot*nw)
+        tmp[1:nx] .= true   # a-parameters
+        tmp[[1,4,7,11,14,17,21,24,27].+nx] .= true  # c-parameters
+        tmp
+    end                 # New disturbance model but corresponding same free parameter as old disturbance model all parameters, delta case
     # free_dist_pars = vcat(fill(true, nx), fill(false, n_tot*nw))                    # Whole a-vector unknown
-    free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*nw))           # First parameter of a-vector unknown
+    # free_dist_pars = vcat(true, fill(false, nx-1), fill(false, n_tot*nw))           # First parameter of a-vector unknown
     # free_dist_pars = vcat(false, true, fill(false, nx-2), fill(false, n_tot*nw))    # Second parameter of a-vector unknown
 end
 # ===================================================================================================
@@ -280,8 +280,9 @@ function get_disturbance_metadata(W_meta_raw::Matrix{Float64})::DisturbanceMetaD
     DisturbanceMetaData(nx, nv, nw, η_true, free_par_inds, free_par_bounds, get_all_ηs, num_rel, Nw, δ)
 end
 
+# TODO: Implement adjoint method for baseline approach!
 function get_baseline_estimates(pars0::Vector{Float64}, exp_data::ExperimentData; verbose::Bool = true, E_in::Int=typemax(Int))
-    let N = size(exp_data.Y, 1)÷md.ny-1, E = min(size(exp_data.Y, 2), E_in), dη = length(exp_data.W_meta.η), W_meta = exp_data.W_meta
+    let N = size(exp_data.Y, 1)÷md.ny-1, E = min(size(exp_data.Y, 2), E_in), Ts = exp_data.Ts, dη = length(exp_data.W_meta.η), W_meta = exp_data.W_meta
 
         opt_pars_baseline = zeros(md.dθ, E)
         trace_baseline = [[pars0] for e=1:E]

@@ -77,7 +77,8 @@ function perform_ADAM_deltaversion(
             # running_criterion() || break  # TODO: Consider implementing convergence/running criterion
             pars = pars + step
             # Dynamically updates parameter bounds, since they are parameter-dependent
-            bounds[4,:] = [max(pars[1]-pars[3], 0.01), pars[1]+pars[3]] # Constrains max(0.01, L0-L2) <= L3 <= L0+L2
+            # Uses 0.99L2 instead of L2 to make sure bound is a little tighter to avoid numerical issues close to edge
+            bounds[4,:] = [max(pars[1]-0.99*pars[3], 0.01), pars[1]+0.99*pars[3]] # Constrains max(0.01, L0-L2) <= L3 <= L0+L2
             bounds[5,:] = [bounds[5,1], pars[2]]                        # Constrains 0.01 <= LC1 <= L1
             bounds[6,:] = [bounds[6,1], pars[3]]                        # Constrains 0.01 <= LC2 <= L2
             project_on_bounds!(pars, bounds)
