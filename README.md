@@ -2,7 +2,7 @@
 A Parameter Estimation Experiment for DAEs  
 For the code used in our [paper published at CDC 2021](https://www.diva-portal.org/smash/get/diva2:1539989/FULLTEXT01.pdf), please see the branch "cdc".  
 For the code used in our [paper submitted to CDC 2022](https://kth.diva-portal.org/smash/get/diva2:1914575/FULLTEXT01.pdf), please see the branch "CDC22".\
-This main branch contains the code for the [Licentiate thesis](https://kth.diva-portal.org/smash/get/diva2:1914575/FULLTEXT01.pdf) of Robert Bereza.
+This main branch contains cleaned up code for the [Licentiate thesis](https://kth.diva-portal.org/smash/get/diva2:1914575/FULLTEXT01.pdf) of Robert Bereza.
 
 
 ## Prerequisites
@@ -13,7 +13,7 @@ You will need to install some additional julia packages. The julia repl
 (`julia`) will notify you which packages are missing when you include files
 (i.e. `include("<file>.jl")`) and how to install them. To start julia with
 multiple threads (recommended), start julia with the following command `julia
---threads n`, where `n` is the number of threads you want to use. We have used `n=8`.
+--threads n`, where `n` is the number of threads you want to use.
 
 ## Run the experiment
 Before running your first ever experiment, it is important to install the necessary packages, or the code will crash. One can attempt to run the code and from the error message see which package needs to be installed, but you can also simply upfront run
@@ -28,9 +28,19 @@ noise model and noise generation is defined in
 [src/julia/noise_generation.jl](src/julia/noise_generation.jl). The DAE models can be found in [src/julia/models.jl](src/julia/models.jl), while 
 the user selects which of those models to use in the corresponding model metadata-file, found in the [src/julia/model_metadata](src/julia/model_metadata).
 
-### Minimal example
+### Download or generate noise
+You can either generate the data yourself or download the data used in our experiment from
+https://kth-my.sharepoint.com/:f:/g/personal/robbj_ug_kth_se/Eoy33BAr42JPnTzK1MGQ2qcBP2sjLWb-fs0cAFC2YrUK5Q?e=I5bAHp (This link is only valid for 180 days, if it doesn't work then please e-mail robbj@kth.se, since that means we have forgotten to update it). Place these files in
+[src/julia/data/experiments](src/julia/data/experiments) (Note that these files are quite large). You can also generate noise yourself using
+the functions defined in
+[src/julia/noise_generation.jl](src/julia/noise_generation.jl). You should generate and
+save four files in total:
 
-Many experiment metaparameters have to be set in the code and are perhaps therefore not easy to edit. The current metaparameters are set so that it is straightforward to run a single experiment for identifying the parameter `k` of the pendulum model. Download the experiment data titled *500_u2w6_from_Alsvin* from [https://kth-my.sharepoint.com/:f:/g/personal/robbj_ug_kth_se/EqMa_VdRU89GtYkNFiPfe-sB6O4B19RKqXIo494jX9mcGA?e=wP89k9](https://kth-my.sharepoint.com/:f:/g/personal/robbj_ug_kth_se/EqMa_VdRU89GtYkNFiPfe-sB6O4B19RKqXIo494jX9mcGA?e=wP89k9) (This link is only valid for 180 days, if it doesn't work then please e-mail robbj@kth.se, since that means we have forgotten to update it). You can also generate your own noise using the instructions under the next heading. In that case, use `N=500`. Place the data in [src/julia/data/experiments](src/julia/data/experiments).
+1. A `Nw✕1` noise matrix serving as the input u(t).
+2. Meta-data corresponding to the above noise matrix
+3. A `Nw✕E` noise matrix representing the process disturbance, where `E` is the
+   number of used data-sets
+4. Meta-data corresponding to the above noise matrix
 
 
 The parameter `Nw` defines the number of steps of the noise sequence, and which has to be long enough for running the simulation.  Specifically, `Nw*δ >= N*Ts` must hold, where `δ` is the sampling time of the noise generation, `N` and `Ts` is the number of steps and sampling time of the simulation, respectively.
@@ -66,7 +76,7 @@ Then, in the repl, include the experiment script
 include("run_experiment.jl")
 ```
 You will probably have to install a number of dependencies pointed out by julia.
-After that, you can run the estimation experiment over the data-set found in the folder ```src/julia/experiments/500_u2w6_from_Alsvin```, by writing
+After that, you can run the estimation experiment over the `E` data-sets found in the folder ```src/julia/experiments/expid```, by writing
 
 ```{julia}
 exp_data, isws = get_experiment_data("expid")
