@@ -1,8 +1,8 @@
 # dae-param-est
-This repository contains the code to the numerical experiment discussed in
-(TO BE ADDED, SUBMITTED TO CDC 2022), which proposes a method for consistent parameter
-estimation using stochastic approximation for Differential Algebraic Equations (DAEs) subject to process
-disturbances.
+A Parameter Estimation Experiment for DAEs  
+For the code used in our [paper published at CDC 2021](https://www.diva-portal.org/smash/get/diva2:1539989/FULLTEXT01.pdf), please see the branch "cdc".  
+For the code used in our [paper submitted to CDC 2022](https://kth.diva-portal.org/smash/get/diva2:1914575/FULLTEXT01.pdf), please see the branch "CDC22".\
+This branch contains cleaned up code for the [Licentiate thesis](https://kth.diva-portal.org/smash/get/diva2:1914575/FULLTEXT01.pdf) of Robert Bereza.
 
 
 ## Prerequisites
