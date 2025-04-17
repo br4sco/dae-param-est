@@ -115,9 +115,9 @@ delta_model_data = let
     # BASELINE: SHOULD NOT INCLUDE DISTURBANCE PARAMETERS, SINCE BASELINE METHOD CANNOT IDENTIFY THEM ANYWAY
     # Sensitivity wrt to all dynamical parameters
     f_sens_baseline(x::Vector{Float64}, p::Vector{Float64})::Matrix{Float64} = hcat(f_sens_base(x, p, 1)+f_sens_L0(x), f_sens_base(x, p, 2)+f_sens_L1(x), f_sens_base(x, p, 3)+f_sens_L2(x), 
-    f_sens_base(x, p, 4)+f_sens_L3(x), f_sens_base(x, p, 5)+f_sens_other(x), f_sens_base(x, p, 6)+f_sens_other(x), f_sens_base(x, p, 7)+f_sens_other(x),
-    f_sens_base(x, p, 8)+f_sens_other(x), f_sens_base(x, p, 9)+f_sens_other(x), f_sens_base(x, p, 10)+f_sens_other(x), f_sens_base(x, p, 11)+f_sens_other(x),
-    f_sens_base(x, p, 12)+f_sens_other(x))
+        f_sens_base(x, p, 4)+f_sens_L3(x), f_sens_base(x, p, 5)+f_sens_other(x), f_sens_base(x, p, 6)+f_sens_other(x), f_sens_base(x, p, 7)+f_sens_other(x),
+        f_sens_base(x, p, 8)+f_sens_other(x), f_sens_base(x, p, 9)+f_sens_other(x), f_sens_base(x, p, 10)+f_sens_other(x), f_sens_base(x, p, 11)+f_sens_other(x),
+        f_sens_base(x, p, 12)+f_sens_other(x))
     # # Sensitivity wrt to whichever individual parameter except L0, L1, L2, L3, all others are the same
     # f_sens_baseline(x::Vector{Float64}, p::Vector{Float64})::Matrix{Float64} = f_sens_base(x, p, 1)+f_sens_other(x)
     # # Sensitivity wrt whichever parameters I felt like while debugging (γ)
@@ -171,5 +171,5 @@ delta_model_data = let
     (σ = σ, L0 = L0, L1 = L1, L2 = L2, L3 = L3, LC1 = LC1, LC2 = LC2, M1 = M1, M2 = M2, M3 = M3, J1 = J1, J2 = J2, γ = γ,
     get_all_pars = get_all_pars, free_dyn_pars_true = free_dyn_pars_true, par_bounds = par_bounds,
     ny = ny, model_nominal = model_nominal, model_sens = model_sens, model_adjoint = model_adjoint, model_adjoint_odedist=model_adjoint_odedist,
-    f=f, f_sens=f_sens, f_sens_baseline=f_sens, f_all_adj=f_all_adj, dθ = dθ, minimizer=minimizer, init_learning_rate=init_learning_rate, get_sens_init=get_sens_init)
+    f=f, f_sens=f_sens, f_sens_baseline=f_sens_baseline, f_all_adj=f_all_adj, dθ = dθ, minimizer=minimizer, init_learning_rate=init_learning_rate, get_sens_init=get_sens_init)
 end
