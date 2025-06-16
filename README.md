@@ -52,7 +52,7 @@ using DataFrames
 include("run_experiment.jl")
 using .NoiseGeneration: get_filtered_noise, disturbance_model_5, get_multisine_data   # disturbance_model_5 is for delta robot
 
-XW, Wmat, meta_W = get_filtered_noise(disturbance_model_5, δ, E, Nw, scale=0.6, p_scale=500.0)  # Generated process disturbance and meta-data
+XW, Wmat, meta_W = get_filtered_noise(disturbance_model_5, δ, E, Nw, scale=0.3, p_scale=500.0)  # Generated process disturbance and meta-data
 _, meta_U = get_multisine_data(50, 3)
 meta_Y = DataFrame(Ts=10δ, N=Nw÷10)	# It is convenient to also generate metadata for system output
 writedlm("data/experiments/expid/XW_T.csv", transpose(XW), ',')
