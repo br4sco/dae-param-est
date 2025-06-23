@@ -12,13 +12,13 @@ using DelimitedFiles: readdlm, writedlm
 using LsqFit: curve_fit, coef
 using LinearAlgebra: I
 # For pendulum.jl file.
-using .DynamicalModels: pendulum, pendulum_forward_m, pendulum_forward_k, get_pendulum_initial, get_pendulum_initial_msens, get_pendulum_initial_ksens, get_pendulum_initial_distsens
-using .DynamicalModels: pendulum_adjoint_m, pendulum_adjoint_k_1dist_ODEdist, pendulum_adjoint_k_1dist, pendulum_forward_k_1dist, Model_ode, Model
+using .DynamicalModels: pendulum, pendulum_forward_m, pendulum_forward_k, get_pendulum_initial, get_pendulum_initial_msens, get_pendulum_initial_ksens, get_pendulum_initial_distsens, Model
+using .DynamicalModels: pendulum_adjoint_m, pendulum_adjoint_k_1dist_ODEdist, pendulum_adjoint_k_1dist, pendulum_forward_k_1dist, pendulum_forward_allpar, pendulum_adjoint_allpar, Model_ode
 # For delta_robot.jl file
 using .DynamicalModels: delta_robot, delta_forward_γ, delta_adjoint_γ, delta_forward_allpar_alldist, delta_adjoint_allpar_alldist, delta_adjoint_allpar_alldist_ODEdist
 using .DynamicalModels: get_delta_initial_with_mats, get_delta_initial_L0sens, get_delta_initial_L1sens, get_delta_initial_L2sens, get_delta_initial_L3sens, get_delta_initial_LC1sens
 using .DynamicalModels: get_delta_initial_LC2sens, get_delta_initial_M1sens, get_delta_initial_M2sens, get_delta_initial_M3sens, get_delta_initial_J1sens, get_delta_initial_J2sens, get_delta_initial_γsens
-using .DynamicalModels: delta_forward_1dist, delta_adjoint_1dist, delta_adjoint_1dist_ODEdist, delta_adjoint_allpar, delta_adjoint_alldist, delta_adjoint_M3
+using .DynamicalModels: delta_forward_1dist, delta_adjoint_1dist, delta_adjoint_1dist_ODEdist, delta_adjoint_allpar, delta_forward_allpar, delta_adjoint_alldist, delta_adjoint_M3
 
 import CSV, Statistics
 
@@ -71,6 +71,7 @@ a_learning_rate = [500*0.1, (500^2)*0.2, (500^3)*0.2]
 c_learning_rate = zeros(27)
 c_learning_rate[[1,4,7,11,14,17,21,24,27]] .= 0.05
 dist_init_learning_rate = vcat(a_learning_rate, c_learning_rate) # Large disturbance model
+
 # Similarly for disturbance parameter bounds
 dist_bounds = repeat([-Inf Inf], 30)
 

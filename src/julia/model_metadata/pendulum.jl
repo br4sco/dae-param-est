@@ -14,31 +14,30 @@ pend_model_data = let
     # this needs to be set in the get_disturbance_free_pars()-function in run_experiment.jl
 
     # ------- The following fields are part of the informal interface for model metadata -------
-    get_all_pars(pars::Vector{Float64}) = [m, L, g, pars[1]]  # [m, L, g, k]
-    free_dyn_pars_true = [k]#Array{Float64}(undef, 0)#[k]# True values of free parameters
-    init_learning_rate = [1.0] # The initial learning rate for each component of free_dyn_pars_true
+    get_all_pars(pars::Vector{Float64}) = [pars[1], pars[2], g, pars[3]]  # [m, L, g, k]
+    free_dyn_pars_true = [m, L, k]#Array{Float64}(undef, 0)#[k]# True values of free parameters
+    init_learning_rate = [0.1, 1.0, 1.0] # The initial learning rate for each component of free_dyn_pars_true
     # Left column contains lower bound for parameters, right column contains upper bound
-    par_bounds = [0.1 1e4]#[0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
+    par_bounds = [0.01 1e4; 0.1 1e4; 0.1 1e4]#; 0.1 1e4] #Array{Float64}(undef, 0, 2)
     model_nominal = pendulum
-    model_sens = pendulum_forward_k_1dist                                 # For forward sensitivity
-    model_adjoint = pendulum_adjoint_k_1dist                              # For adjoint sensitivity
+    model_sens = pendulum_forward_allpar                                 # For forward sensitivity
+    model_adjoint = pendulum_adjoint_allpar                              # For adjoint sensitivity
     model_adjoint_odedist = pendulum_adjoint_k_1dist_ODEdist           # Adjoint when disturbances are given by an ODE incorporated into the DAE
     σ = 0.002                                               # measurement noise variance
 
     # Should return the initial sensitivity of all state variables, given parameters and initial input and disturbance
     function get_sens_init(θ::Vector{Float64}, u0::Vector{Float64}, w0::Vector{Float64})::Matrix{Float64}
         pend0, dpend0 = get_pendulum_initial(θ, u0[1], w0[1], φ0)
-        # sm, _= get_pendulum_initial_msens(θ, u0[1], w0[1], φ0, pend0, dpend0)
+        sm, _= get_pendulum_initial_msens(θ, u0[1], w0[1], φ0, pend0, dpend0)
+        sL, _= get_pendulum_initial_msens(θ, u0[1], w0[1], φ0, pend0, dpend0)
         sk, _= get_pendulum_initial_ksens(θ, u0[1], w0[1], φ0, pend0, dpend0)
-        sa, _= get_pendulum_initial_distsens(θ, u0[1], w0[1], φ0, pend0, dpend0)
+        # sa, _= get_pendulum_initial_distsens(θ, u0[1], w0[1], φ0, pend0, dpend0)
         # The return value should be a matrix with state-component along the rows and parameter index along the columns
-        hcat(sk, sa)
+        hcat(sm, sL, sk)
     end
 
     f(x::Vector{Float64}, θ::Vector{Float64}) = x[7]        # Output function, returns the output given the state vector x
-    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[14]   x[21]]# x[21] x[28] x[35] ;;]# x[42] x[49]]# x[28] ;;]##[x[14] x[21] x[28] x[35] x[42];;]   # Returns sensitivities of the output
-    # THERE MUST BE BETTER WAY OF DOING THIS!!!
-    # f_all_sens(x::Vector{Float64}, θ::Vector{Float64}) = x[8:end]            # Returns the sensitivity of all states, but only the sensitivities
+    f_sens(x::Vector{Float64}, θ::Vector{Float64})::Matrix{Float64} = [x[14]   x[21]   x[28]]# x[21] x[28] x[35] ;;]# x[42] x[49]]# x[28] ;;]##[x[14] x[21] x[28] x[35] x[42];;]   # Returns sensitivities of the output
     f_all_adj(x::Vector{Float64}, θ::Vector{Float64}) = x[1:num_dyn_vars]    # Returns all nominal states, including the model output
     dθ = length(free_dyn_pars_true)
     ny = length(f(ones(7), get_all_pars(free_dyn_pars_true)))
