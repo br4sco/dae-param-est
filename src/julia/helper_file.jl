@@ -1,4 +1,5 @@
 using DelimitedFiles
+using Statistics: mean, var
 
 # res_500 = readdlm("data/results/delta_500_smallw_largeu_baseline/opt_pars_baseline.csv", ',')
 # res_2k = readdlm("data/results/delta_2k_smallw_largeu_baseline/opt_pars_baseline.csv", ',')
@@ -85,8 +86,8 @@ true_vals = [1.0, 1.5, 2.0, 0.5, 0.75, 1.0, 0.1, 0.1, 0.3, 0.4, 0.4, 1.0]
 num_per_row = 4
 num_rows = length(par_names)÷4
 
-tmp = "\textbf{Parameter:} &"
-mystr = ""
+# tmp = "\textbf{Parameter:} &"
+# mystr = ""
 
 # THIS SUCKS A BIT ACTUALLY! Why Do it this annoying way though.....??
 
@@ -103,17 +104,35 @@ mystr = ""
 #     end
 # end
 
+means500 = mean(res_500, dims=2)
+means2k = mean(res_2k, dims=2)
+means3p5k = mean(res_3p5k, dims=2)
+means5k = mean(res_5k, dims=2)
+
+vars500 = var(res_500, dims=2)
+vars2k = var(res_2k, dims=2)
+vars3p5k = var(res_3p5k, dims=2)
+vars5k = var(res_5k, dims=2)
+
+means = [[means500[ind], means2k[ind], means3p5k[ind], means5k[ind]] for ind=1:length(par_names)]
+biases = [[means500[ind]-true_vals[ind], means2k[ind]-true_vals[ind], means3p5k[ind]-true_vals[ind], means5k[ind]-true_vals[ind]] for ind=1:length(par_names)]
+vars = [[vars500[ind], vars2k[ind], vars3p5k[ind], vars5k[ind]] for ind=1:length(par_names)]
+
+mean_mat = reshape(transpose(collect(means)), num_rows, :)
+bias_mat = reshape(transpose(collect(biases)), num_rows, :)
+var_mat = reshape(transpose(collect(vars)), num_rows, :)
+
 # I CAN JUST DO csv_write WITH WELL CHOSEN DELIMITER????? <-------------------------------------------------------------------
 
-mystr = ""
-for rowind = 1:num_rows
-    for colind = 1:num_per_row
-        ind = (rowind-1)*num_per_row + colind
-        # MEAN
-        mystr = string(mean(res_500[ind,:])) * " & " * string(mean(res_2k[ind,:])) * " & " * string(mean(res_3p5k[ind,:])) * " & " * string(mean(res_5k[ind,:]))
-        # BIAS
-        mystr2 = string(mean(res_500[ind,:])-true_vals[ind]) * " & " * string(mean(res_2k[ind,:])-true_vals[ind]) * " & " * string(mean(res_3p5k[ind,:])-true_vals[ind]) * " & " * string(mean(res_5k[ind,:])-true_vals[ind])
-        # VARIANCE
-        mystr3 = string(var(res_500[ind,:])) * " & " * string(var(res_2k[ind,:])) * " & " * string(var(res_3p5k[ind,:])) * " & " * string(var(res_5k[ind,:]))
-    end
-end
+# mystr = ""
+# for rowind = 1:num_rows
+#     for colind = 1:num_per_row
+#         ind = (rowind-1)*num_per_row + colind
+#         # MEAN
+#         mystr = string(mean(res_500[ind,:])) * " & " * string(mean(res_2k[ind,:])) * " & " * string(mean(res_3p5k[ind,:])) * " & " * string(mean(res_5k[ind,:]))
+#         # BIAS
+#         mystr2 = string(mean(res_500[ind,:])-true_vals[ind]) * " & " * string(mean(res_2k[ind,:])-true_vals[ind]) * " & " * string(mean(res_3p5k[ind,:])-true_vals[ind]) * " & " * string(mean(res_5k[ind,:])-true_vals[ind])
+#         # VARIANCE
+#         mystr3 = string(var(res_500[ind,:])) * " & " * string(var(res_2k[ind,:])) * " & " * string(var(res_3p5k[ind,:])) * " & " * string(var(res_5k[ind,:]))
+#     end
+# end
